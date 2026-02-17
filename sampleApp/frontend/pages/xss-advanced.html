@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced XSS Demo - AWS Security Agent</title>
+    <link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+    <div class="container">
+        <div class="warning-banner">
+            ⚠️ This is an intentionally vulnerable application for educational purposes only
+        </div>
+        
+        <div class="vuln-container">
+            <a href="dashboard.html" class="back-link">← Back to Dashboard</a>
+            
+            <div class="vuln-header">
+                <h1>⚡ Advanced XSS Vulnerabilities Demo</h1>
+                <p class="subtitle">DOM-based and Attribute-based XSS attacks</p>
+            </div>
+            
+            <!-- Vulnerability Description -->
+            <div class="vuln-description">
+                <h2>What are DOM-based and Attribute-based XSS?</h2>
+                <p>
+                    These are advanced XSS variants that exploit different attack vectors:
+                </p>
+                <ul style="margin-left: 20px; margin-top: 10px; color: #666;">
+                    <li><strong>DOM-based XSS:</strong> The vulnerability exists in client-side JavaScript code that 
+                    manipulates the DOM using untrusted data from sources like URL parameters, without proper validation.</li>
+                    <li><strong>Attribute-based XSS:</strong> Malicious code is injected into HTML attributes (like href, src, 
+                    or event handlers) allowing script execution through attribute manipulation.</li>
+                </ul>
+                
+                <h2 style="margin-top: 20px;">Why They're Dangerous</h2>
+                <p>
+                    These XSS variants are particularly dangerous because:
+                </p>
+                <ul style="margin-left: 20px; margin-top: 10px; color: #666;">
+                    <li>DOM-based XSS never touches the server, making it harder to detect with server-side security tools</li>
+                    <li>Attribute-based XSS can bypass simple HTML encoding that only protects tag content</li>
+                    <li>Both can execute arbitrary JavaScript in the victim's browser context</li>
+                    <li>They can steal cookies, session tokens, or perform actions on behalf of the user</li>
+                </ul>
+                
+                <h2 style="margin-top: 20px;">How to Fix It</h2>
+                <p>
+                    <strong>For DOM-based XSS:</strong> Validate and sanitize all data from untrusted sources before using it in DOM manipulation.
+                </p>
+                <pre style="background: white; padding: 15px; border-radius: 6px; margin-top: 10px; overflow-x: auto; font-size: 13px;">
+// ❌ VULNERABLE
+const name = new URLSearchParams(window.location.search).get('name');
+document.getElementById('greeting').innerHTML = 'Hello ' + name;
+
+// ✅ SECURE
+const name = new URLSearchParams(window.location.search).get('name');
+document.getElementById('greeting').textContent = 'Hello ' + name;</pre>
+                
+                <p style="margin-top: 15px;">
+                    <strong>For Attribute-based XSS:</strong> Properly encode data when inserting into HTML attributes and avoid using user input in dangerous attributes.
+                </p>
+                <pre style="background: white; padding: 15px; border-radius: 6px; margin-top: 10px; overflow-x: auto; font-size: 13px;">
+// ❌ VULNERABLE
+element.setAttribute('href', userInput);
+
+// ✅ SECURE
+if (userInput.startsWith('http://') || userInput.startsWith('https://')) {
+  element.setAttribute('href', userInput);
+}</pre>
+            </div>
+            
+            <!-- DOM-based XSS Demo Section -->
+            <div class="demo-section">
+                <h3>Try It Yourself: DOM-based XSS</h3>
+                <p style="color: #666; margin-bottom: 20px;">
+                    Enter your name in the URL parameter or the input below. The JavaScript will manipulate the DOM 
+                    directly without server interaction!
+                </p>
+                
+                <div class="form-group">
+                    <label for="nameInput">Your Name:</label>
+                    <input 
+                        type="text" 
+                        id="nameInput" 
+                        placeholder="Enter your name (try XSS payloads!)"
+                    >
+                </div>
+                
+                <button onclick="updateGreeting()" class="btn btn-primary">Update Greeting</button>
+                
+                <!-- Greeting Display (vulnerable to DOM-based XSS) -->
+                <div class="result-box" style="margin-top: 20px;">
+                    <h3>Greeting</h3>
+                    <div id="greetingDisplay" style="padding: 15px; background: white; border-radius: 6px; min-height: 50px;">
+                        <p style="color: #666;">Enter your name above to see a greeting</p>
+                    </div>
+                </div>
+                
+                <!-- Sample Payloads for DOM-based XSS -->
+                <div class="sample-payloads">
+                    <h3>📝 Sample DOM-based XSS Payloads</h3>
+                    <p style="color: #666; margin-bottom: 15px;">
+                        Click any payload below to try it:
+                    </p>
+                    <div id="domPayloads">
+                        <div class="payload-item" onclick="tryDOMPayload(this.textContent)">&lt;img src=x onerror=alert('DOM-XSS')&gt;</div>
+                        <div class="payload-item" onclick="tryDOMPayload(this.textContent)">&lt;svg onload=alert('DOM-XSS')&gt;</div>
+                        <div class="payload-item" onclick="tryDOMPayload(this.textContent)">&lt;iframe src=&quot;javascript:alert('DOM-XSS')&quot;&gt;</div>
+                        <div class="payload-item" onclick="tryDOMPayload(this.textContent)">&lt;body onload=alert('DOM-XSS')&gt;</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Attribute-based XSS Demo Section -->
+            <div class="demo-section" style="margin-top: 30px;">
+                <h3>Try It Yourself: Attribute-based XSS</h3>
+                <p style="color: #666; margin-bottom: 20px;">
+                    Enter a URL or JavaScript code. The input will be placed directly into HTML attributes 
+                    without proper validation!
+                </p>
+                
+                <div class="form-group">
+                    <label for="linkInput">Link URL:</label>
+                    <input 
+                        type="text" 
+                        id="linkInput" 
+                        placeholder="Enter a URL (try javascript: payloads!)"
+                        value="https://example.com"
+                    >
+                </div>
+                
+                <button onclick="createLink()" class="btn btn-primary">Create Link</button>
+                
+                <!-- Link Display (vulnerable to attribute-based XSS) -->
+                <div class="result-box" style="margin-top: 20px;">
+                    <h3>Generated Link</h3>
+                    <div id="linkDisplay" style="padding: 15px; background: white; border-radius: 6px; min-height: 50px;">
+                        <p style="color: #666;">Enter a URL above to create a link</p>
+                    </div>
+                </div>
+                
+                <!-- Sample Payloads for Attribute-based XSS -->
+                <div class="sample-payloads">
+                    <h3>📝 Sample Attribute-based XSS Payloads</h3>
+                    <p style="color: #666; margin-bottom: 15px;">
+                        Click any payload below to try it:
+                    </p>
+                    <div id="attrPayloads">
+                        <div class="payload-item" onclick="tryAttrPayload(this.textContent)">javascript:alert('Attr-XSS')</div>
+                        <div class="payload-item" onclick="tryAttrPayload(this.textContent)">javascript:void(alert('Attr-XSS'))</div>
+                        <div class="payload-item" onclick="tryAttrPayload(this.textContent)">" onmouseover="alert('Attr-XSS')</div>
+                        <div class="payload-item" onclick="tryAttrPayload(this.textContent)">' onclick='alert(\"Attr-XSS\")</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Image with Event Handler Demo -->
+            <div class="demo-section" style="margin-top: 30px;">
+                <h3>Try It Yourself: Event Handler Injection</h3>
+                <p style="color: #666; margin-bottom: 20px;">
+                    Enter an image URL. The input will be placed in an img tag's src attribute, 
+                    allowing onerror event injection!
+                </p>
+                
+                <div class="form-group">
+                    <label for="imageInput">Image URL:</label>
+                    <input 
+                        type="text" 
+                        id="imageInput" 
+                        placeholder="Enter image URL (try onerror payloads!)"
+                        value="https://via.placeholder.com/150"
+                    >
+                </div>
+                
+                <button onclick="displayImage()" class="btn btn-primary">Display Image</button>
+                
+                <!-- Image Display (vulnerable to event handler injection) -->
+                <div class="result-box" style="margin-top: 20px;">
+                    <h3>Image Preview</h3>
+                    <div id="imageDisplay" style="padding: 15px; background: white; border-radius: 6px; min-height: 100px;">
+                        <p style="color: #666;">Enter an image URL above to display it</p>
+                    </div>
+                </div>
+                
+                <!-- Sample Payloads for Event Handler Injection -->
+                <div class="sample-payloads">
+                    <h3>📝 Sample Event Handler Injection Payloads</h3>
+                    <p style="color: #666; margin-bottom: 15px;">
+                        Click any payload below to try it:
+                    </p>
+                    <div id="eventPayloads">
+                        <div class="payload-item" onclick="tryImagePayload(this.textContent)">x" onerror="alert('Event-XSS')</div>
+                        <div class="payload-item" onclick="tryImagePayload(this.textContent)">x' onerror='alert(\"Event-XSS\")</div>
+                        <div class="payload-item" onclick="tryImagePayload(this.textContent)">invalid-url" onload="alert('Event-XSS')</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Educational Message (shown on successful exploit) -->
+            <div id="educationalMessage" style="display: none;"></div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/amazon-cognito-identity-js@6.3.6/dist/amazon-cognito-identity.min.js"></script>
+    <script src="../assets/config.js"></script>
+    <script src="../assets/auth.js"></script>
+    <script>
+        // Require authentication
+        requireAuth();
+        
+        /**
+         * Update greeting with DOM-based XSS vulnerability
+         * VULNERABILITY: Uses innerHTML with user input
+         */
+        function updateGreeting() {
+            const nameInput = document.getElementById('nameInput');
+            const greetingDisplay = document.getElementById('greetingDisplay');
+            const name = nameInput.value.trim();
+            
+            if (!name) {
+                alert('Please enter your name');
+                return;
+            }
+            
+            // VULNERABILITY: DOM-based XSS - using innerHTML with user input
+            // This is intentionally vulnerable - DO NOT use in production code!
+            greetingDisplay.innerHTML = `<p style="color: #333; font-size: 18px;">Hello, ${name}! Welcome to the demo.</p>`;
+            
+            // Detect if XSS payload was used
+            if (detectXSSPayload(name)) {
+                showEducationalMessage('dom', name);
+            }
+        }
+        
+        /**
+         * Create link with attribute-based XSS vulnerability
+         * VULNERABILITY: Places user input directly in href attribute
+         */
+        function createLink() {
+            const linkInput = document.getElementById('linkInput');
+            const linkDisplay = document.getElementById('linkDisplay');
+            const url = linkInput.value.trim();
+            
+            if (!url) {
+                alert('Please enter a URL');
+                return;
+            }
+            
+            // VULNERABILITY: Attribute-based XSS - placing user input in href without validation
+            // This is intentionally vulnerable - DO NOT use in production code!
+            linkDisplay.innerHTML = `
+                <p style="margin-bottom: 10px; color: #666;">Click the link below:</p>
+                <a href="${url}" style="color: #667eea; font-size: 16px; text-decoration: underline;">
+                    Click here to visit: ${escapeHtml(url)}
+                </a>
+            `;
+            
+            // Detect if XSS payload was used
+            if (detectXSSPayload(url) || url.toLowerCase().startsWith('javascript:')) {
+                showEducationalMessage('attribute', url);
+            }
+        }
+        
+        /**
+         * Display image with event handler injection vulnerability
+         * VULNERABILITY: Places user input directly in src attribute
+         */
+        function displayImage() {
+            const imageInput = document.getElementById('imageInput');
+            const imageDisplay = document.getElementById('imageDisplay');
+            const imageUrl = imageInput.value.trim();
+            
+            if (!imageUrl) {
+                alert('Please enter an image URL');
+                return;
+            }
+            
+            // VULNERABILITY: Event handler injection - placing user input in src attribute
+            // This is intentionally vulnerable - DO NOT use in production code!
+            imageDisplay.innerHTML = `
+                <p style="margin-bottom: 10px; color: #666;">Image preview:</p>
+                <img src="${imageUrl}" alt="User provided image" style="max-width: 100%; border-radius: 6px;">
+            `;
+            
+            // Detect if XSS payload was used
+            if (detectXSSPayload(imageUrl)) {
+                showEducationalMessage('event', imageUrl);
+            }
+        }
+        
+        /**
+         * Detect if input contains XSS payload
+         */
+        function detectXSSPayload(input) {
+            const xssPatterns = [
+                /<script/i,
+                /javascript:/i,
+                /onerror=/i,
+                /onload=/i,
+                /onclick=/i,
+                /onmouseover=/i,
+                /<iframe/i,
+                /<svg/i,
+                /<img/i,
+                /<body/i
+            ];
+            
+            return xssPatterns.some(pattern => pattern.test(input));
+        }
+        
+        /**
+         * Show educational message on successful exploit
+         */
+        function showEducationalMessage(type, payload) {
+            const educationalMessage = document.getElementById('educationalMessage');
+            
+            let title, whatHappened, howAgentDetects;
+            
+            if (type === 'dom') {
+                title = 'DOM-based XSS Detected!';
+                whatHappened = 'Your input was placed directly into the DOM using innerHTML without sanitization. ' +
+                    'The browser parsed your input as HTML, allowing any script tags or event handlers to execute. ' +
+                    'This vulnerability exists entirely in client-side JavaScript code and never touches the server.';
+                howAgentDetects = 'AWS Security Agent detects DOM-based XSS by analyzing client-side JavaScript code ' +
+                    'for dangerous DOM manipulation patterns (innerHTML, document.write, eval) that use untrusted data sources ' +
+                    'like URL parameters, localStorage, or user input without proper sanitization.';
+            } else if (type === 'attribute') {
+                title = 'Attribute-based XSS Detected!';
+                whatHappened = 'Your input was placed directly into an HTML attribute (href) without validation. ' +
+                    'By using javascript: protocol or breaking out of the attribute with quotes, you can execute arbitrary JavaScript. ' +
+                    'This bypasses simple HTML encoding that only protects tag content.';
+                howAgentDetects = 'AWS Security Agent detects attribute-based XSS by testing various attribute injection techniques, ' +
+                    'including javascript: protocol handlers, attribute breakout attempts with quotes, and event handler injections. ' +
+                    'It analyzes how user input flows into HTML attributes.';
+            } else if (type === 'event') {
+                title = 'Event Handler Injection Detected!';
+                whatHappened = 'Your input was placed into an HTML attribute where you could inject event handlers like onerror or onload. ' +
+                    'By breaking out of the src attribute and adding an event handler, you can execute JavaScript when the event fires. ' +
+                    'This is a variant of attribute-based XSS that exploits event-driven JavaScript execution.';
+                howAgentDetects = 'AWS Security Agent detects event handler injection by testing payloads that break out of attributes ' +
+                    'and inject event handlers (onerror, onload, onclick, etc.). It monitors how user input is placed in attributes ' +
+                    'that can trigger JavaScript execution.';
+            }
+            
+            const samplePayloads = [
+                '<img src=x onerror=alert(1)>',
+                'javascript:alert(1)',
+                '" onclick="alert(1)',
+                '<svg onload=alert(1)>'
+            ];
+            
+            let html = `
+                <div class="educational-message">
+                    <h3>🚨 ${escapeHtml(title)}</h3>
+                    
+                    <div style="margin-top: 20px;">
+                        <h4 style="margin-bottom: 10px;">What Happened:</h4>
+                        <p>${escapeHtml(whatHappened)}</p>
+                    </div>
+                    
+                    <div style="margin-top: 20px;">
+                        <h4 style="margin-bottom: 10px;">Your Payload:</h4>
+                        <code style="background: rgba(255,255,255,0.2); padding: 8px 12px; border-radius: 4px; display: block; word-break: break-all;">
+                            ${escapeHtml(payload)}
+                        </code>
+                    </div>
+                    
+                    <div style="margin-top: 20px;">
+                        <h4 style="margin-bottom: 10px;">How AWS Security Agent Detects This:</h4>
+                        <p>${escapeHtml(howAgentDetects)}</p>
+                    </div>
+                    
+                    <div style="margin-top: 20px;">
+                        <h4 style="margin-bottom: 10px;">Other Sample Payloads to Try:</h4>
+                        <ul>
+            `;
+            
+            samplePayloads.forEach(p => {
+                html += `<li><code style="background: rgba(255,255,255,0.2); padding: 2px 6px; border-radius: 3px;">${escapeHtml(p)}</code></li>`;
+            });
+            
+            html += `
+                        </ul>
+                    </div>
+                </div>
+            `;
+            
+            educationalMessage.innerHTML = html;
+            educationalMessage.style.display = 'block';
+            
+            // Scroll to educational message
+            educationalMessage.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+        
+        /**
+         * Try a DOM-based XSS payload
+         */
+        function tryDOMPayload(payload) {
+            const nameInput = document.getElementById('nameInput');
+            // Decode HTML entities in the payload
+            const textarea = document.createElement('textarea');
+            textarea.innerHTML = payload;
+            nameInput.value = textarea.value;
+            updateGreeting();
+        }
+        
+        /**
+         * Try an attribute-based XSS payload
+         */
+        function tryAttrPayload(payload) {
+            const linkInput = document.getElementById('linkInput');
+            linkInput.value = payload;
+            createLink();
+        }
+        
+        /**
+         * Try an image event handler payload
+         */
+        function tryImagePayload(payload) {
+            const imageInput = document.getElementById('imageInput');
+            imageInput.value = payload;
+            displayImage();
+        }
+        
+        /**
+         * Escape HTML to prevent XSS in our educational messages
+         */
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // Check for URL parameters on page load (DOM-based XSS demo)
+        window.addEventListener('DOMContentLoaded', function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const nameParam = urlParams.get('name');
+            
+            if (nameParam) {
+                const nameInput = document.getElementById('nameInput');
+                nameInput.value = nameParam;
+                updateGreeting();
+            }
+        });
+        
+        // Allow Enter key to submit
+        document.getElementById('nameInput').addEventListener('keypress', function(event) {
+            if (event.key === 'Enter') {
+                updateGreeting();
+            }
+        });
+        
+        document.getElementById('linkInput').addEventListener('keypress', function(event) {
+            if (event.key === 'Enter') {
+                createLink();
+            }
+        });
+        
+        document.getElementById('imageInput').addEventListener('keypress', function(event) {
+            if (event.key === 'Enter') {
+                displayImage();
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,198 @@
+/**
+ * Cross-Site Scripting (XSS) Vulnerability Demo Page
+ * WARNING: Intentionally vulnerable for educational purposes.
+ */
+import {
+    Alert, Box, Button, Container, ContentLayout, Header, Input, SpaceBetween,
+    Textarea,
+} from "@cloudscape-design/components";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
+import { get, post } from "aws-amplify/api";
+
+const XSS_PAYLOADS = [
+    '<script>alert("XSS")</script>',
+    '<img src=x onerror=alert("XSS")>',
+    '<svg onload=alert("XSS")>',
+    '<iframe src="javascript:alert(\'XSS\')">',
+    '<body onload=alert("XSS")>',
+    '<input onfocus=alert("XSS") autofocus>',
+];
+
+const SecurityCommentsPage = () => {
+    const navigate = useNavigate();
+    const [commentInput, setCommentInput] = useState("");
+    const [searchInput, setSearchInput] = useState("");
+    const [comments, setComments] = useState<any[]>([]);
+    const [searchResults, setSearchResults] = useState<any>(null);
+    const [postResult, setPostResult] = useState<any>(null);
+    const [loading, setLoading] = useState(false);
+    const [searchLoading, setSearchLoading] = useState(false);
+    const commentsRef = useRef<HTMLDivElement>(null);
+
+    const loadComments = useCallback(async () => {
+        try {
+            const restOp = get({ apiName: "restApi", path: "/security-comments" });
+            const response = await restOp.response;
+            const data = await response.body.json() as any;
+            if (data.success) {
+                setComments(data.data || []);
+                if (data.educational) setPostResult(data);
+            }
+        } catch (err) {
+            console.error("Failed to load comments:", err);
+        }
+    }, []);
+
+    useEffect(() => { loadComments(); }, [loadComments]);
+
+    const postComment = async () => {
+        if (!commentInput.trim()) return;
+        setLoading(true);
+        setPostResult(null);
+        try {
+            const restOp = post({
+                apiName: "restApi",
+                path: "/security-comments",
+                options: { body: { user_id: 1, content: commentInput } as any },
+            });
+            const response = await restOp.response;
+            const data = await response.body.json() as any;
+            if (data.success) {
+                setCommentInput("");
+                setPostResult(data);
+                loadComments();
+            }
+        } catch (err: any) {
+            setPostResult({ success: false, error: err?.message || "Failed" });
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const searchComments = async () => {
+        if (!searchInput.trim()) return;
+        setSearchLoading(true);
+        setSearchResults(null);
+        try {
+            const restOp = post({ apiName: "restApi", path: "/security-search", options: { body: { q: searchInput } as any } });
+            const response = await restOp.response;
+            const data = await response.body.json() as any;
+            setSearchResults(data);
+        } catch (err: any) {
+            setSearchResults({ success: false, error: err?.message || "Search failed" });
+        } finally {
+            setSearchLoading(false);
+        }
+    };
+
+    return (
+        <ContentLayout header={<Header variant="h1" description="Learn how XSS works and how AWS Security Agent detects it">⚡ Cross-Site Scripting (XSS) Vulnerability Demo</Header>}>
+            <SpaceBetween size="l">
+                <Alert type="warning" header="Educational Purpose Only">
+                    This is an intentionally vulnerable endpoint for educational purposes only.
+                </Alert>
+
+                <Container header={<Header variant="h2">What is Cross-Site Scripting (XSS)?</Header>}>
+                    <SpaceBetween size="m">
+                        <Box>XSS is a security vulnerability that allows attackers to inject malicious scripts into web pages viewed by other users. When user input is displayed without proper sanitization, attackers can inject JavaScript that executes in victims' browsers.</Box>
+                        <Box variant="h4">Types of XSS</Box>
+                        <ul>
+                            <li><strong>Stored XSS:</strong> Malicious script is stored in the database and executed when displayed (demonstrated below)</li>
+                            <li><strong>Reflected XSS:</strong> Malicious script is reflected from the server in the response (demonstrated in search)</li>
+                            <li><strong>DOM-based XSS:</strong> Malicious script manipulates the DOM directly in the browser</li>
+                        </ul>
+                        <Box variant="h4">How to Fix It</Box>
+                        <pre style={{ background: "rgba(255,255,255,0.05)", padding: "15px", borderRadius: "6px", fontSize: "13px", overflow: "auto" }}>{`// ❌ VULNERABLE (no encoding)
+element.innerHTML = userInput;
+
+// ✅ SECURE (use textContent or encode)
+element.textContent = userInput;`}</pre>
+                    </SpaceBetween>
+                </Container>
+
+                {/* Stored XSS Demo */}
+                <Container header={<Header variant="h2">Try It Yourself: Comment System (Stored XSS)</Header>}>
+                    <SpaceBetween size="m">
+                        <Box color="text-body-secondary">Post a comment with XSS payloads. The malicious script will be stored and executed when anyone views the comments!</Box>
+                        <Textarea value={commentInput} onChange={({ detail }) => setCommentInput(detail.value)} placeholder="Enter your comment (try XSS payloads!)" rows={3} />
+                        <Button variant="primary" onClick={postComment} loading={loading}>Post Comment</Button>
+
+                        <Container header={<Header variant="h3">📝 Sample XSS Payloads</Header>}>
+                            <Box color="text-body-secondary" margin={{ bottom: "s" }}>Click any payload below to try it:</Box>
+                            <SpaceBetween size="xs">
+                                {XSS_PAYLOADS.map((payload) => (
+                                    <Button key={payload} variant="inline-link" onClick={() => setCommentInput(payload)}>
+                                        <code>{payload}</code>
+                                    </Button>
+                                ))}
+                            </SpaceBetween>
+                        </Container>
+                    </SpaceBetween>
+                </Container>
+
+                {/* Reflected XSS Demo */}
+                <Container header={<Header variant="h2">Try It Yourself: Search (Reflected XSS)</Header>}>
+                    <SpaceBetween size="m">
+                        <Box color="text-body-secondary">Search for comments. Your search query will be reflected in the response without sanitization!</Box>
+                        <Input value={searchInput} onChange={({ detail }) => setSearchInput(detail.value)} placeholder="Enter search query (try XSS payloads!)" onKeyDown={({ detail }) => { if (detail.key === "Enter") searchComments(); }} />
+                        <Button variant="primary" onClick={searchComments} loading={searchLoading}>Search</Button>
+
+                        {searchResults && (
+                            <Container header={<Header variant="h3">Search Results</Header>}>
+                                {searchResults.success ? (
+                                    <SpaceBetween size="s">
+                                        {/* VULNERABILITY: Reflected XSS - rendering search query without encoding */}
+                                        <div dangerouslySetInnerHTML={{ __html: `Search results for: <strong>${searchResults.query}</strong>` }} />
+                                        {searchResults.data?.length > 0 ? searchResults.data.map((c: any, i: number) => (
+                                            <Container key={i}>
+                                                <Box variant="strong">{c.username || "Anonymous"}</Box>
+                                                {/* VULNERABILITY: Stored XSS - rendering content without encoding */}
+                                                <div dangerouslySetInnerHTML={{ __html: c.content }} />
+                                            </Container>
+                                        )) : <Box color="text-body-secondary">No comments found.</Box>}
+                                    </SpaceBetween>
+                                ) : <Alert type="error">{searchResults.error}</Alert>}
+                            </Container>
+                        )}
+                    </SpaceBetween>
+                </Container>
+
+                {/* Comments Display */}
+                <div ref={commentsRef}>
+                    <Container header={<Header variant="h2" actions={<Button onClick={loadComments}>Refresh</Button>}>All Comments</Header>}>
+                        <SpaceBetween size="s">
+                            {comments.length === 0 ? (
+                                <Box color="text-body-secondary">No comments yet. Be the first to comment!</Box>
+                            ) : comments.map((comment, i) => (
+                                <Container key={i}>
+                                    <SpaceBetween size="xxs">
+                                        <Box variant="strong">{comment.username || "Anonymous"} <Box variant="small" display="inline" color="text-body-secondary">{new Date(comment.created_at).toLocaleString()}</Box></Box>
+                                        {/* VULNERABILITY: Stored XSS - rendering content without encoding */}
+                                        <div dangerouslySetInnerHTML={{ __html: comment.content }} />
+                                    </SpaceBetween>
+                                </Container>
+                            ))}
+                        </SpaceBetween>
+                    </Container>
+                </div>
+
+                {/* Educational Message */}
+                {(postResult?.educational || searchResults?.educational) && (
+                    <Alert type="info" header={`🚨 ${(postResult?.educational || searchResults?.educational)?.vulnerability}`}>
+                        <SpaceBetween size="s">
+                            <Box><Box variant="strong">What Happened:</Box> {(postResult?.educational || searchResults?.educational)?.what_happened}</Box>
+                            <Box><Box variant="strong">How AWS Security Agent Detects This:</Box> {(postResult?.educational || searchResults?.educational)?.how_agent_detects}</Box>
+                            <Box><Box variant="strong">Other Payloads to Try:</Box></Box>
+                            <ul>{(postResult?.educational || searchResults?.educational)?.sample_payloads?.map((p: string, i: number) => <li key={i}><code>{p}</code></li>)}</ul>
+                        </SpaceBetween>
+                    </Alert>
+                )}
+
+                <Button variant="link" onClick={() => navigate("/crm/security")}>← Back to Security Dashboard</Button>
+            </SpaceBetween>
+        </ContentLayout>
+    );
+};
+
+export default SecurityCommentsPage;

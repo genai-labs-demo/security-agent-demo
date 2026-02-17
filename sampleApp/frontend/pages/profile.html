@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SQL Injection Demo - AWS Security Agent</title>
+    <link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+    <div class="container">
+        <div class="warning-banner">
+            ⚠️ This is an intentionally vulnerable application for educational purposes only
+        </div>
+        
+        <div class="vuln-container">
+            <a href="dashboard.html" class="back-link">← Back to Dashboard</a>
+            
+            <div class="vuln-header">
+                <h1>🔓 SQL Injection Vulnerability Demo</h1>
+                <p class="subtitle">Learn how SQL injection works and how AWS Security Agent detects it</p>
+            </div>
+            
+            <!-- Vulnerability Description -->
+            <div class="vuln-description">
+                <h2>What is SQL Injection?</h2>
+                <p id="vulnDescription">
+                    SQL Injection is a code injection technique that exploits security vulnerabilities in an application's 
+                    database layer. When user input is directly concatenated into SQL queries without proper parameterization, 
+                    attackers can inject malicious SQL code to bypass authentication, extract sensitive data, modify database 
+                    contents, or execute administrative operations.
+                </p>
+                
+                <h2 style="margin-top: 20px;">Why It's Dangerous</h2>
+                <p>
+                    SQL injection can lead to:
+                </p>
+                <ul style="margin-left: 20px; margin-top: 10px; color: #666;">
+                    <li>Authentication bypass (logging in as any user without a password)</li>
+                    <li>Unauthorized data access (reading sensitive information from the database)</li>
+                    <li>Data manipulation (modifying or deleting database records)</li>
+                    <li>Complete database compromise (executing administrative commands)</li>
+                </ul>
+                
+                <h2 style="margin-top: 20px;">How to Fix It</h2>
+                <p>
+                    <strong>Always use parameterized queries or prepared statements:</strong>
+                </p>
+                <pre style="background: white; padding: 15px; border-radius: 6px; margin-top: 10px; overflow-x: auto; font-size: 13px;">
+// ❌ VULNERABLE (string concatenation)
+const query = `SELECT * FROM users WHERE id = ${userId}`;
+
+// ✅ SECURE (parameterized query)
+const query = 'SELECT * FROM users WHERE id = $1';
+pool.query(query, [userId]);</pre>
+            </div>
+            
+            <!-- Demo Section -->
+            <div class="demo-section">
+                <h3>Try It Yourself: User Profile Search</h3>
+                <p style="color: #666; margin-bottom: 20px;">
+                    Enter a user ID to search for a profile. Try using SQL injection payloads to manipulate the query!
+                </p>
+                
+                <div class="form-group">
+                    <label for="userIdInput">User ID:</label>
+                    <input 
+                        type="text" 
+                        id="userIdInput" 
+                        placeholder="Enter user ID (e.g., 1 or try: 1 OR 1=1)" 
+                        value="1"
+                    >
+                </div>
+                
+                <button onclick="searchProfile()" class="btn btn-primary">Search Profile</button>
+                
+                <!-- Sample Payloads -->
+                <div class="sample-payloads">
+                    <h3>📝 Sample SQL Injection Payloads</h3>
+                    <p style="color: #666; margin-bottom: 15px;">
+                        Click any payload below to try it:
+                    </p>
+                    <div id="samplePayloads">
+                        <!-- Payloads will be loaded dynamically -->
+                        <div class="payload-item" onclick="tryPayload(this.textContent)">1 OR 1=1</div>
+                        <div class="payload-item" onclick="tryPayload(this.textContent)">1' OR '1'='1</div>
+                        <div class="payload-item" onclick="tryPayload(this.textContent)">admin' --</div>
+                        <div class="payload-item" onclick="tryPayload(this.textContent)">1' UNION SELECT * FROM users --</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Results Section -->
+            <div class="result-box" id="resultBox" style="display: none;">
+                <h3>Results</h3>
+                <div id="resultContent"></div>
+            </div>
+            
+            <!-- Educational Message (shown on successful exploit) -->
+            <div id="educationalMessage" style="display: none;"></div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/amazon-cognito-identity-js@6.3.6/dist/amazon-cognito-identity.min.js"></script>
+    <script src="../assets/config.js"></script>
+    <script src="../assets/auth.js"></script>
+    <script>
+        // Require authentication
+        requireAuth();
+        
+        /**
+         * Search for user profile (vulnerable to SQL injection)
+         */
+        async function searchProfile() {
+            const userIdInput = document.getElementById('userIdInput');
+            const userId = userIdInput.value.trim();
+            
+            if (!userId) {
+                alert('Please enter a user ID');
+                return;
+            }
+            
+            const resultBox = document.getElementById('resultBox');
+            const resultContent = document.getElementById('resultContent');
+            const educationalMessage = document.getElementById('educationalMessage');
+            
+            // Show loading state
+            resultBox.style.display = 'block';
+            resultContent.innerHTML = '<p style="color: #666;">Searching...</p>';
+            educationalMessage.style.display = 'none';
+            
+            try {
+                const token = getIdToken();
+                const response = await fetch(`${CONFIG.API_BASE_URL}/api/profile/${encodeURIComponent(userId)}`, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    // Display results
+                    displayResults(data);
+                    
+                    // Show educational message if SQL injection was detected
+                    if (data.educational) {
+                        displayEducationalMessage(data);
+                    }
+                } else {
+                    // Display error
+                    resultContent.innerHTML = `
+                        <div class="error-message">
+                            <strong>Error:</strong> ${data.error || 'Unknown error'}
+                            ${data.message ? `<br><br><strong>Details:</strong> ${data.message}` : ''}
+                            ${data.detail ? `<br><strong>Detail:</strong> ${data.detail}` : ''}
+                            ${data.hint ? `<br><strong>Hint:</strong> ${data.hint}` : ''}
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                console.error('Search failed:', error);
+                resultContent.innerHTML = `
+                    <div class="error-message">
+                        <strong>Request Failed:</strong> ${error.message}
+                    </div>
+                `;
+            }
+        }
+        
+        /**
+         * Display search results
+         */
+        function displayResults(data) {
+            const resultContent = document.getElementById('resultContent');
+            
+            // Handle both single user and multiple users (from SQL injection)
+            const users = Array.isArray(data.data) ? data.data : [data.data];
+            
+            let html = '';
+            
+            if (users.length === 0) {
+                html = '<p style="color: #666;">No users found.</p>';
+            } else {
+                html = '<div style="margin-top: 10px;">';
+                
+                users.forEach((user, index) => {
+                    html += `
+                        <div style="background: white; padding: 15px; border-radius: 6px; margin: 10px 0; border: 1px solid #dee2e6;">
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+                                <strong style="color: #333; font-size: 16px;">${escapeHtml(user.username)}</strong>
+                                <span style="color: #666; font-size: 14px;">ID: ${user.id}</span>
+                            </div>
+                            <div style="color: #666; font-size: 14px; line-height: 1.6;">
+                                <p><strong>Email:</strong> ${escapeHtml(user.email)}</p>
+                                <p><strong>Role:</strong> ${escapeHtml(user.role)}</p>
+                                ${user.bio ? `<p><strong>Bio:</strong> ${escapeHtml(user.bio)}</p>` : ''}
+                                <p><strong>Created:</strong> ${new Date(user.created_at).toLocaleString()}</p>
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                html += '</div>';
+                
+                // Show count if multiple users returned
+                if (users.length > 1) {
+                    html = `<p style="color: #667eea; font-weight: 600; margin-bottom: 10px;">
+                        Found ${users.length} users (SQL injection detected!)
+                    </p>` + html;
+                }
+            }
+            
+            resultContent.innerHTML = html;
+        }
+        
+        /**
+         * Display educational message on successful exploit
+         */
+        function displayEducationalMessage(data) {
+            const educationalMessage = document.getElementById('educationalMessage');
+            const edu = data.educational;
+            
+            let html = `
+                <div class="educational-message">
+                    <h3>🚨 ${escapeHtml(data.message || 'SQL Injection Detected!')}</h3>
+                    
+                    <div style="margin-top: 20px;">
+                        <h4 style="margin-bottom: 10px;">What Happened:</h4>
+                        <p>${escapeHtml(edu.what_happened)}</p>
+                    </div>
+                    
+                    <div style="margin-top: 20px;">
+                        <h4 style="margin-bottom: 10px;">How AWS Security Agent Detects This:</h4>
+                        <p>${escapeHtml(edu.how_agent_detects)}</p>
+                    </div>
+            `;
+            
+            if (edu.sample_payloads && edu.sample_payloads.length > 0) {
+                html += `
+                    <div style="margin-top: 20px;">
+                        <h4 style="margin-bottom: 10px;">Other Sample Payloads to Try:</h4>
+                        <ul>
+                `;
+                
+                edu.sample_payloads.forEach(payload => {
+                    html += `<li><code style="background: rgba(255,255,255,0.2); padding: 2px 6px; border-radius: 3px;">${escapeHtml(payload)}</code></li>`;
+                });
+                
+                html += `
+                        </ul>
+                    </div>
+                `;
+            }
+            
+            html += '</div>';
+            
+            educationalMessage.innerHTML = html;
+            educationalMessage.style.display = 'block';
+        }
+        
+        /**
+         * Try a sample payload
+         */
+        function tryPayload(payload) {
+            const userIdInput = document.getElementById('userIdInput');
+            userIdInput.value = payload;
+            searchProfile();
+        }
+        
+        /**
+         * Escape HTML to prevent XSS in our display
+         * (Ironic, but we need to display results safely!)
+         */
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        /**
+         * Load vulnerability information from backend
+         */
+        async function loadVulnerabilityInfo() {
+            try {
+                const token = getIdToken();
+                const response = await fetch(`${CONFIG.API_BASE_URL}/api/profile/1`, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                // We're just making a normal request to potentially get educational content
+                // The actual vulnerability info is already in the HTML, but we could enhance it
+                // from the database if needed
+            } catch (error) {
+                console.error('Failed to load vulnerability info:', error);
+            }
+        }
+        
+        // Allow Enter key to submit search
+        document.getElementById('userIdInput').addEventListener('keypress', function(event) {
+            if (event.key === 'Enter') {
+                searchProfile();
+            }
+        });
+        
+        // Load vulnerability information on page load
+        loadVulnerabilityInfo();
+    </script>
+</body>
+</html>
