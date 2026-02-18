@@ -14,6 +14,17 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 
+def _build_owner_authorization_filter(user_owner_id: Optional[str]) -> tuple:
+    """
+    Helper to build owner authorization SQL filter and parameters.
+    Returns tuple of (sql_fragment, params_list)
+    """
+    if user_owner_id:
+        return (" AND owner_id = %s", [user_owner_id])
+    else:
+        return ("", [])
+
+
 def _map_opportunity_to_api_format(db_record: Dict[str, Any]) -> Dict[str, Any]:
     """
     Map database snake_case columns to camelCase API response fields.
