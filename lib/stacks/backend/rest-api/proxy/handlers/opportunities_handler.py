@@ -82,6 +82,110 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
     return db_data
 
 
+
+def _recalculate_account_metrics(connection, account_id: str) -> None:
+    """
+    Recalculate and update aggregate metrics for an account.
+    
+    This function ensures data integrity by recalculating:
+    - opportunity_count: Total number of opportunities for this account
+    - total_opportunity_value: Sum of all opportunity amounts for this account
+    
+    Args:
+        connection: Database connection object
+        account_id: Account ID to recalculate metrics for
+    
+    Raises:
+        Exception: If database update fails
+    """
+    try:
+        if not account_id:
+            return
+        
+        cursor = connection.cursor()
+        
+        # Calculate aggregate metrics from opportunities table
+        query = """
+            UPDATE accounts
+            SET 
+                opportunity_count = COALESCE((
+                    SELECT COUNT(*)
+                    FROM opportunities
+                    WHERE account_id = %s
+                ), 0),
+                total_opportunity_value = COALESCE((
+                    SELECT SUM(amount)
+                    FROM opportunities
+                    WHERE account_id = %s
+                ), 0)
+            WHERE id = %s
+        """
+        
+        cursor.execute(query, (account_id, account_id, account_id))
+        cursor.close()
+        
+        logger.info(f"Recalculated metrics for account: {account_id}")
+        
+    except psycopg2.Error as e:
+        logger.error(f"Database error recalculating account metrics for {account_id}: {str(e)}")
+        raise Exception(f"Failed to recalculate account metrics: {str(e)}")
+
+
+def _recalculate_team_member_metrics(connection, owner_id: str) -> None:
+    """
+    Recalculate and update aggregate metrics for a team member.
+    
+    This function ensures data integrity by recalculating:
+    - opportunity_count: Total number of opportunities owned by this team member
+    - pipeline_value: Sum of opportunities in pipeline stages (Pipeline, Best Case, Commit)
+    - closed_won_value: Sum of opportunities in Closed Won stage
+    - quota_attainment: Percentage of quota achieved (closed_won_value / quota * 100)
+    
+    Args:
+        connection: Database connection object
+        owner_id: Team member ID to recalculate metrics for
+    
+    Raises:
+        Exception: If database update fails
+    """
+    try:
+        if not owner_id:
+            return
+        
+        cursor = connection.cursor()
+        
+        # Calculate aggregate metrics from opportunities table
+        query = """
+            UPDATE team_members
+            SET 
+                opportunity_count = COALESCE((
+                    SELECT COUNT(*)
+                    FROM opportunities
+                    WHERE owner_id = %s
+                ), 0),
+                pipeline_value = COALESCE((
+                    SELECT SUM(amount)
+                    FROM opportunities
+                    WHERE owner_id = %s AND stage IN ('Pipeline', 'Best Case', 'Commit')
+                ), 0),
+                closed_won_value = COALESCE((
+                    SELECT SUM(amount)
+                    FROM opportunities
+                    WHERE owner_id = %s AND stage = 'Closed Won'
+                ), 0),
+                quota_attainment = CASE WHEN quota > 0 THEN ROUND((COALESCE((SELECT SUM(amount) FROM opportunities WHERE owner_id = %s AND stage = 'Closed Won'), 0) / quota * 100)::numeric, 2) ELSE 0 END
+            WHERE id = %s
+        """
+        
+        cursor.execute(query, (owner_id, owner_id, owner_id, owner_id, owner_id))
+        cursor.close()
+        
+        logger.info(f"Recalculated metrics for team member: {owner_id}")
+        
+    except psycopg2.Error as e:
+        logger.error(f"Database error recalculating team member metrics for {owner_id}: {str(e)}")
+        raise Exception(f"Failed to recalculate team member metrics: {str(e)}")
+
 def search_opportunities(connection, search_query: str, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Perform full text search on opportunities using multiple keywords.
@@ -399,12 +503,19 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         cursor.execute(query, values)
         record = cursor.fetchone()
         connection.commit()
-        cursor.close()
         
         # Map to API format
         opportunity = _map_opportunity_to_api_format(dict(record))
         
         logger.info(f"Created opportunity with ID: {opportunity['id']}")
+        # Recalculate aggregate metrics for account and team member
+        if db_data.get('account_id'):
+            _recalculate_account_metrics(connection, db_data['account_id'])
+        if db_data.get('owner_id'):
+            _recalculate_team_member_metrics(connection, db_data['owner_id'])
+        
+        connection.commit()
+        
         return opportunity
         
     except psycopg2.IntegrityError as e:
@@ -448,6 +559,14 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
     try:
         logger.info(f"Updating opportunity: {opportunity_id}")
         
+        
+        # Get current opportunity to track account/owner changes
+        cursor_temp = connection.cursor(cursor_factory=RealDictCursor)
+        cursor_temp.execute("SELECT account_id, owner_id FROM opportunities WHERE id = %s", (opportunity_id,))
+        old_record = cursor_temp.fetchone()
+        cursor_temp.close()
+        old_account_id = old_record['account_id'] if old_record else None
+        old_owner_id = old_record['owner_id'] if old_record else None
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
         
@@ -504,12 +623,31 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
             return None
         
         connection.commit()
-        cursor.close()
         
         # Map to API format
         opportunity = _map_opportunity_to_api_format(dict(record))
         
         logger.info(f"Updated opportunity: {opportunity_id}")
+        # Recalculate aggregate metrics for affected accounts and team members
+        new_account_id = db_data.get('account_id', old_account_id)
+        new_owner_id = db_data.get('owner_id', old_owner_id)
+        
+        # Recalculate old account if it changed
+        if old_account_id and new_account_id != old_account_id:
+            _recalculate_account_metrics(connection, old_account_id)
+        # Recalculate new/current account
+        if new_account_id:
+            _recalculate_account_metrics(connection, new_account_id)
+        
+        # Recalculate old owner if it changed
+        if old_owner_id and new_owner_id != old_owner_id:
+            _recalculate_team_member_metrics(connection, old_owner_id)
+        # Recalculate new/current owner
+        if new_owner_id:
+            _recalculate_team_member_metrics(connection, new_owner_id)
+        
+        connection.commit()
+        
         return opportunity
         
     except psycopg2.IntegrityError as e:
@@ -555,18 +693,28 @@ def delete_opportunity(connection, opportunity_id: str) -> bool:
         cursor = connection.cursor()
         
         # Check if opportunity exists
-        cursor.execute("SELECT id FROM opportunities WHERE id = %s", (opportunity_id,))
+        # Get opportunity details before deletion to recalculate metrics
         if not cursor.fetchone():
-            cursor.close()
+        opp_record = cursor.fetchone()
+        if not opp_record:
             logger.info(f"Opportunity not found for deletion: {opportunity_id}")
             return False
         
         # Delete the opportunity
+        account_id, owner_id = opp_record
+        
         cursor.execute("DELETE FROM opportunities WHERE id = %s", (opportunity_id,))
         connection.commit()
-        cursor.close()
         
         logger.info(f"Deleted opportunity: {opportunity_id}")
+        # Recalculate aggregate metrics for account and team member
+        if account_id:
+            _recalculate_account_metrics(connection, account_id)
+        if owner_id:
+            _recalculate_team_member_metrics(connection, owner_id)
+        
+        connection.commit()
+        
         return True
         
     except psycopg2.Error as e:
