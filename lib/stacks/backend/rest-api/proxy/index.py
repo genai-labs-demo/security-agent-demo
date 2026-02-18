@@ -29,6 +29,7 @@ from error_handler import (
     handle_server_error,
     parse_database_error
 )
+from validation import ValidationError
 
 # CloudWatch client for custom metrics
 cloudwatch = boto3.client('cloudwatch')
@@ -130,6 +131,12 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         return response
         
     except ValueError as e:
+    except ValidationError as e:
+        # Validation errors from validation module (400)
+        logger.warning(f"Validation error in request {request_id}: {e.message}")
+        response = handle_validation_error(e.message, field=e.field)
+        return process_cors(event, response)
+        
         # Validation errors (400)
         logger.warning(f"Validation error in request {request_id}: {str(e)}")
         response = handle_validation_error(str(e))

@@ -8,6 +8,7 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 import psycopg2
 from psycopg2.extras import RealDictCursor
+import validation
 
 # Configure logging
 logger = logging.getLogger()
@@ -347,6 +348,9 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     try:
         logger.info(f"Creating new opportunity: {data.get('name')}")
         
+        # Validate input data against business rules
+        validation.validate_opportunity(data, is_update=False)
+        
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
         
@@ -447,6 +451,9 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
     """
     try:
         logger.info(f"Updating opportunity: {opportunity_id}")
+        
+        # Validate input data against business rules
+        validation.validate_opportunity(data, is_update=True)
         
         # Map API format to database format
         db_data = _map_api_to_db_format(data)

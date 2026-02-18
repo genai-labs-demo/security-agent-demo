@@ -15,6 +15,9 @@ FORECAST_CATEGORY_VALUES = ['Pipeline', 'Best Case', 'Commit', 'Closed']
 # Email validation regex pattern
 EMAIL_PATTERN = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
 
+# Maximum allowed values for business validation
+MAX_OPPORTUNITY_AMOUNT = 100000000  # $100 million - reasonable upper bound for enterprise deals
+MAX_ACCOUNT_ANNUAL_REVENUE = 1000000000  # $1 billion - reasonable upper bound for account revenue
 
 class ValidationError(Exception):
     """Custom exception for validation errors with field-specific details."""
@@ -70,6 +73,8 @@ def validate_account(data: Dict[str, Any], is_update: bool = False) -> None:
             raise ValidationError("Field 'annualRevenue' must be a number", field='annualRevenue')
         if data['annualRevenue'] < 0:
             raise ValidationError("Field 'annualRevenue' must be non-negative", field='annualRevenue')
+        if data['annualRevenue'] > MAX_ACCOUNT_ANNUAL_REVENUE:
+            raise ValidationError(f"Field 'annualRevenue' must not exceed ${MAX_ACCOUNT_ANNUAL_REVENUE:,.0f}", field='annualRevenue')
     
     # Validate employeeCount
     if 'employeeCount' in data:
@@ -160,6 +165,8 @@ def validate_opportunity(data: Dict[str, Any], is_update: bool = False) -> None:
             raise ValidationError("Field 'amount' must be a number", field='amount')
         if data['amount'] < 0:
             raise ValidationError("Field 'amount' must be non-negative", field='amount')
+        if data['amount'] > MAX_OPPORTUNITY_AMOUNT:
+            raise ValidationError(f"Field 'amount' must not exceed ${MAX_OPPORTUNITY_AMOUNT:,.0f}", field='amount')
     
     # Validate closeDate (ISO 8601 date string)
     if 'closeDate' in data:
