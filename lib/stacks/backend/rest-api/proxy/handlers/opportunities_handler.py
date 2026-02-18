@@ -102,9 +102,20 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
             return []
         
         keywords = search_query.strip().split()
+        # Limit to maximum 5 keywords to prevent DoS via complex queries (CWE-400)
+        # Each keyword generates 17 SQL operations per row (6 ILIKE + 5 relevance + 6 match count)
+        # With 50k opportunities: 5 keywords * 17 ops * 50k rows = 4.25M operations (manageable)
+        # vs 15 keywords * 17 ops * 50k rows = 12.75M operations (resource exhaustion risk)
+        MAX_SEARCH_KEYWORDS = 5
+        if len(keywords) > MAX_SEARCH_KEYWORDS:
+            logger.warning(f"Search query exceeded maximum {MAX_SEARCH_KEYWORDS} keywords, truncating from {len(keywords)} keywords")
+            keywords = keywords[:MAX_SEARCH_KEYWORDS]
         logger.info(f"Searching opportunities for keywords: {keywords}")
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
+        
+        # Set statement timeout to 30 seconds to prevent long-running queries (CWE-400)
+        cursor.execute("SET LOCAL statement_timeout = '30s'")
         
         # Create WHERE conditions for each keyword (must find ALL keywords)
         keyword_conditions = []
