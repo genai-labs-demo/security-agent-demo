@@ -188,6 +188,109 @@ def initialize_schema(conn):
         author_role VARCHAR(100),
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
     );
+
+    -- Create function to automatically update account aggregate fields
+    -- This ensures opportunity_count and total_opportunity_value are always accurate
+    CREATE OR REPLACE FUNCTION update_account_aggregates()
+    RETURNS TRIGGER AS $$
+    BEGIN
+        -- Handle UPDATE where account_id changed (update both old and new accounts)
+        IF (TG_OP = 'UPDATE' AND OLD.account_id IS DISTINCT FROM NEW.account_id) THEN
+            -- Update old account
+            IF OLD.account_id IS NOT NULL THEN
+                UPDATE accounts
+                SET 
+                    opportunity_count = (
+                        SELECT COUNT(*) 
+                        FROM opportunities 
+                        WHERE account_id = OLD.account_id
+                    ),
+                    total_opportunity_value = (
+                        SELECT COALESCE(SUM(amount), 0) 
+                        FROM opportunities 
+                        WHERE account_id = OLD.account_id
+                    )
+                WHERE id = OLD.account_id;
+            END IF;
+            
+            -- Update new account
+            IF NEW.account_id IS NOT NULL THEN
+                UPDATE accounts
+                SET 
+                    opportunity_count = (
+                        SELECT COUNT(*) 
+                        FROM opportunities 
+                        WHERE account_id = NEW.account_id
+                    ),
+                    total_opportunity_value = (
+                        SELECT COALESCE(SUM(amount), 0) 
+                        FROM opportunities 
+                        WHERE account_id = NEW.account_id
+                    )
+                WHERE id = NEW.account_id;
+            END IF;
+        
+        -- Handle INSERT or UPDATE where only amount changed
+        ELSIF (TG_OP = 'INSERT' OR TG_OP = 'UPDATE') THEN
+            IF NEW.account_id IS NOT NULL THEN
+                UPDATE accounts
+                SET 
+                    opportunity_count = (
+                        SELECT COUNT(*) 
+                        FROM opportunities 
+                        WHERE account_id = NEW.account_id
+                    ),
+                    total_opportunity_value = (
+                        SELECT COALESCE(SUM(amount), 0) 
+                        FROM opportunities 
+                        WHERE account_id = NEW.account_id
+                    )
+                WHERE id = NEW.account_id;
+            END IF;
+        
+        -- Handle DELETE
+        ELSIF (TG_OP = 'DELETE') THEN
+            IF OLD.account_id IS NOT NULL THEN
+                UPDATE accounts
+                SET 
+                    opportunity_count = (
+                        SELECT COUNT(*) 
+                        FROM opportunities 
+                        WHERE account_id = OLD.account_id
+                    ),
+                    total_opportunity_value = (
+                        SELECT COALESCE(SUM(amount), 0) 
+                        FROM opportunities 
+                        WHERE account_id = OLD.account_id
+                    )
+                WHERE id = OLD.account_id;
+            END IF;
+        END IF;
+        
+        RETURN NULL; -- Result is ignored for AFTER triggers
+    END;
+    $$ LANGUAGE plpgsql;
+
+    -- Drop existing triggers if they exist (for idempotency)
+    DROP TRIGGER IF EXISTS trg_opportunity_insert ON opportunities;
+    DROP TRIGGER IF EXISTS trg_opportunity_update ON opportunities;
+    DROP TRIGGER IF EXISTS trg_opportunity_delete ON opportunities;
+
+    -- Create triggers to maintain account aggregates
+    CREATE TRIGGER trg_opportunity_insert
+        AFTER INSERT ON opportunities
+        FOR EACH ROW
+        EXECUTE FUNCTION update_account_aggregates();
+
+    CREATE TRIGGER trg_opportunity_update
+        AFTER UPDATE ON opportunities
+        FOR EACH ROW
+        EXECUTE FUNCTION update_account_aggregates();
+
+    CREATE TRIGGER trg_opportunity_delete
+        AFTER DELETE ON opportunities
+        FOR EACH ROW
+        EXECUTE FUNCTION update_account_aggregates();
     """
     
     cursor = conn.cursor()
