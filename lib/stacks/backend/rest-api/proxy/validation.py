@@ -219,6 +219,47 @@ def validate_opportunity(data: Dict[str, Any], is_update: bool = False) -> None:
             raise ValidationError("Field 'ownerName' must not exceed 255 characters", field='ownerName')
 
 
+def validate_stage_transition(current_stage: str, new_stage: str) -> None:
+    """
+    Enforce sequential stage progression in sales pipeline.
+    Prevents skipping intermediate stages or invalid backwards transitions.
+    
+    Args:
+        current_stage: The opportunity's current stage value
+        new_stage: The requested new stage value
+    
+    Raises:
+        ValidationError: When transition violates sequential progression rules
+    """
+    if current_stage == new_stage:
+        return
+    
+    # Map each stage to its valid next stages
+    transitions = {
+        'Launched': ['Qualified', 'Closed Lost'],
+        'Qualified': ['Proof of Concept', 'Closed Lost'],
+        'Proof of Concept': ['Negotiation', 'Closed Lost'],
+        'Negotiation': ['Closed Won', 'Closed Lost'],
+        'Closed Won': [],
+        'Closed Lost': []
+    }
+    
+    if current_stage not in transitions:
+        raise ValidationError(
+            f"Unknown current stage: {current_stage}",
+            field='stage'
+        )
+    
+    valid_next = transitions[current_stage]
+    
+    if new_stage not in valid_next:
+        allowed = ', '.join(valid_next) if valid_next else 'none'
+        raise ValidationError(
+            f"Cannot transition from '{current_stage}' to '{new_stage}'. Valid next stages: {allowed}",
+            field='stage'
+        )
+
+
 def validate_team_member(data: Dict[str, Any], is_update: bool = False) -> None:
     """
     Validate team member data against schema requirements.

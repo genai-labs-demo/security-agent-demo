@@ -448,6 +448,20 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
     try:
         logger.info(f"Updating opportunity: {opportunity_id}")
         
+        # Validate stage transition if stage is being updated
+        if 'stage' in data:
+            # Import validation function
+            from validation import validate_stage_transition
+            
+            # Retrieve current opportunity to check current stage
+            current_opp = get_opportunity(connection, opportunity_id)
+            if not current_opp:
+                logger.info(f"Opportunity not found: {opportunity_id}")
+                return None
+            
+            # Validate the stage transition
+            validate_stage_transition(current_opp['stage'], data['stage'])
+        
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
         
