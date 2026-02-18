@@ -102,6 +102,13 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
             return []
         
         keywords = search_query.strip().split()
+        
+        # Limit number of keywords to prevent DoS via excessive ILIKE operations
+        # Each keyword generates 17 ILIKE operations (6 in WHERE, 5 in relevance, 6 in match count)
+        MAX_KEYWORDS = 10
+        if len(keywords) > MAX_KEYWORDS:
+            logger.warning(f"Search query contains {len(keywords)} keywords, limiting to {MAX_KEYWORDS}")
+            keywords = keywords[:MAX_KEYWORDS]
         logger.info(f"Searching opportunities for keywords: {keywords}")
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
