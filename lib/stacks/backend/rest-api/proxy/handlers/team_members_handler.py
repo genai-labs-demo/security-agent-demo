@@ -314,6 +314,19 @@ def update_team_member(connection, member_id: str, data: Dict[str, Any]) -> Opti
             logger.info(f"Team member not found for update: {member_id}")
             return None
         
+        # Synchronize denormalized owner_name in accounts and opportunities if name changed
+        if 'name' in db_data:
+            # Update denormalized owner_name in accounts table
+            cursor.execute(
+                "UPDATE accounts SET owner_name = %s WHERE owner_id = %s",
+                (db_data['name'], member_id)
+            )
+            # Update denormalized owner_name in opportunities table
+            cursor.execute(
+                "UPDATE opportunities SET owner_name = %s WHERE owner_id = %s",
+                (db_data['name'], member_id)
+            )
+        
         connection.commit()
         cursor.close()
         
