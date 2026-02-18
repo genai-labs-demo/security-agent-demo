@@ -211,15 +211,30 @@ def execute_operation(connection, route_info, operation: str) -> Any:
         account_id = query_params.get('accountId')
         search_query = query_params.get('search') or query_params.get('q')  # Support both 'search' and 'q' parameters
         
+        # Extract pagination parameters from query string
+        page_limit = query_params.get('limit', '100')
+        page_offset = query_params.get('offset', '0')
+        
+        # Convert to integers with validation
+        try:
+            page_limit = int(page_limit)
+        except (ValueError, TypeError):
+            page_limit = 100
+        
+        try:
+            page_offset = int(page_offset)
+        except (ValueError, TypeError):
+            page_offset = 0
+        
         # Check if this is a search endpoint (/opportunities/search)
         is_search_endpoint = route_info.path.endswith('/search')
         
         if operation == 'list' or is_search_endpoint:
             # If search query is provided, perform search instead of list
             if search_query:
-                return opportunities_handler.search_opportunities(connection, search_query, account_id)
+                return opportunities_handler.search_opportunities(connection, search_query, account_id, page_limit, page_offset)
             else:
-                return opportunities_handler.list_opportunities(connection, account_id)
+                return opportunities_handler.list_opportunities(connection, account_id, page_limit, page_offset)
         elif operation == 'get':
             result = opportunities_handler.get_opportunity(connection, resource_id)
             if result is None:
