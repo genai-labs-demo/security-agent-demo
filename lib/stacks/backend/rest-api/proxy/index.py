@@ -15,6 +15,7 @@ from typing import Dict, Any
 import boto3
 
 # Import handler modules
+from validation import ValidationError
 from router import parse_api_gateway_event, validate_route, get_operation_type
 from db_connection import get_database_connection, return_database_connection
 from handlers import accounts_handler, opportunities_handler, team_members_handler, industries_handler
@@ -128,6 +129,12 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         
         logger.info(f"Request {request_id} completed successfully with status {response['statusCode']}")
         return response
+        
+    except ValidationError as e:
+        # Input validation errors (400) - from validation module
+        logger.warning(f"Validation error in request {request_id}: {e.message}")
+        response = handle_validation_error(e.message)
+        return process_cors(event, response)
         
     except ValueError as e:
         # Validation errors (400)
