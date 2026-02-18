@@ -140,8 +140,40 @@ export class RestApi extends Construct {
             }));
         }
 
+        // Add unauthenticated security demo endpoints BEFORE the catch-all proxy
+        // These must be explicitly defined so pen test scanners can reach them without a JWT
+        const lambdaInteg = new LambdaIntegration(proxyFunction);
+        const noAuth = { authorizationType: AuthorizationType.NONE };
+
+        const secProfile = restApi.root.addResource("security-profile");
+        secProfile.addMethod("GET", lambdaInteg, noAuth);
+        secProfile.addMethod("POST", lambdaInteg, noAuth);
+        const secProfileId = secProfile.addResource("{id}");
+        secProfileId.addMethod("GET", lambdaInteg, noAuth);
+
+        const secComments = restApi.root.addResource("security-comments");
+        secComments.addMethod("GET", lambdaInteg, noAuth);
+        secComments.addMethod("POST", lambdaInteg, noAuth);
+
+        const secSearch = restApi.root.addResource("security-search");
+        secSearch.addMethod("GET", lambdaInteg, noAuth);
+        secSearch.addMethod("POST", lambdaInteg, noAuth);
+
+        const secTools = restApi.root.addResource("security-tools");
+        const secPing = secTools.addResource("ping");
+        secPing.addMethod("POST", lambdaInteg, noAuth);
+        const secNslookup = secTools.addResource("nslookup");
+        secNslookup.addMethod("POST", lambdaInteg, noAuth);
+
+        const secHealth = restApi.root.addResource("security-health");
+        secHealth.addMethod("GET", lambdaInteg, noAuth);
+
+        const secXssPage = restApi.root.addResource("security-xss-page");
+        secXssPage.addMethod("GET", lambdaInteg, noAuth);
+
+        // Catch-all proxy for remaining (authenticated) CRM endpoints
         restApi.root.addProxy({
-            defaultIntegration: new LambdaIntegration(proxyFunction),
+            defaultIntegration: lambdaInteg,
         });
 
         new RequestValidator(this, "requestValidator", {

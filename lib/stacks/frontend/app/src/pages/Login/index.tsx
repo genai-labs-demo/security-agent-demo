@@ -35,18 +35,18 @@ const Login = () => {
                                 padding="1rem 2rem 2rem"
                             >
                                 <View
-                                    backgroundColor="rgba(255, 255, 255, 0.05)"
+                                    backgroundColor="rgba(0, 0, 0, 0.06)"
                                     borderRadius="8px"
                                     padding="12px 16px"
-                                    border="1px solid rgba(255, 255, 255, 0.15)"
+                                    border="1px solid rgba(0, 0, 0, 0.15)"
                                 >
-                                    <Text fontSize="13px" color="rgba(255, 255, 255, 0.7)" fontWeight="600" marginBottom="4px">
+                                    <Text fontSize="13px" color="#232f3e" fontWeight="600" marginBottom="4px">
                                         Demo Credentials
                                     </Text>
-                                    <Text fontSize="12px" color="rgba(255, 255, 255, 0.55)">
+                                    <Text fontSize="12px" color="#545b64">
                                         Username: user_test@example.com
                                     </Text>
-                                    <Text fontSize="12px" color="rgba(255, 255, 255, 0.55)">
+                                    <Text fontSize="12px" color="#545b64">
                                         Password: AWS123xyz!
                                     </Text>
                                 </View>

@@ -168,28 +168,21 @@ export class Auth extends Construct {
                     },
                     {
                         name: "AWSManagedRulesKnownBadInputsRuleSet",
+                        overrideAction: {
+                            count: {},
+                        },
                     },
                     {
                         name: "AWSManagedRulesUnixRuleSet",
-                        ruleActionOverrides: [
-                            {
-                                name: "UNIXShellCommandsVariables_BODY",
-                                actionToUse: {
-                                    count: {},
-                                },
-                            },
-                        ],
+                        overrideAction: {
+                            count: {},
+                        },
                     },
                     {
                         name: "AWSManagedRulesSQLiRuleSet",
-                        ruleActionOverrides: [
-                            {
-                                name: "SQLi_BODY",
-                                actionToUse: {
-                                    count: {},
-                                },
-                            },
-                        ],
+                        overrideAction: {
+                            count: {},
+                        },
                     },
                 ]),
             ],

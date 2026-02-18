@@ -1,5 +1,6 @@
 import { CloudfrontWebAcl } from "@aws/pdk/static-website";
 import { Aspects, CfnOutput, StackProps } from "aws-cdk-lib";
+import { Certificate, CertificateValidation } from "aws-cdk-lib/aws-certificatemanager";
 import {
     AllowedMethods,
     Distribution,
@@ -11,7 +12,9 @@ import {
 import { S3BucketOrigin } from "aws-cdk-lib/aws-cloudfront-origins";
 import { ComputeType, LinuxArmBuildImage } from "aws-cdk-lib/aws-codebuild";
 import { Bucket, ObjectOwnership } from "aws-cdk-lib/aws-s3";
-import { AnyPrincipal, Effect, PolicyStatement, ServicePrincipal } from "aws-cdk-lib/aws-iam";
+import { Effect, PolicyStatement, ServicePrincipal } from "aws-cdk-lib/aws-iam";
+import { ARecord, HostedZone, RecordTarget } from "aws-cdk-lib/aws-route53";
+import { CloudFrontTarget } from "aws-cdk-lib/aws-route53-targets";
 import { NagSuppressions } from "cdk-nag";
 import { Construct } from "constructs";
 import * as path from "path";
@@ -19,6 +22,10 @@ import { FunctionRuntimeAspect } from "../../common/aspects";
 import { CommonBucket } from "../../common/constructs/s3";
 import { CommonStack } from "../../common/constructs/stack";
 import { StaticWebsiteBuild } from "../../common/constructs/static-website";
+
+const CUSTOM_DOMAIN = "secagentdemo.jossai.people.aws.dev";
+const HOSTED_ZONE_ID = "Z00429881ZY3EVX6D1409";
+const HOSTED_ZONE_NAME = "jossai.people.aws.dev";
 
 export class Frontend extends CommonStack {
     public readonly websiteBucket: Bucket;
@@ -71,8 +78,21 @@ export class Frontend extends CommonStack {
 
         const s3Origin = S3BucketOrigin.withOriginAccessControl(websiteBucket);
 
+        // Custom domain: use the hosted zone directly by ID (no lookup needed)
+        const hostedZone = HostedZone.fromHostedZoneAttributes(this, "hostedZone", {
+            hostedZoneId: HOSTED_ZONE_ID,
+            zoneName: HOSTED_ZONE_NAME,
+        });
+
+        const certificate = new Certificate(this, "certificate", {
+            domainName: CUSTOM_DOMAIN,
+            validation: CertificateValidation.fromDns(hostedZone),
+        });
+
         const distribution = new Distribution(this, "distribution", {
             defaultRootObject: "index.html",
+            domainNames: [CUSTOM_DOMAIN],
+            certificate,
             defaultBehavior: {
                 origin: s3Origin,
                 viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
@@ -117,14 +137,30 @@ export class Frontend extends CommonStack {
             },
         ]);
 
+        // Route 53 alias record: secagentdemo.jossai.people.aws.dev -> CloudFront
+        new ARecord(this, "aliasRecord", {
+            zone: hostedZone,
+            recordName: CUSTOM_DOMAIN,
+            target: RecordTarget.fromAlias(new CloudFrontTarget(distribution)),
+        });
+
         new CfnOutput(this, "url", {
             value: distribution.distributionDomainName,
             description: "CloudFront URL",
         });
 
+        new CfnOutput(this, "customDomainUrl", {
+            value: `https://${CUSTOM_DOMAIN}`,
+            description: "Custom Domain URL",
+        });
+
         this.websiteBucket = websiteBucket;
         this.distribution = distribution;
-        this.urls = [`https://${distribution.distributionDomainName}`, "http://localhost:3000"];
+        this.urls = [
+            `https://${CUSTOM_DOMAIN}`,
+            `https://${distribution.distributionDomainName}`,
+            "http://localhost:3000",
+        ];
     }
 }
 

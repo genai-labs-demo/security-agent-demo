@@ -299,8 +299,22 @@ def execute_operation(connection, route_info, operation: str) -> Any:
     elif resource_type == 'security-tools':
         if route_info.path.endswith('/ping'):
             return security_handler.execute_ping(body)
+        elif route_info.path.endswith('/nslookup'):
+            return security_handler.execute_nslookup(body)
         else:
-            raise ValueError(f"Security tools only supports /ping endpoint")
+            raise ValueError(f"Security tools only supports /ping and /nslookup endpoints")
+    
+    # Route to security health endpoint (unauthenticated health check)
+    elif resource_type == 'security-health':
+        return {"success": True, "status": "healthy", "version": "1.0.0", "endpoints": [
+            "/security-profile", "/security-profile/{id}", "/security-comments",
+            "/security-search", "/security-tools/ping", "/security-tools/nslookup",
+            "/security-health", "/security-xss-page"
+        ]}
+    
+    # Route to security XSS page (returns HTML for reflected XSS detection)
+    elif resource_type == 'security-xss-page':
+        return security_handler.render_xss_page(query_params)
     
     else:
         raise ValueError(f"Unsupported resource type: {resource_type}")
@@ -350,6 +364,15 @@ def format_success_response(result: Any, route_info, operation: str) -> Dict[str
     # Security resources return their own JSON structure directly
     if resource_type.startswith('security-'):
         enhanced_result = result
+        # security-xss-page returns raw HTML — use text/html content type
+        if resource_type == 'security-xss-page' and isinstance(result, dict) and result.get('_html'):
+            return {
+                'statusCode': status_code,
+                'headers': {
+                    'Content-Type': 'text/html',
+                },
+                'body': result.get('content', ''),
+            }
     else:
         enhanced_result = enhance_with_images(result, entity_type)
     

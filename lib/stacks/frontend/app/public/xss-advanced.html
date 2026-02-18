@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced XSS Demo - Security Testing</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; background: #1a1a2e; color: #e0e0e0; }
+        h1 { color: #ff6b6b; }
+        h2 { color: #ffa07a; margin-top: 30px; }
+        .container { background: #16213e; padding: 20px; border-radius: 8px; margin: 15px 0; }
+        input, textarea { width: 100%; padding: 10px; margin: 8px 0; background: #0f3460; color: #e0e0e0; border: 1px solid #533483; border-radius: 4px; box-sizing: border-box; }
+        button { padding: 10px 20px; background: #e94560; color: white; border: none; border-radius: 4px; cursor: pointer; margin: 5px 0; }
+        button:hover { background: #c73e54; }
+        #greeting-output, #link-output, #image-output, #search-output { padding: 15px; background: #0f3460; border-radius: 4px; margin-top: 10px; min-height: 30px; }
+        .warning { background: #4a1942; border-left: 4px solid #e94560; padding: 15px; margin: 20px 0; border-radius: 0 4px 4px 0; }
+        code { background: #0f3460; padding: 2px 6px; border-radius: 3px; font-size: 13px; }
+    </style>
+</head>
+<body>
+    <h1>⚡ Advanced XSS Vulnerabilities Demo</h1>
+    <div class="warning">
+        <strong>⚠️ Educational Purpose Only</strong> — This page contains intentional DOM-based XSS vulnerabilities for security testing and education.
+    </div>
+
+    <!-- DOM-based XSS via innerHTML -->
+    <div class="container">
+        <h2>1. DOM-based XSS (innerHTML)</h2>
+        <p>Enter your name below. Input is placed directly into the DOM via <code>innerHTML</code>.</p>
+        <input type="text" id="name-input" placeholder="Enter your name (try: <img src=x onerror=alert('XSS')>)" />
+        <button onclick="updateGreeting()">Update Greeting</button>
+        <div id="greeting-output">Enter your name above...</div>
+    </div>
+
+    <!-- Attribute-based XSS via href -->
+    <div class="container">
+        <h2>2. Attribute Injection (href)</h2>
+        <p>Enter a URL. Input is placed directly into an <code>href</code> attribute.</p>
+        <input type="text" id="link-input" placeholder="Enter URL (try: javascript:alert('XSS'))" value="https://example.com" />
+        <button onclick="createLink()">Create Link</button>
+        <div id="link-output">Enter a URL above...</div>
+    </div>
+
+    <!-- Event handler injection via img src -->
+    <div class="container">
+        <h2>3. Event Handler Injection (img onerror)</h2>
+        <p>Enter an image URL. Input is placed into <code>img src</code> attribute.</p>
+        <input type="text" id="image-input" placeholder='Enter image URL (try: x" onerror="alert(1))' />
+        <button onclick="displayImage()">Display Image</button>
+        <div id="image-output">Enter an image URL above...</div>
+    </div>
+
+    <!-- Reflected XSS via URL parameters -->
+    <div class="container">
+        <h2>4. Reflected XSS (URL parameter)</h2>
+        <p>This section reads the <code>q</code> parameter from the URL and reflects it into the page.</p>
+        <div id="search-output">No search query provided.</div>
+    </div>
+
+    <script>
+        // VULNERABILITY: DOM-based XSS - innerHTML with user input
+        function updateGreeting() {
+            var name = document.getElementById('name-input').value;
+            document.getElementById('greeting-output').innerHTML = '<p>Hello, ' + name + '! Welcome to the demo.</p>';
+        }
+
+        // VULNERABILITY: Attribute-based XSS - user input in href
+        function createLink() {
+            var url = document.getElementById('link-input').value;
+            document.getElementById('link-output').innerHTML = '<a href="' + url + '" style="color:#539fe5;">Click here to visit</a>';
+        }
+
+        // VULNERABILITY: Event handler injection - user input in img src
+        function displayImage() {
+            var url = document.getElementById('image-input').value;
+            document.getElementById('image-output').innerHTML = '<img src="' + url + '" alt="User image" style="max-width:100%;">';
+        }
+
+        // VULNERABILITY: Reflected XSS - URL parameter reflected into DOM
+        (function() {
+            var params = new URLSearchParams(window.location.search);
+            var query = params.get('q');
+            if (query) {
+                document.getElementById('search-output').innerHTML = '<p>Search results for: ' + query + '</p>';
+            }
+            // Also check hash for DOM-based XSS via fragment
+            if (window.location.hash) {
+                document.getElementById('search-output').innerHTML += '<p>Fragment: ' + decodeURIComponent(window.location.hash.substring(1)) + '</p>';
+            }
+        })();
+    </script>
+</body>
+</html>

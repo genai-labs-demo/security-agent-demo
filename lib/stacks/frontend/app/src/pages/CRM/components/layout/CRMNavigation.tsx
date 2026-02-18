@@ -53,7 +53,7 @@ const CRMNavigation = ({ activeHref: propActiveHref }: CRMNavigationProps) => {
                                 {
                                     type: "link" as const,
                                     text: "Pipeline",
-                                    href: "/crm",
+                                    href: "/crm/pipeline",
                                     info: <Badge color="blue">{opportunityCount}</Badge>
                                 },
                                 {
@@ -96,7 +96,7 @@ const CRMNavigation = ({ activeHref: propActiveHref }: CRMNavigationProps) => {
                         {
                             type: "link" as const,
                             text: "Security Agent",
-                            href: "/crm/security",
+                            href: "/crm",
                         }
                     ]
                 }

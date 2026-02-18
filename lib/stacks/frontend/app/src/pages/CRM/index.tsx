@@ -32,6 +32,9 @@ const CRM = () => {
         if (pathSegments.length > 1) {
             const page = pathSegments[1];
             switch (page) {
+                case 'pipeline':
+                    breadcrumbs.push({ text: "Pipeline", href: "/crm/pipeline" });
+                    break;
                 case 'accounts':
                     breadcrumbs.push({ text: "Accounts", href: "/crm/accounts" });
                     break;
@@ -82,7 +85,8 @@ const CRM = () => {
                         <SpaceBetween size="l">
                             <ErrorBoundary>
                                 <Routes>
-                                    <Route index element={<PipelinePage />} />
+                                    <Route index element={<SecurityPage />} />
+                                    <Route path="pipeline" element={<PipelinePage />} />
                                     <Route path="accounts" element={<AccountsPage />} />
                                     <Route path="my-opportunities" element={<MyOpportunitiesPage />} />
                                     <Route path="team" element={<TeamPerformancePage />} />

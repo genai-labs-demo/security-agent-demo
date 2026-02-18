@@ -184,6 +184,8 @@ def initialize_schema(conn):
         id SERIAL PRIMARY KEY,
         user_id INTEGER REFERENCES security_users(id),
         content TEXT NOT NULL,
+        author_name VARCHAR(255),
+        author_role VARCHAR(100),
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
     );
     """

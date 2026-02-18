@@ -19,7 +19,6 @@ import {
     Link,
     Button,
     Popover,
-    Icon,
 } from "@cloudscape-design/components";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -36,6 +35,13 @@ const VULNERABILITY_DEMOS = [
         title: "🔓 SQL Injection",
         description:
             "Discover how unsanitized database queries can allow attackers to bypass authentication and extract sensitive data.",
+        href: "/crm/security/profile",
+    },
+    {
+        id: "idor",
+        title: "🔑 Insecure Direct Object Reference (IDOR)",
+        description:
+            "See how sequential user IDs without authorization checks allow complete enumeration of all user data.",
         href: "/crm/security/profile",
     },
     {
@@ -58,6 +64,13 @@ const VULNERABILITY_DEMOS = [
         description:
             "Explore how unsanitized input to system commands can allow arbitrary code execution on the server.",
         href: "/crm/security/tools",
+    },
+    {
+        id: "mass-assignment",
+        title: "📝 Mass Assignment",
+        description:
+            "See how accepting unvalidated fields in API requests allows attackers to spoof comment authorship and escalate privileges.",
+        href: "/crm/security/comments",
     },
 ];
 
@@ -126,14 +139,12 @@ const SecurityPage = () => {
                                         dismissButton={false}
                                         content={<StatusIndicator type="success">Copied</StatusIndicator>}
                                     >
-                                        <Box
-                                            display="inline"
-                                            color="text-link-default"
-                                            fontSize="body-s"
-                                            onClick={() => navigator.clipboard.writeText("aws_user")}
-                                        >
-                                            <span style={{ cursor: "pointer" }}><Icon name="copy" /></span>
-                                        </Box>
+                                        <Button
+                                            variant="inline-icon"
+                                            iconName="copy"
+                                            ariaLabel="Copy username"
+                                            onClick={() => { navigator.clipboard.writeText("aws_user"); }}
+                                        />
                                     </Popover>
                                 </Box>
                             </Box>
@@ -148,14 +159,12 @@ const SecurityPage = () => {
                                         dismissButton={false}
                                         content={<StatusIndicator type="success">Copied</StatusIndicator>}
                                     >
-                                        <Box
-                                            display="inline"
-                                            color="text-link-default"
-                                            fontSize="body-s"
-                                            onClick={() => navigator.clipboard.writeText("AWS123xyz!")}
-                                        >
-                                            <span style={{ cursor: "pointer" }}><Icon name="copy" /></span>
-                                        </Box>
+                                        <Button
+                                            variant="inline-icon"
+                                            iconName="copy"
+                                            ariaLabel="Copy password"
+                                            onClick={() => { navigator.clipboard.writeText("AWS123xyz!"); }}
+                                        />
                                     </Popover>
                                 </Box>
                             </Box>

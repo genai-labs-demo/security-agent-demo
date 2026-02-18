@@ -142,7 +142,8 @@ def _parse_path(path: str) -> Tuple[str, Optional[str]]:
     
     # Validate resource type
     valid_resources = ['accounts', 'opportunities', 'team-members', 'industries',
-                       'security-profile', 'security-comments', 'security-search', 'security-tools']
+                       'security-profile', 'security-comments', 'security-search', 'security-tools',
+                       'security-health', 'security-xss-page']
     if resource_type not in valid_resources:
         raise ValueError(f"Invalid resource type: {resource_type}. "
                         f"Must be one of: {', '.join(valid_resources)}")
@@ -159,8 +160,8 @@ def _parse_path(path: str) -> Tuple[str, Optional[str]]:
             # For search operations, we don't set resource_id
             # The search logic will be handled by query parameters
             resource_id = None
-        elif resource_type == 'security-tools' and second_part == 'ping':
-            # For security-tools/ping, treat as a special operation
+        elif resource_type == 'security-tools' and second_part in ('ping', 'nslookup'):
+            # For security-tools/ping and security-tools/nslookup, treat as special operations
             resource_id = None
         else:
             resource_id = second_part
@@ -256,6 +257,8 @@ def route_request(route_info: RouteInfo) -> str:
         'security-comments': 'security-comments',
         'security-search': 'security-search',
         'security-tools': 'security-tools',
+        'security-health': 'security-health',
+        'security-xss-page': 'security-xss-page',
     }
     
     handler = handler_map.get(resource_type)
@@ -298,6 +301,14 @@ def validate_route(route_info: RouteInfo) -> None:
     # Security tools only supports POST (for ping)
     if resource_type == 'security-tools' and method not in ['POST', 'OPTIONS']:
         raise ValueError(f"Security tools resource only supports POST operations, got {method}")
+    
+    # Security health is read-only
+    if resource_type == 'security-health' and method not in ['GET', 'OPTIONS']:
+        raise ValueError(f"Security health resource only supports GET operations, got {method}")
+    
+    # Security XSS page is read-only (returns HTML)
+    if resource_type == 'security-xss-page' and method not in ['GET', 'OPTIONS']:
+        raise ValueError(f"Security XSS page resource only supports GET operations, got {method}")
     
     # Security profile supports GET and POST (POST for SQL injection demo payloads)
     if resource_type == 'security-profile' and method not in ['GET', 'POST', 'OPTIONS']:

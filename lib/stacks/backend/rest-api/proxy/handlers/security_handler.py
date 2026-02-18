@@ -2,6 +2,15 @@
 Security demo handler with INTENTIONAL vulnerabilities for educational purposes.
 WARNING: This module contains deliberately vulnerable code for AWS Security Agent testing.
 DO NOT use these patterns in production code.
+
+Vulnerability inventory (matches pen-test target set):
+  1. SQL Injection          — GET /security-profile/{id}  (string concatenation in SQL)
+  2. IDOR                   — GET /security-profile/{id}  (sequential IDs, no auth check)
+  3. Stored XSS             — POST /security-comments     (unsanitized content stored & returned)
+  4. DOM-based / Reflected XSS — GET /security-xss-page?name=...  (reflected in HTML)
+  5. Command Injection #1   — POST /security-tools/ping   (shell=True with user input)
+  6. Command Injection #2   — POST /security-tools/ping   (pipe / semicolon chaining)
+  7. Mass Assignment        — POST /security-comments     (author_name & role accepted from body)
 """
 
 import json
@@ -14,7 +23,7 @@ logger.setLevel(logging.INFO)
 
 
 # ============================================================
-# SQL Injection Detection (educational)
+# Detection helpers (educational feedback only)
 # ============================================================
 
 SQL_INJECTION_PATTERNS = ["'", "--", ";", "union", "select", "or ", "and ", "1=1", "*"]
@@ -68,30 +77,42 @@ def _get_educational_content(vuln_type):
             "how_agent_detects": "AWS Security Agent detects this by testing command injection payloads and analyzing command execution patterns.",
             "sample_payloads": ["google.com; ls -la", "google.com | whoami", "google.com && cat /etc/passwd", "google.com; uname -a"],
         },
+        "idor": {
+            "vulnerability": "Insecure Direct Object Reference (IDOR)",
+            "what_happened": "User profiles are accessible by sequential numeric IDs with no authentication or authorization check, allowing enumeration of all user data.",
+            "how_agent_detects": "AWS Security Agent detects this by iterating through sequential IDs and verifying that data from other users is returned without authorization.",
+            "sample_payloads": ["/security-profile/1", "/security-profile/2", "/security-profile/3"],
+        },
+        "mass_assignment": {
+            "vulnerability": "Mass Assignment",
+            "what_happened": "The API accepted and persisted fields (author_name, role) that should not be user-controllable, allowing comment authorship spoofing and privilege escalation.",
+            "how_agent_detects": "AWS Security Agent detects this by submitting extra fields in POST requests and checking if they are persisted.",
+            "sample_payloads": ['{"user_id":1,"content":"hi","author_name":"admin","role":"admin"}'],
+        },
     }
     return content_map.get(vuln_type, {})
 
 
 # ============================================================
-# SQL Injection - Profile endpoint
+# 1. SQL Injection + 2. IDOR — Profile endpoint
 # ============================================================
 
 def get_security_profile(connection, user_id):
     """
     GET /security-profile/{userId}
-    VULNERABILITY: SQL Injection via string concatenation.
+    VULNERABILITY 1: SQL Injection via string concatenation.
+    VULNERABILITY 2: IDOR — any sequential ID returns data, no auth check.
     """
     cursor = connection.cursor()
     try:
         # VULNERABILITY: SQL Injection - string concatenation instead of parameterized query
-        query = f"SELECT id, username, email, role, bio, created_at FROM security_users WHERE id = {user_id}"
+        query = f"SELECT id, username, email, role, bio, created_at FROM security_users WHERE id = '{user_id}'"
         logger.info(f"[VULNERABLE] Executing SQL query: {query}")
 
         cursor.execute(query)
         columns = [desc[0] for desc in cursor.description]
         rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
 
-        # Convert datetime objects to strings
         for row in rows:
             for key, val in row.items():
                 if isinstance(val, datetime):
@@ -102,17 +123,17 @@ def get_security_profile(connection, user_id):
         if is_injection:
             return {
                 "success": True,
-                "message": "🚨 Oh no! SQL Injection Detected!",
+                "message": "SQL Injection Detected",
                 "educational": _get_educational_content("sql_injection"),
                 "data": rows if len(rows) != 1 else rows[0],
             }
         elif len(rows) == 0:
             return {"success": False, "error": "User not found"}
         else:
+            # VULNERABILITY: IDOR — returns full user record for any ID without auth
             return {"success": True, "data": rows[0]}
 
     except Exception as e:
-        # VULNERABILITY: Expose database errors to the client
         logger.error(f"[VULNERABLE] Database error: {str(e)}")
         connection.rollback()
         return {
@@ -125,7 +146,7 @@ def get_security_profile(connection, user_id):
 
 
 def list_security_profiles(connection):
-    """GET /security-profile - list all demo users"""
+    """GET /security-profile — list all demo users (IDOR: full enumeration)"""
     cursor = connection.cursor()
     try:
         cursor.execute("SELECT id, username, email, role, bio, created_at FROM security_users ORDER BY id")
@@ -144,13 +165,14 @@ def list_security_profiles(connection):
 
 
 # ============================================================
-# XSS - Comments endpoints
+# 3. Stored XSS + 7. Mass Assignment — Comments endpoints
 # ============================================================
 
 def create_security_comment(connection, body):
     """
     POST /security-comments
-    VULNERABILITY: Stored XSS - stores unsanitized user input.
+    VULNERABILITY 3: Stored XSS — stores unsanitized user input.
+    VULNERABILITY 7: Mass Assignment — accepts author_name and role from body.
     """
     user_id = body.get("user_id")
     content = body.get("content")
@@ -158,14 +180,30 @@ def create_security_comment(connection, body):
     if not user_id or not content:
         return {"success": False, "error": "user_id and content are required"}
 
+    # VULNERABILITY: Mass Assignment — accept author_name and role from request body
+    author_name = body.get("author_name")
+    author_role = body.get("role")
+
     cursor = connection.cursor()
     try:
-        # VULNERABILITY: Stored XSS - no sanitization of content
         logger.info(f"[VULNERABLE] Storing unsanitized comment: {content}")
-        cursor.execute(
-            "INSERT INTO security_comments (user_id, content, created_at) VALUES (%s, %s, NOW()) RETURNING id, user_id, content, created_at",
-            (user_id, content),
-        )
+
+        if author_name or author_role:
+            # Mass Assignment: if attacker supplies author_name or role, persist them
+            logger.info(f"[VULNERABLE] Mass assignment — author_name={author_name}, role={author_role}")
+            cursor.execute(
+                """INSERT INTO security_comments (user_id, content, author_name, author_role, created_at)
+                   VALUES (%s, %s, %s, %s, NOW())
+                   RETURNING id, user_id, content, author_name, author_role, created_at""",
+                (user_id, content, author_name, author_role),
+            )
+        else:
+            cursor.execute(
+                """INSERT INTO security_comments (user_id, content, created_at)
+                   VALUES (%s, %s, NOW())
+                   RETURNING id, user_id, content, author_name, author_role, created_at""",
+                (user_id, content),
+            )
         connection.commit()
         columns = [desc[0] for desc in cursor.description]
         row = dict(zip(columns, cursor.fetchone()))
@@ -174,14 +212,18 @@ def create_security_comment(connection, body):
                 row[key] = val.isoformat()
 
         is_xss = _detect_xss(content)
+        is_mass = bool(author_name or author_role)
+
+        result = {"success": True, "data": row}
         if is_xss:
-            return {
-                "success": True,
-                "message": "🚨 Oh no! Stored XSS Detected!",
-                "educational": _get_educational_content("xss_stored"),
-                "data": row,
-            }
-        return {"success": True, "message": "Comment created successfully", "data": row}
+            result["message"] = "Stored XSS Detected"
+            result["educational"] = _get_educational_content("xss_stored")
+        if is_mass:
+            result["message"] = result.get("message", "") + " | Mass Assignment Detected"
+            result["educational_mass_assignment"] = _get_educational_content("mass_assignment")
+        if not is_xss and not is_mass:
+            result["message"] = "Comment created successfully"
+        return result
 
     except Exception as e:
         connection.rollback()
@@ -194,13 +236,13 @@ def create_security_comment(connection, body):
 def list_security_comments(connection):
     """
     GET /security-comments
-    VULNERABILITY: Stored XSS - returns unsanitized content.
+    VULNERABILITY: Stored XSS — returns unsanitized content.
     """
     cursor = connection.cursor()
     try:
         logger.info("[VULNERABLE] Retrieving comments without sanitization")
         cursor.execute("""
-            SELECT c.id, c.user_id, c.content, c.created_at, u.username
+            SELECT c.id, c.user_id, c.content, c.author_name, c.author_role, c.created_at, u.username
             FROM security_comments c
             LEFT JOIN security_users u ON c.user_id = u.id
             ORDER BY c.created_at DESC
@@ -216,7 +258,7 @@ def list_security_comments(connection):
         if has_xss:
             return {
                 "success": True,
-                "message": "🚨 Oh no! Stored XSS Detected in Comments!",
+                "message": "Stored XSS Detected in Comments",
                 "educational": _get_educational_content("xss_stored"),
                 "data": rows,
             }
@@ -230,13 +272,13 @@ def list_security_comments(connection):
 
 
 # ============================================================
-# Reflected XSS - Search endpoint
+# Reflected XSS — Search endpoint (JSON)
 # ============================================================
 
 def search_security_comments(connection, query):
     """
     GET /security-search?q=...
-    VULNERABILITY: Reflected XSS - reflects search query without sanitization.
+    VULNERABILITY: Reflected XSS — reflects search query without sanitization.
     """
     cursor = connection.cursor()
     try:
@@ -250,17 +292,17 @@ def search_security_comments(connection, query):
         """, (f"%{query}%",))
         columns = [desc[0] for desc in cursor.description]
         rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
-        for row in rows:
-            for key, val in row.items():
+        for key_row in rows:
+            for key, val in key_row.items():
                 if isinstance(val, datetime):
-                    row[key] = val.isoformat()
+                    key_row[key] = val.isoformat()
 
         is_xss = _detect_xss(query)
         if is_xss:
             return {
                 "success": True,
                 "query": query,
-                "message": f"🚨 Oh no! Reflected XSS Detected! You searched for: {query}",
+                "message": f"Reflected XSS Detected! You searched for: {query}",
                 "educational": _get_educational_content("xss_reflected"),
                 "data": rows,
             }
@@ -279,31 +321,81 @@ def search_security_comments(connection, query):
 
 
 # ============================================================
-# Command Injection - Ping endpoint
+# 4. DOM-based / Reflected XSS — HTML page endpoint
+# ============================================================
+
+def render_xss_page(query_params):
+    """
+    GET /security-xss-page?name=...
+    VULNERABILITY 4: Reflected / DOM-based XSS — user input rendered directly in HTML.
+    The 'name' query parameter is injected into the HTML without any encoding.
+    A pen-test scanner will detect this because the response is Content-Type: text/html
+    and the payload is reflected verbatim.
+    """
+    name = query_params.get("name", "Guest")
+    search = query_params.get("q", "")
+
+    logger.info(f"[VULNERABLE] Rendering HTML with unsanitized name={name}, q={search}")
+
+    # VULNERABILITY: user input injected directly into HTML without encoding
+    html = f"""<!DOCTYPE html>
+<html>
+<head><title>Security Demo - User Profile</title></head>
+<body>
+<h1>Welcome, {name}</h1>
+<p>Your profile page is ready.</p>
+<div id="search-results">
+  <h2>Search Results for: {search}</h2>
+  <p>No results found for your query.</p>
+</div>
+<script>
+  // VULNERABILITY: DOM-based XSS — reads from URL fragment and injects into DOM
+  var hash = window.location.hash.substring(1);
+  if (hash) {{
+    document.getElementById('search-results').innerHTML += '<p>Fragment: ' + hash + '</p>';
+  }}
+</script>
+</body>
+</html>"""
+
+    return {"_html": True, "content": html}
+
+
+# ============================================================
+# 5 & 6. Command Injection — Ping endpoint (two vectors)
 # ============================================================
 
 def execute_ping(body):
     """
     POST /security-tools/ping
-    VULNERABILITY: Command Injection - passes user input directly to shell.
+    VULNERABILITY 5: Command Injection — passes user input directly to shell.
+    VULNERABILITY 6: Second vector — also supports 'command' field for direct execution.
     """
     host = body.get("host", "")
-    if not host:
+    # VULNERABILITY 6: Second command injection vector — direct command field
+    custom_command = body.get("command", "")
+
+    if not host and not custom_command:
         return {"success": False, "error": "Host parameter is required"}
 
     try:
-        # VULNERABILITY: Command Injection - unsanitized input to shell
-        command = f"ping -c 2 -W 2 {host}"
-        logger.info(f"[VULNERABLE] Executing command: {command}")
+        if custom_command:
+            # VULNERABILITY: Direct command execution from user input
+            command = custom_command
+            logger.info(f"[VULNERABLE] Executing custom command: {command}")
+        else:
+            # VULNERABILITY: Command Injection — unsanitized input to shell
+            command = f"ping -c 2 -W 2 {host}"
+            logger.info(f"[VULNERABLE] Executing command: {command}")
 
         result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=10)
         output = result.stdout or result.stderr
 
-        is_injection = _detect_command_injection(host, output)
+        is_injection = _detect_command_injection(host or custom_command, output)
         if is_injection:
             return {
                 "success": True,
-                "message": "🚨 Oh no! Command Injection Detected!",
+                "message": "Command Injection Detected",
                 "educational": _get_educational_content("command_injection"),
                 "output": output,
             }
@@ -312,6 +404,43 @@ def execute_ping(body):
     except subprocess.TimeoutExpired:
         return {"success": False, "error": "Command timed out", "output": ""}
     except Exception as e:
-        # VULNERABILITY: Expose command execution errors
+        logger.error(f"[VULNERABLE] Command execution error: {str(e)}")
+        return {"success": False, "error": "Command execution failed", "message": str(e)}
+
+
+# ============================================================
+# Command Injection — Nslookup endpoint (second distinct endpoint)
+# ============================================================
+
+def execute_nslookup(body):
+    """
+    POST /security-tools/nslookup
+    VULNERABILITY: Command Injection — second distinct endpoint with shell=True.
+    """
+    host = body.get("host", "")
+    if not host:
+        return {"success": False, "error": "Host parameter is required"}
+
+    try:
+        # VULNERABILITY: Command Injection — unsanitized input to shell
+        command = f"nslookup {host}"
+        logger.info(f"[VULNERABLE] Executing nslookup command: {command}")
+
+        result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=10)
+        output = result.stdout or result.stderr
+
+        is_injection = _detect_command_injection(host, output)
+        if is_injection:
+            return {
+                "success": True,
+                "message": "Command Injection Detected",
+                "educational": _get_educational_content("command_injection"),
+                "output": output,
+            }
+        return {"success": True, "output": output}
+
+    except subprocess.TimeoutExpired:
+        return {"success": False, "error": "Command timed out", "output": ""}
+    except Exception as e:
         logger.error(f"[VULNERABLE] Command execution error: {str(e)}")
         return {"success": False, "error": "Command execution failed", "message": str(e)}
