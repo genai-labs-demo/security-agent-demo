@@ -12,6 +12,18 @@ HEALTH_STATUS_VALUES = ['Green', 'Yellow', 'Red']
 OPPORTUNITY_STAGE_VALUES = ['Launched', 'Qualified', 'Proof of Concept', 'Negotiation', 'Closed Won', 'Closed Lost']
 FORECAST_CATEGORY_VALUES = ['Pipeline', 'Best Case', 'Commit', 'Closed']
 
+# Define expected probability ranges for each opportunity stage
+# Based on standard CRM business logic for sales pipeline management
+STAGE_PROBABILITY_RANGES = {
+    'Launched': (10, 20),
+    'Qualified': (20, 40),
+    'Proof of Concept': (40, 60),
+    'Negotiation': (60, 90),
+    'Closed Won': (100, 100),
+    'Closed Lost': (0, 0)
+}
+
+
 # Email validation regex pattern
 EMAIL_PATTERN = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
 
@@ -122,6 +134,37 @@ def validate_account(data: Dict[str, Any], is_update: bool = False) -> None:
             raise ValidationError("Field 'logoUrl' must be a string", field='logoUrl')
 
 
+
+
+def validate_stage_probability_alignment(stage: str, probability: int) -> None:
+    """
+    Validate that probability value aligns with opportunity stage.
+    Enforces business logic rules for realistic probability-to-stage combinations.
+    
+    Args:
+        stage: Opportunity stage value
+        probability: Probability percentage (0-100)
+    
+    Raises:
+        ValidationError: If probability is outside expected range for the stage
+    """
+    if stage not in STAGE_PROBABILITY_RANGES:
+        # Stage validation should have already caught this, but be defensive
+        return
+    
+    min_prob, max_prob = STAGE_PROBABILITY_RANGES[stage]
+    
+    if not (min_prob <= probability <= max_prob):
+        if min_prob == max_prob:
+            raise ValidationError(
+                f"Field 'probability' must be {min_prob}% for stage '{stage}' (received {probability}%)",
+                field='probability'
+            )
+        else:
+            raise ValidationError(
+                f"Field 'probability' must be between {min_prob}% and {max_prob}% for stage '{stage}' (received {probability}%)",
+                field='probability'
+            )
 def validate_opportunity(data: Dict[str, Any], is_update: bool = False) -> None:
     """
     Validate opportunity data against schema requirements.
@@ -196,6 +239,11 @@ def validate_opportunity(data: Dict[str, Any], is_update: bool = False) -> None:
             raise ValidationError("Field 'probability' must be an integer", field='probability')
         if not (0 <= data['probability'] <= 100):
             raise ValidationError("Field 'probability' must be between 0 and 100", field='probability')
+    
+    # Cross-field validation: probability must align with stage
+    # Only validate if both fields are present (supports partial updates)
+    if 'stage' in data and 'probability' in data:
+        validate_stage_probability_alignment(data['stage'], data['probability'])
     
     # Validate optional fields if present
     if 'accountName' in data and data['accountName'] is not None:
