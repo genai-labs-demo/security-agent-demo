@@ -347,6 +347,15 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     try:
         logger.info(f"Creating new opportunity: {data.get('name')}")
         
+        # Import validation to check business rules
+        from validation import validate_opportunity, ValidationError
+        
+        # Validate the opportunity data including business rules
+        try:
+            validate_opportunity(data, is_update=False, current_data=None)
+        except ValidationError as e:
+            raise Exception(f"Validation failed: {e.message}")
+        
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
         
@@ -447,6 +456,21 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
     """
     try:
         logger.info(f"Updating opportunity: {opportunity_id}")
+        
+        # Get current opportunity state for validation
+        current_opportunity = get_opportunity(connection, opportunity_id)
+        if not current_opportunity:
+            logger.warning(f"Opportunity not found: {opportunity_id}")
+            return None
+        
+        # Import validation to check business rules
+        from validation import validate_opportunity, ValidationError
+        
+        # Validate the update including stage transitions
+        try:
+            validate_opportunity(data, is_update=True, current_data=current_opportunity)
+        except ValidationError as e:
+            raise Exception(f"Validation failed: {e.message}")
         
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
