@@ -105,6 +105,7 @@ def list_accounts(connection) -> List[Dict[str, Any]]:
                 opportunity_count, total_opportunity_value,
                 last_activity_date, created_date, logo_url
             FROM accounts
+            WHERE deleted_at IS NULL
             ORDER BY name ASC
         """
         
@@ -152,7 +153,7 @@ def get_account(connection, account_id: str) -> Optional[Dict[str, Any]]:
                 opportunity_count, total_opportunity_value,
                 last_activity_date, created_date, logo_url
             FROM accounts
-            WHERE id = %s
+            WHERE id = %s AND deleted_at IS NULL
         """
         
         cursor.execute(query, (account_id,))
@@ -348,8 +349,8 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
 def delete_account(connection, account_id: str) -> bool:
     """
     Delete an account record from the database.
-    Checks for foreign key constraints (opportunities) before deletion.
-    
+    Soft-delete an account by setting deleted_at timestamp.
+    Verifies no active opportunities exist before soft-deletion to maintain data integrity.
     Args:
         connection: Database connection object
         account_id: Account ID to delete
@@ -360,24 +361,24 @@ def delete_account(connection, account_id: str) -> bool:
     Raises:
         Exception: If account has associated opportunities or database delete fails
     """
-    try:
+        Exception: If account has active opportunities or operation fails
         logger.info(f"Deleting account: {account_id}")
         
         cursor = connection.cursor()
         
         # Check if account exists
         cursor.execute("SELECT id FROM accounts WHERE id = %s", (account_id,))
-        if not cursor.fetchone():
-            cursor.close()
+        # Check if account exists and is not already soft-deleted
+        cursor.execute("SELECT id FROM accounts WHERE id = %s AND deleted_at IS NULL", (account_id,))
             logger.info(f"Account not found for deletion: {account_id}")
             return False
         
         # Check for associated opportunities (foreign key constraint)
         cursor.execute(
             "SELECT COUNT(*) as count FROM opportunities WHERE account_id = %s",
-            (account_id,)
+        # Check for active (non-deleted) opportunities
         )
-        result = cursor.fetchone()
+            "SELECT COUNT(*) as count FROM opportunities WHERE account_id = %s AND deleted_at IS NULL",
         opportunity_count = result[0] if result else 0
         
         if opportunity_count > 0:
@@ -387,12 +388,12 @@ def delete_account(connection, account_id: str) -> bool:
                 f"Cannot delete account: account has {opportunity_count} associated opportunities. "
                 f"Delete the opportunities first."
             )
-        
-        # Delete the account
+                f"Cannot delete account: account has {opportunity_count} active opportunities. "
+                f"Archive or delete the opportunities first."
         cursor.execute("DELETE FROM accounts WHERE id = %s", (account_id,))
         connection.commit()
-        cursor.close()
-        
+        # Perform soft delete by setting deleted_at timestamp
+        cursor.execute("UPDATE accounts SET deleted_at = NOW() WHERE id = %s", (account_id,))
         logger.info(f"Deleted account: {account_id}")
         return True
         
@@ -401,7 +402,7 @@ def delete_account(connection, account_id: str) -> bool:
         logger.error(f"Integrity error deleting account {account_id}: {str(e)}")
         raise Exception(f"Cannot delete account: has associated records")
     except psycopg2.Error as e:
-        connection.rollback()
+        raise Exception(f"Cannot delete account: integrity constraint violation")
         logger.error(f"Database error deleting account {account_id}: {str(e)}")
         raise Exception(f"Failed to delete account: {str(e)}")
     except Exception as e:

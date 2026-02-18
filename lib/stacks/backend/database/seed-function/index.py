@@ -143,7 +143,8 @@ def initialize_schema(conn):
         total_opportunity_value NUMERIC(15, 2),
         last_activity_date TIMESTAMP WITH TIME ZONE,
         created_date TIMESTAMP WITH TIME ZONE,
-        logo_url TEXT
+        logo_url TEXT,
+        deleted_at TIMESTAMP WITH TIME ZONE DEFAULT NULL
     );
 
     CREATE TABLE IF NOT EXISTS opportunities (
@@ -162,13 +163,16 @@ def initialize_schema(conn):
         owner_name VARCHAR(255),
         probability INTEGER,
         created_date TIMESTAMP WITH TIME ZONE,
-        last_modified_date TIMESTAMP WITH TIME ZONE
+        last_modified_date TIMESTAMP WITH TIME ZONE,
+        deleted_at TIMESTAMP WITH TIME ZONE DEFAULT NULL
     );
 
     CREATE INDEX IF NOT EXISTS idx_opportunities_owner_id ON opportunities(owner_id);
     CREATE INDEX IF NOT EXISTS idx_opportunities_stage ON opportunities(stage);
     CREATE INDEX IF NOT EXISTS idx_accounts_owner_id ON accounts(owner_id);
     CREATE INDEX IF NOT EXISTS idx_accounts_industry_id ON accounts(industry_id);
+    CREATE INDEX IF NOT EXISTS idx_accounts_deleted_at ON accounts(deleted_at);
+    CREATE INDEX IF NOT EXISTS idx_opportunities_deleted_at ON opportunities(deleted_at);
 
     -- Security demo tables (intentionally vulnerable for AWS Security Agent testing)
     CREATE TABLE IF NOT EXISTS security_users (
