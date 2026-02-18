@@ -64,8 +64,6 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
         'employeeCount': 'employee_count',
         'ownerId': 'owner_id',
         'ownerName': 'owner_name',
-        'healthStatus': 'health_status',
-        'healthScore': 'health_score',
         'opportunityCount': 'opportunity_count',
         'totalOpportunityValue': 'total_opportunity_value',
         'lastActivityDate': 'last_activity_date',
@@ -78,6 +76,92 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
             db_data[db_field] = api_data[api_field]
     
     return db_data
+
+
+def _derive_health_from_opportunities(connection, account_id: str) -> Dict[str, Any]:
+    """
+    Derive account health based on opportunity data analysis.
+    
+    This prevents manual manipulation by calculating health from actual
+    business metrics: opportunity value, activity timing, and deal count.
+    
+    Scoring algorithm:
+    - 40% weight: Total deal value (normalized to $1M scale)
+    - 30% weight: Activity freshness (days-based decay)
+    - 30% weight: Deal pipeline size
+    
+    Status thresholds:
+    - Green: score >= 80
+    - Yellow: score >= 50 and < 80
+    - Red: score < 50
+    
+    Args:
+        connection: Active database connection
+        account_id: Target account ID
+    
+    Returns:
+        Dictionary containing health_score (int) and health_status (str)
+    """
+    cursor = None
+    try:
+        cursor = connection.cursor()
+        
+        # Aggregate opportunity metrics for the account
+        query = """
+            SELECT 
+                COUNT(*) as deal_count,
+                COALESCE(SUM(amount), 0) as total_deal_value,
+                MAX(recent_activity_date) as most_recent_activity
+            FROM opportunities
+            WHERE account_id = %s
+        """
+        cursor.execute(query, (account_id,))
+        
+        metrics = cursor.fetchone()
+        cursor.close()
+        cursor = None
+        
+        # Handle no opportunities case
+        if not metrics or metrics[0] == 0:
+            return {
+                'health_score': 50,
+                'health_status': 'Yellow'
+            }
+        
+        deal_count = int(metrics[0])
+        total_deal_value = float(metrics[1])
+        most_recent_activity = metrics[2]
+        
+        # Score calculation part 1: Deal value (40% contribution)
+        # Scale from 0 to 100 where $1M = 100 points
+        value_score = min(100.0, (total_deal_value / 10000.0))
+        
+        # Score calculation part 2: Activity freshness (30% contribution)
+        # Recent activity = high score, stale activity = low score
+        if most_recent_activity:
+            current_time = datetime.utcnow().replace(tzinfo=most_recent_activity.tzinfo)
+            days_since_activity = (current_time - most_recent_activity).days
+            # Linear decay: 0 days = 100, 60 days = 0
+            freshness_score = max(0.0, 100.0 - (days_since_activity * (100.0 / 60.0)))
+        else:
+            freshness_score = 0.0
+        
+        # Score calculation part 3: Deal count (30% contribution)
+        # More deals = better health, capped at 6 deals = 100 points
+        count_score = min(100.0, (deal_count / 6.0) * 100.0)
+        
+        # Weighted combination
+        overall_score = int((value_score * 0.4) + (freshness_score * 0.3) + (count_score * 0.3))
+        overall_status = 'Green' if overall_score >= 80 else ('Yellow' if overall_score >= 50 else 'Red')
+        
+        return {'health_score': overall_score, 'health_status': overall_status}
+        
+    except Exception as error:
+        logger.error(f"Error deriving health for account {account_id}: {str(error)}")
+        if cursor:
+            cursor.close()
+        # Fallback to neutral values on error
+        return {'health_score': 50, 'health_status': 'Yellow'}
 
 
 def list_accounts(connection) -> List[Dict[str, Any]]:
@@ -213,6 +297,10 @@ def create_account(connection, data: Dict[str, Any]) -> Dict[str, Any]:
             db_data['last_activity_date'] = datetime.utcnow()
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
+        # Initialize health for new account (no opportunities yet)
+        initial_health = {'health_score': 50, 'health_status': 'Yellow'}
+        db_data.update(initial_health)
+        
         
         # Build INSERT query dynamically based on provided fields
         columns = list(db_data.keys())
@@ -283,6 +371,10 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
         
         # Remove id if present (shouldn't be updated)
         db_data.pop('id', None)
+        
+        # Recalculate health based on current opportunity metrics
+        derived_health = _derive_health_from_opportunities(connection, account_id)
+        db_data.update(derived_health)
         
         if not db_data:
             logger.warning("No fields to update")
