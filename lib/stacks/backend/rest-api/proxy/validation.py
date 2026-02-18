@@ -160,6 +160,11 @@ def validate_opportunity(data: Dict[str, Any], is_update: bool = False) -> None:
             raise ValidationError("Field 'amount' must be a number", field='amount')
         if data['amount'] < 0:
             raise ValidationError("Field 'amount' must be non-negative", field='amount')
+        # Add upper bound validation for business logic reasonability
+        # Maximum reasonable opportunity amount: $100 million
+        # This prevents pipeline inflation and unrealistic values (CWE-20: Improper Input Validation)
+        if data['amount'] > 100000000:
+            raise ValidationError("Field 'amount' exceeds maximum allowed value of $100,000,000", field='amount')
     
     # Validate closeDate (ISO 8601 date string)
     if 'closeDate' in data:
