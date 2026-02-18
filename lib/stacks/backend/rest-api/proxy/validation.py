@@ -5,6 +5,7 @@ Validates required fields, data types, and enum values for all entity types.
 
 import re
 from typing import Dict, Any, List, Optional
+from datetime import datetime, timedelta
 
 
 # Define allowed enum values based on database schema
@@ -161,13 +162,35 @@ def validate_opportunity(data: Dict[str, Any], is_update: bool = False) -> None:
         if data['amount'] < 0:
             raise ValidationError("Field 'amount' must be non-negative", field='amount')
     
-    # Validate closeDate (ISO 8601 date string)
+    # Validate closeDate (ISO 8601 date string with business logic constraints)
     if 'closeDate' in data:
         if not isinstance(data['closeDate'], str) or not data['closeDate'].strip():
             raise ValidationError("Field 'closeDate' must be a non-empty string in ISO 8601 format", field='closeDate')
+        
         # Basic ISO date format validation (YYYY-MM-DD)
         if not re.match(r'^\d{4}-\d{2}-\d{2}', data['closeDate']):
             raise ValidationError("Field 'closeDate' must be in ISO 8601 date format (YYYY-MM-DD)", field='closeDate')
+        
+        # Parse the date and validate business logic constraints
+        try:
+            # Extract date portion (handles both YYYY-MM-DD and YYYY-MM-DDTHH:MM:SS formats)
+            date_str = data['closeDate'].split('T')[0]
+            close_date = datetime.fromisoformat(date_str)
+            current_date = datetime.utcnow().date()
+            
+            # Prevent past dates (close date must be today or in the future)
+            if close_date.date() < current_date:
+                raise ValidationError("Field 'closeDate' must not be in the past", field='closeDate')
+            
+            # Prevent unrealistically far future dates (max 10 years from now)
+            max_future_date = current_date + timedelta(days=365 * 10)
+            if close_date.date() > max_future_date:
+                raise ValidationError("Field 'closeDate' must not be more than 10 years in the future", field='closeDate')
+                
+        except ValueError as e:
+            # Handle invalid date values (e.g., Feb 30, invalid month, etc.)
+            if "Field 'closeDate'" not in str(e):
+                raise ValidationError(f"Field 'closeDate' contains an invalid date value: {str(e)}", field='closeDate')
     
     # Validate stage enum
     if 'stage' in data:
