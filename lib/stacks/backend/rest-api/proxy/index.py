@@ -147,7 +147,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             return process_cors(event, response)
         
         # Conflict errors (409)
-        if "cannot delete" in error_str.lower() or "already exists" in error_str.lower():
+        if ("cannot delete" in error_str.lower() or 
+            "already exists" in error_str.lower() or
+            "was modified by another user" in error_str.lower() or
+            "concurrent" in error_str.lower()):
             response = handle_conflict_error(error_str)
             return process_cors(event, response)
         
@@ -228,7 +231,19 @@ def execute_operation(connection, route_info, operation: str) -> Any:
         elif operation == 'create':
             return opportunities_handler.create_opportunity(connection, body)
         elif operation == 'update':
-            result = opportunities_handler.update_opportunity(connection, resource_id, body)
+            # Extract current lastModifiedDate for optimistic locking
+            # Client should send this in the request body to enable race condition protection
+            current_last_modified = body.get('lastModifiedDate')
+            
+            # Log if optimistic locking is being used
+            if current_last_modified:
+                logger.info(f"Update with optimistic locking enabled for opportunity {resource_id}")
+            else:
+                logger.warning(f"Update without optimistic locking for opportunity {resource_id} - race conditions possible")
+            
+            result = opportunities_handler.update_opportunity(
+                connection, resource_id, body, current_last_modified
+            )
             if result is None:
                 raise ValueError(f"Opportunity with id {resource_id} not found")
             return result

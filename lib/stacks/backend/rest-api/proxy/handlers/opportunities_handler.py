@@ -430,29 +430,55 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         raise
 
 
-def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+class ConcurrentUpdateError(Exception):
+    """Exception raised when a concurrent update is detected (optimistic locking failure)"""
+    pass
+
+
+def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any], current_last_modified: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
-    Update an existing opportunity record in the database.
+    Update an existing opportunity record in the database with optimistic locking.
+    
+    Uses the last_modified_date as a version token to prevent lost updates from concurrent modifications.
+    If current_last_modified is provided, the update will only succeed if the database record's
+    last_modified_date matches the provided value, preventing race conditions.
     
     Args:
         connection: Database connection object
         opportunity_id: Opportunity ID to update
         data: Partial opportunity data in API format (camelCase)
+        current_last_modified: Current lastModifiedDate value for optimistic locking (ISO format string)
     
     Returns:
         Updated opportunity dictionary in API format, or None if not found
     
     Raises:
+        ConcurrentUpdateError: If concurrent modification detected (optimistic locking failure)
         Exception: If database update fails or validation fails
     """
     try:
         logger.info(f"Updating opportunity: {opportunity_id}")
+        
+        # If current_last_modified is provided, validate it for optimistic locking
+        if current_last_modified:
+            try:
+                # Parse ISO format datetime string
+                from dateutil import parser as dateutil_parser
+                expected_last_modified = dateutil_parser.isoparse(current_last_modified)
+            except (ValueError, TypeError) as e:
+                logger.error(f"Invalid lastModifiedDate format: {current_last_modified}")
+                raise Exception(f"Invalid lastModifiedDate format: must be ISO 8601 format")
+        else:
+            expected_last_modified = None
         
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
         
         # Remove id if present (shouldn't be updated)
         db_data.pop('id', None)
+        
+        # Remove last_modified_date from update data if present (we set it automatically)
+        db_data.pop('last_modified_date', None)
         
         # Update last_modified_date
         db_data['last_modified_date'] = datetime.utcnow()
@@ -481,12 +507,20 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         # Build UPDATE query dynamically based on provided fields
         set_clauses = [f"{col} = %s" for col in db_data.keys()]
         values = list(db_data.values())
-        values.append(opportunity_id)  # For WHERE clause
+        
+        # Build WHERE clause with optimistic locking if current_last_modified provided
+        if expected_last_modified:
+            where_clause = "WHERE id = %s AND last_modified_date = %s"
+            values.append(opportunity_id)
+            values.append(expected_last_modified)
+        else:
+            where_clause = "WHERE id = %s"
+            values.append(opportunity_id)
         
         query = f"""
             UPDATE opportunities
             SET {', '.join(set_clauses)}
-            WHERE id = %s
+            {where_clause}
             RETURNING 
                 id, name, account_id, account_name, amount, close_date,
                 stage, next_step, recent_activity, recent_activity_date,
@@ -498,10 +532,28 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         record = cursor.fetchone()
         
         if not record:
-            connection.rollback()
             cursor.close()
-            logger.info(f"Opportunity not found for update: {opportunity_id}")
-            return None
+            
+            # Check if opportunity exists at all
+            cursor = connection.cursor(cursor_factory=RealDictCursor)
+            cursor.execute("SELECT id, last_modified_date FROM opportunities WHERE id = %s", (opportunity_id,))
+            existing_record = cursor.fetchone()
+            cursor.close()
+            
+            if not existing_record:
+                # Opportunity doesn't exist
+                connection.rollback()
+                logger.info(f"Opportunity not found for update: {opportunity_id}")
+                return None
+            else:
+                # Opportunity exists but last_modified_date didn't match (concurrent update detected)
+                connection.rollback()
+                logger.warning(f"Concurrent update detected for opportunity {opportunity_id}. "
+                             f"Expected last_modified: {expected_last_modified}, "
+                             f"Actual: {existing_record.get('last_modified_date')}")
+                raise ConcurrentUpdateError(
+                    f"Opportunity was modified by another user. Please refresh and try again."
+                )
         
         connection.commit()
         cursor.close()
@@ -526,10 +578,15 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         connection.rollback()
         logger.error(f"Database error updating opportunity {opportunity_id}: {str(e)}")
         raise Exception(f"Failed to update opportunity: {str(e)}")
+    except ConcurrentUpdateError:
+        # Re-raise concurrent update errors without modification
+        raise
     except Exception as e:
         connection.rollback()
         # Re-raise if it's already our custom exception
         if "Invalid account ID" in str(e) or "Invalid owner ID" in str(e):
+            raise
+        if "Invalid lastModifiedDate format" in str(e):
             raise
         logger.error(f"Unexpected error updating opportunity {opportunity_id}: {str(e)}")
         raise
