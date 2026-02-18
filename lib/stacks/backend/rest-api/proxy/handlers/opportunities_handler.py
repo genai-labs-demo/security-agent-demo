@@ -169,9 +169,11 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
                     {match_count_sql}
                 ) as match_count
             FROM opportunities o
-            JOIN accounts a ON o.account_id = a.id
+            JOIN accounts a ON o.account_id = a.id AND a.deleted_at IS NULL
             LEFT JOIN team_members tm ON o.owner_id = tm.id
             WHERE 
+                o.deleted_at IS NULL
+                AND
                 {where_clause}
         """
         
@@ -251,11 +253,12 @@ def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dic
                 forecast_category, owner_id, owner_name, probability,
                 created_date, last_modified_date
             FROM opportunities
+            WHERE deleted_at IS NULL
         """
         
         params = []
         if account_id:
-            query += " WHERE account_id = %s"
+            query += " AND account_id = %s"
             params.append(account_id)
         
         query += " ORDER BY close_date DESC LIMIT 1000"
@@ -305,7 +308,7 @@ def get_opportunity(connection, opportunity_id: str) -> Optional[Dict[str, Any]]
                 created_date, last_modified_date
             FROM opportunities
             WHERE id = %s
-        """
+            WHERE id = %s AND deleted_at IS NULL
         
         cursor.execute(query, (opportunity_id,))
         record = cursor.fetchone()
@@ -537,7 +540,8 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
 
 def delete_opportunity(connection, opportunity_id: str) -> bool:
     """
-    Delete an opportunity record from the database.
+    Soft-delete an opportunity by setting deleted_at timestamp.
+    Preserves data for recovery and maintains audit trail.
     
     Args:
         connection: Database connection object
@@ -548,21 +552,23 @@ def delete_opportunity(connection, opportunity_id: str) -> bool:
     
     Raises:
         Exception: If database delete fails
-    """
+        Exception: If database operation fails
     try:
         logger.info(f"Deleting opportunity: {opportunity_id}")
         
         cursor = connection.cursor()
         
         # Check if opportunity exists
-        cursor.execute("SELECT id FROM opportunities WHERE id = %s", (opportunity_id,))
+        # Only allow deletion of opportunities that are not already soft-deleted
+        cursor.execute("SELECT id FROM opportunities WHERE id = %s AND deleted_at IS NULL", (opportunity_id,))
         if not cursor.fetchone():
             cursor.close()
             logger.info(f"Opportunity not found for deletion: {opportunity_id}")
             return False
         
-        # Delete the opportunity
-        cursor.execute("DELETE FROM opportunities WHERE id = %s", (opportunity_id,))
+        # Perform soft delete by setting the deleted_at timestamp
+        # This enables recovery and maintains audit trail for compliance
+        cursor.execute("UPDATE opportunities SET deleted_at = NOW() WHERE id = %s", (opportunity_id,))
         connection.commit()
         cursor.close()
         
