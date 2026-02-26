@@ -97,7 +97,6 @@ export class StaticWebsiteBuild extends Construct {
 
         NagSuppressions.addResourceSuppressions(this.project, [
             { id: "AwsSolutions-CB4", reason: "KMS encryption not required for demo environment" },
-            { id: "AwsSolutions-IAM5", reason: "Wildcard permissions required for S3 sync and CloudFront invalidation" },
         ], true);
 
         const triggerCode =

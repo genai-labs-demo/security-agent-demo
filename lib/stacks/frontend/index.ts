@@ -22,6 +22,7 @@ import { FunctionRuntimeAspect } from "../../common/aspects";
 import { CommonBucket } from "../../common/constructs/s3";
 import { CommonStack } from "../../common/constructs/stack";
 import { StaticWebsiteBuild } from "../../common/constructs/static-website";
+import { S3EncryptionKey } from "../../common/constructs/kms";
 
 const CUSTOM_DOMAIN = "secagentdemo.jossai.people.aws.dev";
 const HOSTED_ZONE_ID = "Z00429881ZY3EVX6D1409";
@@ -35,8 +36,16 @@ export class Frontend extends CommonStack {
     constructor(scope: Construct, id: string, props?: StackProps) {
         super(scope, id, props);
 
+        // Create KMS key for S3 bucket encryption
+        const s3EncryptionKey = new S3EncryptionKey(
+            this,
+            "s3EncryptionKey",
+            "KMS key for frontend S3 bucket encryption"
+        );
+
         const loggingBucket = new CommonBucket(this, "loggingBucket", {
             objectOwnership: ObjectOwnership.OBJECT_WRITER,
+            encryptionKey: s3EncryptionKey,
         });
 
         // Grant CloudFront log delivery permissions
@@ -56,6 +65,7 @@ export class Frontend extends CommonStack {
 
         const websiteBucket = new CommonBucket(this, "websiteBucket", {
             serverAccessLogsBucket: loggingBucket,
+            encryptionKey: s3EncryptionKey,
         });
 
         const cloudfrontWebAcl = new CloudfrontWebAcl(this, "cloudfrontWebAcl", {
@@ -77,6 +87,12 @@ export class Frontend extends CommonStack {
         Aspects.of(cloudfrontWebAcl).add(new FunctionRuntimeAspect());
 
         const s3Origin = S3BucketOrigin.withOriginAccessControl(websiteBucket);
+
+        // Grant KMS key access to CloudFront service principal for OAC
+        s3EncryptionKey.grantDecrypt(new ServicePrincipal("cloudfront.amazonaws.com"));
+
+        // Grant KMS key access to CodeBuild for deployment
+        s3EncryptionKey.grantEncryptDecrypt(new ServicePrincipal("codebuild.amazonaws.com"));
 
         // Custom domain: use the hosted zone directly by ID (no lookup needed)
         const hostedZone = HostedZone.fromHostedZoneAttributes(this, "hostedZone", {
