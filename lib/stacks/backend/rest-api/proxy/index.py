@@ -17,6 +17,7 @@ import boto3
 # Import handler modules
 from router import parse_api_gateway_event, validate_route, get_operation_type
 from db_connection import get_database_connection, return_database_connection
+from authorization import extract_user_context, check_opportunity_access, check_account_access, check_team_member_access
 from handlers import accounts_handler, opportunities_handler, team_members_handler, industries_handler
 from handlers import security_handler
 from s3_integration import enhance_with_images
@@ -71,6 +72,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Parse API Gateway event to extract route information
         route_info = parse_api_gateway_event(event)
         
+        # Extract user context from JWT claims for authorization checks
+        # Note: Security demo endpoints are unauthenticated, so user_context will be None for those
+        user_context = extract_user_context(event)
+        
         # Validate route
         validate_route(route_info)
         
@@ -85,7 +90,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             start_time = time.time()
             
             # Route to appropriate handler and execute operation
-            result = execute_operation(connection, route_info, operation)
+            result = execute_operation(connection, route_info, operation, user_context)
             
             # Calculate and publish search latency metrics
             elapsed_time = (time.time() - start_time) * 1000  # Convert to milliseconds
@@ -136,6 +141,13 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         return process_cors(event, response)
         
     except Exception as e:
+    except PermissionError as e:
+        # Authorization errors (403 Forbidden)
+        logger.warning(f"Authorization error in request {request_id}: {str(e)}")
+        response = {'statusCode': 403, 'headers': {'Content-Type': 'application/json'},
+                    'body': json.dumps({'error': 'Forbidden', 'message': str(e)})}
+        return process_cors(event, response)
+        
         # Check if it's a custom error message from handlers
         error_str = str(e)
         
@@ -162,7 +174,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         return process_cors(event, response)
 
 
-def execute_operation(connection, route_info, operation: str) -> Any:
+def execute_operation(connection, route_info, operation: str, user_context) -> Any:
     """
     Execute the appropriate CRUD operation based on route information.
     
@@ -170,6 +182,7 @@ def execute_operation(connection, route_info, operation: str) -> Any:
         connection: Database connection object
         route_info: Parsed route information
         operation: Operation type ('list', 'get', 'create', 'update', 'delete')
+        user_context: Authenticated user context from JWT claims (None for unauthenticated endpoints)
         
     Returns:
         Operation result (record, list of records, or boolean)
@@ -187,20 +200,52 @@ def execute_operation(connection, route_info, operation: str) -> Any:
     # Route to accounts handler
     if resource_type == 'accounts':
         if operation == 'list':
+            is_allowed, error_msg = check_account_access(user_context, operation)
+            if not is_allowed:
+                raise PermissionError(error_msg)
             return accounts_handler.list_accounts(connection)
         elif operation == 'get':
+            is_allowed, error_msg = check_account_access(user_context, operation)
+            if not is_allowed:
+                raise PermissionError(error_msg)
             result = accounts_handler.get_account(connection, resource_id)
             if result is None:
                 raise ValueError(f"Account with id {resource_id} not found")
             return result
         elif operation == 'create':
+            is_allowed, error_msg = check_account_access(user_context, operation)
+            if not is_allowed:
+                raise PermissionError(error_msg)
+            # Set owner_id to the authenticated user if not specified
+            if user_context and 'ownerId' not in body:
+                body['ownerId'] = user_context.user_id
             return accounts_handler.create_account(connection, body)
         elif operation == 'update':
+            # Fetch existing account to get owner_id for authorization check
+            existing = accounts_handler.get_account(connection, resource_id)
+            if existing is None:
+                raise ValueError(f"Account with id {resource_id} not found")
+            
+            owner_id = existing.get('ownerId')
+            is_allowed, error_msg = check_account_access(user_context, operation, owner_id)
+            if not is_allowed:
+                raise PermissionError(error_msg)
+            
             result = accounts_handler.update_account(connection, resource_id, body)
             if result is None:
                 raise ValueError(f"Account with id {resource_id} not found")
             return result
         elif operation == 'delete':
+            # Fetch existing account to get owner_id for authorization check
+            existing = accounts_handler.get_account(connection, resource_id)
+            if existing is None:
+                raise ValueError(f"Account with id {resource_id} not found")
+            
+            owner_id = existing.get('ownerId')
+            is_allowed, error_msg = check_account_access(user_context, operation, owner_id)
+            if not is_allowed:
+                raise PermissionError(error_msg)
+            
             success = accounts_handler.delete_account(connection, resource_id)
             if not success:
                 raise ValueError(f"Account with id {resource_id} not found")
@@ -213,43 +258,90 @@ def execute_operation(connection, route_info, operation: str) -> Any:
         
         # Check if this is a search endpoint (/opportunities/search)
         is_search_endpoint = route_info.path.endswith('/search')
+            is_allowed, error_msg = check_opportunity_access(user_context, 'list')
+            if not is_allowed:
+                raise PermissionError(error_msg)
         
         if operation == 'list' or is_search_endpoint:
             # If search query is provided, perform search instead of list
             if search_query:
                 return opportunities_handler.search_opportunities(connection, search_query, account_id)
+            is_allowed, error_msg = check_opportunity_access(user_context, operation)
+            if not is_allowed:
+                raise PermissionError(error_msg)
             else:
                 return opportunities_handler.list_opportunities(connection, account_id)
         elif operation == 'get':
             result = opportunities_handler.get_opportunity(connection, resource_id)
             if result is None:
+            is_allowed, error_msg = check_opportunity_access(user_context, operation)
+            if not is_allowed:
+                raise PermissionError(error_msg)
+            # Set owner_id to the authenticated user if not specified
+            if user_context and 'ownerId' not in body:
+                body['ownerId'] = user_context.user_id
                 raise ValueError(f"Opportunity with id {resource_id} not found")
             return result
+            # Fetch existing opportunity to get owner_id for authorization check
+            existing = opportunities_handler.get_opportunity(connection, resource_id)
+            if existing is None:
+                raise ValueError(f"Opportunity with id {resource_id} not found")
+            
+            owner_id = existing.get('ownerId')
+            is_allowed, error_msg = check_opportunity_access(user_context, operation, owner_id)
+            if not is_allowed:
+                raise PermissionError(error_msg)
+            
         elif operation == 'create':
             return opportunities_handler.create_opportunity(connection, body)
         elif operation == 'update':
             result = opportunities_handler.update_opportunity(connection, resource_id, body)
             if result is None:
+            # Fetch existing opportunity to get owner_id for authorization check
+            existing = opportunities_handler.get_opportunity(connection, resource_id)
+            if existing is None:
+                raise ValueError(f"Opportunity with id {resource_id} not found")
+            
+            owner_id = existing.get('ownerId')
+            is_allowed, error_msg = check_opportunity_access(user_context, operation, owner_id)
+            if not is_allowed:
+                raise PermissionError(error_msg)
+            
                 raise ValueError(f"Opportunity with id {resource_id} not found")
             return result
         elif operation == 'delete':
             success = opportunities_handler.delete_opportunity(connection, resource_id)
             if not success:
                 raise ValueError(f"Opportunity with id {resource_id} not found")
+            is_allowed, error_msg = check_team_member_access(user_context, operation)
+            if not is_allowed:
+                raise PermissionError(error_msg)
             return None
     
+            is_allowed, error_msg = check_team_member_access(user_context, operation)
+            if not is_allowed:
+                raise PermissionError(error_msg)
     # Route to team members handler
     elif resource_type == 'team-members':
         if operation == 'list':
             return team_members_handler.list_team_members(connection)
         elif operation == 'get':
+            is_allowed, error_msg = check_team_member_access(user_context, operation)
+            if not is_allowed:
+                raise PermissionError(error_msg)
             result = team_members_handler.get_team_member(connection, resource_id)
             if result is None:
+            is_allowed, error_msg = check_team_member_access(user_context, operation)
+            if not is_allowed:
+                raise PermissionError(error_msg)
                 raise ValueError(f"Team member with id {resource_id} not found")
             return result
         elif operation == 'create':
             return team_members_handler.create_team_member(connection, body)
         elif operation == 'update':
+            is_allowed, error_msg = check_team_member_access(user_context, operation)
+            if not is_allowed:
+                raise PermissionError(error_msg)
             result = team_members_handler.update_team_member(connection, resource_id, body)
             if result is None:
                 raise ValueError(f"Team member with id {resource_id} not found")
