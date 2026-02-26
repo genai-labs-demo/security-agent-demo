@@ -11,7 +11,7 @@ Requirements: 1.1, 1.2, 2.1, 3.1, 4.1, 5.1, 6.1, 7.1, 8.1, 9.1, 10.1
 import json
 import logging
 import time
-from typing import Dict, Any
+from typing import Dict, Any, List
 import boto3
 
 # Import handler modules
@@ -22,6 +22,7 @@ from handlers import security_handler
 from s3_integration import enhance_with_images
 from cors_handler import process_cors
 from error_handler import (
+    handle_authorization_error,
     handle_validation_error,
     handle_not_found_error,
     handle_conflict_error,
@@ -29,6 +30,7 @@ from error_handler import (
     handle_server_error,
     parse_database_error
 )
+from authorization import extract_user_groups
 
 # CloudWatch client for custom metrics
 cloudwatch = boto3.client('cloudwatch')
@@ -77,6 +79,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Get operation type
         operation = get_operation_type(route_info)
         
+        # Extract user groups from Cognito claims for authorization
+        user_groups = extract_user_groups(event)
+        
         # Get database connection
         connection = get_database_connection()
         
@@ -85,7 +90,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             start_time = time.time()
             
             # Route to appropriate handler and execute operation
-            result = execute_operation(connection, route_info, operation)
+            result = execute_operation(connection, route_info, operation, user_groups)
             
             # Calculate and publish search latency metrics
             elapsed_time = (time.time() - start_time) * 1000  # Convert to milliseconds
@@ -129,6 +134,12 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         logger.info(f"Request {request_id} completed successfully with status {response['statusCode']}")
         return response
         
+    except PermissionError as e:
+        # Authorization errors (403)
+        logger.warning(f"Authorization error in request {request_id}: {str(e)}")
+        response = handle_authorization_error(str(e))
+        return process_cors(event, response)
+        
     except ValueError as e:
         # Validation errors (400)
         logger.warning(f"Validation error in request {request_id}: {str(e)}")
@@ -163,7 +174,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
 
 def execute_operation(connection, route_info, operation: str) -> Any:
-    """
+def execute_operation(connection, route_info, operation: str, user_groups: List[str]) -> Any:
     Execute the appropriate CRUD operation based on route information.
     
     Args:
@@ -171,6 +182,7 @@ def execute_operation(connection, route_info, operation: str) -> Any:
         route_info: Parsed route information
         operation: Operation type ('list', 'get', 'create', 'update', 'delete')
         
+        user_groups: List of Cognito groups the user belongs to
     Returns:
         Operation result (record, list of records, or boolean)
         
@@ -187,21 +199,21 @@ def execute_operation(connection, route_info, operation: str) -> Any:
     # Route to accounts handler
     if resource_type == 'accounts':
         if operation == 'list':
-            return accounts_handler.list_accounts(connection)
+            return accounts_handler.list_accounts(connection, user_groups)
         elif operation == 'get':
-            result = accounts_handler.get_account(connection, resource_id)
+            result = accounts_handler.get_account(connection, resource_id, user_groups)
             if result is None:
                 raise ValueError(f"Account with id {resource_id} not found")
             return result
         elif operation == 'create':
-            return accounts_handler.create_account(connection, body)
+            return accounts_handler.create_account(connection, body, user_groups)
         elif operation == 'update':
-            result = accounts_handler.update_account(connection, resource_id, body)
+            result = accounts_handler.update_account(connection, resource_id, body, user_groups)
             if result is None:
                 raise ValueError(f"Account with id {resource_id} not found")
             return result
         elif operation == 'delete':
-            success = accounts_handler.delete_account(connection, resource_id)
+            success = accounts_handler.delete_account(connection, resource_id, user_groups)
             if not success:
                 raise ValueError(f"Account with id {resource_id} not found")
             return None
@@ -217,23 +229,23 @@ def execute_operation(connection, route_info, operation: str) -> Any:
         if operation == 'list' or is_search_endpoint:
             # If search query is provided, perform search instead of list
             if search_query:
-                return opportunities_handler.search_opportunities(connection, search_query, account_id)
+                return opportunities_handler.search_opportunities(connection, search_query, account_id, user_groups)
             else:
-                return opportunities_handler.list_opportunities(connection, account_id)
+                return opportunities_handler.list_opportunities(connection, account_id, user_groups)
         elif operation == 'get':
-            result = opportunities_handler.get_opportunity(connection, resource_id)
+            result = opportunities_handler.get_opportunity(connection, resource_id, user_groups)
             if result is None:
                 raise ValueError(f"Opportunity with id {resource_id} not found")
             return result
         elif operation == 'create':
-            return opportunities_handler.create_opportunity(connection, body)
+            return opportunities_handler.create_opportunity(connection, body, user_groups)
         elif operation == 'update':
-            result = opportunities_handler.update_opportunity(connection, resource_id, body)
+            result = opportunities_handler.update_opportunity(connection, resource_id, body, user_groups)
             if result is None:
                 raise ValueError(f"Opportunity with id {resource_id} not found")
             return result
         elif operation == 'delete':
-            success = opportunities_handler.delete_opportunity(connection, resource_id)
+            success = opportunities_handler.delete_opportunity(connection, resource_id, user_groups)
             if not success:
                 raise ValueError(f"Opportunity with id {resource_id} not found")
             return None
@@ -242,21 +254,21 @@ def execute_operation(connection, route_info, operation: str) -> Any:
     elif resource_type == 'team-members':
         if operation == 'list':
             return team_members_handler.list_team_members(connection)
-        elif operation == 'get':
+            return team_members_handler.list_team_members(connection, user_groups)
             result = team_members_handler.get_team_member(connection, resource_id)
-            if result is None:
+            result = team_members_handler.get_team_member(connection, resource_id, user_groups)
                 raise ValueError(f"Team member with id {resource_id} not found")
             return result
         elif operation == 'create':
             return team_members_handler.create_team_member(connection, body)
-        elif operation == 'update':
+            return team_members_handler.create_team_member(connection, body, user_groups)
             result = team_members_handler.update_team_member(connection, resource_id, body)
-            if result is None:
+            result = team_members_handler.update_team_member(connection, resource_id, body, user_groups)
                 raise ValueError(f"Team member with id {resource_id} not found")
             return result
         elif operation == 'delete':
             success = team_members_handler.delete_team_member(connection, resource_id)
-            if not success:
+            success = team_members_handler.delete_team_member(connection, resource_id, user_groups)
                 raise ValueError(f"Team member with id {resource_id} not found")
             return None
     

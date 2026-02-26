@@ -9,6 +9,8 @@ from datetime import datetime
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
+from authorization import require_admin, require_authenticated
+
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -118,7 +120,7 @@ def _recalculate_account_aggregates(connection, account_id: str) -> None:
         cursor.close()
 
 
-def search_opportunities(connection, search_query: str, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
+def search_opportunities(connection, search_query: str, account_id: Optional[str] = None, user_groups: List[str] = None) -> List[Dict[str, Any]]:
     """
     Perform full text search on opportunities using multiple keywords.
     
@@ -126,6 +128,7 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
         connection: Database connection object
         search_query: Search string (e.g., "finance software platform")
         account_id: Optional account ID to filter opportunities
+        user_groups: List of Cognito groups the user belongs to
     
     Returns:
         List of opportunity dictionaries in API format, ordered by relevance
@@ -133,6 +136,9 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
     Raises:
         Exception: If database query fails
     """
+        # Enforce authentication (all authenticated users can search opportunities)
+        require_authenticated(user_groups or [])
+        
     try:
         if not search_query or not search_query.strip():
             return []
@@ -299,13 +305,14 @@ def _validate_amount(amount) -> None:
         )
 
 
-def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
+def list_opportunities(connection, account_id: Optional[str] = None, user_groups: List[str] = None) -> List[Dict[str, Any]]:
     """
     Query opportunities from the database with optional account filter.
     
     Args:
         connection: Database connection object
         account_id: Optional account ID to filter opportunities
+        user_groups: List of Cognito groups the user belongs to
     
     Returns:
         List of opportunity dictionaries in API format
@@ -313,6 +320,9 @@ def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dic
     Raises:
         Exception: If database query fails
     """
+        # Enforce authentication (all authenticated users can list opportunities)
+        require_authenticated(user_groups or [])
+        
     try:
         logger.info(f"Listing opportunities{f' for account {account_id}' if account_id else ''}")
         
@@ -353,13 +363,14 @@ def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dic
         raise
 
 
-def get_opportunity(connection, opportunity_id: str) -> Optional[Dict[str, Any]]:
+def get_opportunity(connection, opportunity_id: str, user_groups: List[str]) -> Optional[Dict[str, Any]]:
     """
     Query a single opportunity by ID from the database.
     
     Args:
         connection: Database connection object
         opportunity_id: Opportunity ID to retrieve
+        user_groups: List of Cognito groups the user belongs to
     
     Returns:
         Opportunity dictionary in API format, or None if not found
@@ -367,6 +378,9 @@ def get_opportunity(connection, opportunity_id: str) -> Optional[Dict[str, Any]]
     Raises:
         Exception: If database query fails
     """
+        # Enforce authentication (all authenticated users can get opportunities)
+        require_authenticated(user_groups)
+        
     try:
         logger.info(f"Getting opportunity with ID: {opportunity_id}")
         
@@ -404,14 +418,16 @@ def get_opportunity(connection, opportunity_id: str) -> Optional[Dict[str, Any]]
         raise
 
 
-def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
+def create_opportunity(connection, data: Dict[str, Any], user_groups: List[str]) -> Dict[str, Any]:
     """
     Insert a new opportunity record into the database.
     Validates that account_id and owner_id reference existing records.
+    Requires Admin group membership.
     
     Args:
         connection: Database connection object
         data: Opportunity data in API format (camelCase)
+        user_groups: List of Cognito groups the user belongs to
     
     Returns:
         Created opportunity dictionary in API format
@@ -419,6 +435,9 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     Raises:
         Exception: If database insert fails or validation fails
     """
+        # Enforce Admin-only authorization
+        require_admin(user_groups)
+        
     try:
         logger.info(f"Creating new opportunity: {data.get('name')}")
         
@@ -511,14 +530,16 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         raise
 
 
-def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any], user_groups: List[str]) -> Optional[Dict[str, Any]]:
     """
     Update an existing opportunity record in the database.
+    Requires Admin group membership.
     
     Args:
         connection: Database connection object
         opportunity_id: Opportunity ID to update
         data: Partial opportunity data in API format (camelCase)
+        user_groups: List of Cognito groups the user belongs to
     
     Returns:
         Updated opportunity dictionary in API format, or None if not found
@@ -526,6 +547,9 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
     Raises:
         Exception: If database update fails or validation fails
     """
+        # Enforce Admin-only authorization
+        require_admin(user_groups)
+        
     try:
         logger.info(f"Updating opportunity: {opportunity_id}")
         
@@ -623,15 +647,17 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         raise
 
 
-def delete_opportunity(connection, opportunity_id: str) -> bool:
+def delete_opportunity(connection, opportunity_id: str, user_groups: List[str]) -> bool:
     """
     Soft-delete an opportunity record by marking it as deleted.
     The record is retained in the database for recovery purposes.
     Recalculates parent account aggregates after deletion.
+    Requires Admin group membership.
 
     Args:
         connection: Database connection object
         opportunity_id: Opportunity ID to soft-delete
+        user_groups: List of Cognito groups the user belongs to
 
     Returns:
         True if opportunity was soft-deleted, False if not found
@@ -639,6 +665,9 @@ def delete_opportunity(connection, opportunity_id: str) -> bool:
     Raises:
         Exception: If database update fails
     """
+        # Enforce Admin-only authorization
+        require_admin(user_groups)
+        
     try:
         logger.info(f"Soft-deleting opportunity: {opportunity_id}")
 

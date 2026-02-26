@@ -9,6 +9,8 @@ from datetime import datetime
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
+from authorization import require_admin, require_authenticated
+
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -79,12 +81,13 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
     return db_data
 
 
-def list_accounts(connection) -> List[Dict[str, Any]]:
+def list_accounts(connection, user_groups: List[str]) -> List[Dict[str, Any]]:
     """
     Query all accounts from the database.
     
     Args:
         connection: Database connection object
+        user_groups: List of Cognito groups the user belongs to
     
     Returns:
         List of account dictionaries in API format
@@ -93,6 +96,9 @@ def list_accounts(connection) -> List[Dict[str, Any]]:
         Exception: If database query fails
     """
     try:
+        # Enforce authentication (all authenticated users can list accounts)
+        require_authenticated(user_groups)
+        
         logger.info("Listing all accounts")
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
@@ -130,13 +136,14 @@ COMPUTED_FIELDS = {'health_status', 'health_score', 'opportunity_count', 'total_
 
 
 
-def get_account(connection, account_id: str) -> Optional[Dict[str, Any]]:
+def get_account(connection, account_id: str, user_groups: List[str]) -> Optional[Dict[str, Any]]:
     """
     Query a single account by ID from the database.
     
     Args:
         connection: Database connection object
         account_id: Account ID to retrieve
+        user_groups: List of Cognito groups the user belongs to
     
     Returns:
         Account dictionary in API format, or None if not found
@@ -144,6 +151,9 @@ def get_account(connection, account_id: str) -> Optional[Dict[str, Any]]:
     Raises:
         Exception: If database query fails
     """
+        # Enforce authentication (all authenticated users can get accounts)
+        require_authenticated(user_groups)
+        
     try:
         logger.info(f"Getting account with ID: {account_id}")
         
@@ -181,13 +191,15 @@ def get_account(connection, account_id: str) -> Optional[Dict[str, Any]]:
         raise
 
 
-def create_account(connection, data: Dict[str, Any]) -> Dict[str, Any]:
+def create_account(connection, data: Dict[str, Any], user_groups: List[str]) -> Dict[str, Any]:
     """
     Insert a new account record into the database.
+    Requires Admin group membership.
     
     Args:
         connection: Database connection object
         data: Account data in API format (camelCase)
+        user_groups: List of Cognito groups the user belongs to
     
     Returns:
         Created account dictionary in API format
@@ -195,6 +207,9 @@ def create_account(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     Raises:
         Exception: If database insert fails or validation fails
     """
+        # Enforce Admin-only authorization
+        require_admin(user_groups)
+        
     try:
         logger.info(f"Creating new account: {data.get('name')}")
         
@@ -271,14 +286,16 @@ def create_account(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         raise
 
 
-def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def update_account(connection, account_id: str, data: Dict[str, Any], user_groups: List[str]) -> Optional[Dict[str, Any]]:
     """
     Update an existing account record in the database.
+    Requires Admin group membership.
     
     Args:
         connection: Database connection object
         account_id: Account ID to update
         data: Partial account data in API format (camelCase)
+        user_groups: List of Cognito groups the user belongs to
     
     Returns:
         Updated account dictionary in API format, or None if not found
@@ -286,6 +303,9 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
     Raises:
         Exception: If database update fails or validation fails
     """
+        # Enforce Admin-only authorization
+        require_admin(user_groups)
+        
     try:
         logger.info(f"Updating account: {account_id}")
         
@@ -363,15 +383,17 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
         raise
 
 
-def delete_account(connection, account_id: str) -> bool:
+def delete_account(connection, account_id: str, user_groups: List[str]) -> bool:
     """
     Soft-delete an account record by marking it as deleted.
     The record is retained in the database for recovery purposes.
     Checks for active (non-deleted) opportunities before allowing deletion.
+    Requires Admin group membership.
 
     Args:
         connection: Database connection object
         account_id: Account ID to soft-delete
+        user_groups: List of Cognito groups the user belongs to
 
     Returns:
         True if account was soft-deleted, False if not found
@@ -379,6 +401,9 @@ def delete_account(connection, account_id: str) -> bool:
     Raises:
         Exception: If account has active opportunities or database update fails
     """
+        # Enforce Admin-only authorization
+        require_admin(user_groups)
+        
     try:
         logger.info(f"Soft-deleting account: {account_id}")
 
