@@ -331,6 +331,21 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
             logger.info(f"Account not found for update: {account_id}")
             return None
         
+        # Cascade update denormalized account_name in opportunities if name changed
+        if 'name' in db_data:
+            try:
+                logger.info(f"Cascading account name update to opportunities for account {account_id}")
+                cascade_cursor = connection.cursor()
+                cascade_cursor.execute(
+                    "UPDATE opportunities SET account_name = %s WHERE account_id = %s",
+                    (db_data['name'], account_id)
+                )
+                updated_count = cascade_cursor.rowcount
+                cascade_cursor.close()
+                logger.info(f"Updated account_name in {updated_count} opportunities for account {account_id}")
+            except Exception as e:
+                logger.error(f"Failed to cascade account name update: {str(e)}")
+        
         connection.commit()
         cursor.close()
         

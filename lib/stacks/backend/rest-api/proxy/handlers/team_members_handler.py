@@ -315,6 +315,34 @@ def update_team_member(connection, member_id: str, data: Dict[str, Any]) -> Opti
             return None
         
         connection.commit()
+        
+        # Cascade update denormalized owner_name in opportunities and accounts if name changed
+        if 'name' in db_data:
+            try:
+                logger.info(f"Cascading team member name update to related records for member {member_id}")
+                cascade_cursor = connection.cursor()
+                
+                # Update opportunities.owner_name
+                cascade_cursor.execute(
+                    "UPDATE opportunities SET owner_name = %s WHERE owner_id = %s",
+                    (db_data['name'], member_id)
+                )
+                opportunities_updated = cascade_cursor.rowcount
+                logger.info(f"Updated owner_name in {opportunities_updated} opportunities for team member {member_id}")
+                
+                # Update accounts.owner_name
+                cascade_cursor.execute(
+                    "UPDATE accounts SET owner_name = %s WHERE owner_id = %s",
+                    (db_data['name'], member_id)
+                )
+                accounts_updated = cascade_cursor.rowcount
+                logger.info(f"Updated owner_name in {accounts_updated} accounts for team member {member_id}")
+                
+                connection.commit()
+                cascade_cursor.close()
+            except Exception as e:
+                logger.error(f"Failed to cascade team member name update: {str(e)}")
+                connection.rollback()
         cursor.close()
         
         # Map to API format
