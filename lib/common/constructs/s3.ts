@@ -37,7 +37,16 @@ export class CommonWebBucket extends Bucket {
                 {
                     allowedMethods: [HttpMethods.GET, HttpMethods.PUT, HttpMethods.POST, HttpMethods.DELETE],
                     allowedOrigins,
-                    allowedHeaders: ["*"],
+                    allowedHeaders: [
+                        "Content-Type",
+                        "Content-Length",
+                        "Content-MD5",
+                        "x-amz-date",
+                        "x-amz-content-sha256",
+                        "x-amz-security-token",
+                        "x-amz-user-agent",
+                        "Authorization"
+                    ],
                 },
             ],
             ...bucketProps,
