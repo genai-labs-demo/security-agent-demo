@@ -50,10 +50,13 @@ export class Backend extends CommonStack {
             crmImagesBucket: storage.storageBucket,
         });
         NagSuppressions.addStackSuppressions(this, [
+        
+        // AWS managed policies for Lambda VPC access - this is a standard AWS pattern
             {
                 id: "AwsSolutions-IAM4",
                 reason: "Lambda functions require managed policies to interface with the vpc.",
-            },
+                reason: "Lambda functions require AWS managed policy (AWSLambdaVPCAccessExecutionRole) for VPC access. " +
+                        "This is a standard AWS pattern and acceptable for both demo and production environments.",
         ]);
 
         this.environmentVariables = {

@@ -85,10 +85,13 @@ export class Networking extends Construct {
             "Allow PostgreSQL access from within security group"
         );
         NagSuppressions.addResourceSuppressions(securityGroup, [
+        
+        // Security group allows HTTPS from VPC CIDR only - acceptable security pattern
             {
                 id: "AwsSolutions-EC23",
                 reason: "Security group only allows HTTPS traffic from VPC CIDR block.",
-            },
+                reason: "Security group allows ingress from VPC CIDR (10.0.0.0/16) for HTTPS and PostgreSQL. " +
+                        "This is scoped to private VPC traffic only, not public internet. Acceptable for both demo and production.",
         ]);
 
         this.vpc = vpc;

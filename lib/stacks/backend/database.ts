@@ -72,25 +72,35 @@ export class Database extends Construct {
         this.databaseSecret = this.database.secret as Secret;
         this.databaseEndpoint = this.database.dbInstanceEndpointAddress;
 
-        // Suppress CDK Nag warnings for demo environment
+        // DEMO ENVIRONMENT ONLY: These RDS security and reliability features are disabled
+        // to reduce costs and simplify demo environment management.
+        //
+        // WARNING: For production environments, you MUST:
+        // 1. Enable Multi-AZ for high availability (multiAz: true)
+        // 2. Enable deletion protection (deletionProtection: true)
+        // 3. Use non-default port for security through obscurity (port: custom)
+        // 4. Enable automatic secret rotation (secret.addRotationSchedule())
+        // 5. Remove all these suppressions
+        //
+        // Current demo configuration prioritizes cost savings over production reliability.
         NagSuppressions.addResourceSuppressions(
             this.database,
             [
                 {
                     id: "AwsSolutions-RDS3",
-                    reason: "Multi-AZ not required for demo environment - reduces cost",
+                    reason: "[DEMO ONLY] Multi-AZ disabled to reduce costs (~2x cost savings). PRODUCTION REQUIRES Multi-AZ for high availability.",
                 },
                 {
                     id: "AwsSolutions-RDS10",
-                    reason: "Deletion protection disabled for demo environment - allows easy cleanup",
+                    reason: "[DEMO ONLY] Deletion protection disabled for easy demo cleanup. PRODUCTION REQUIRES deletion protection to prevent accidental data loss.",
                 },
                 {
                     id: "AwsSolutions-RDS11",
-                    reason: "Default port acceptable for demo environment",
+                    reason: "[DEMO ONLY] Using default PostgreSQL port 5432. Production should use non-standard port as defense-in-depth measure.",
                 },
                 {
                     id: "AwsSolutions-SMG4",
-                    reason: "Automatic rotation not required for demo environment",
+                    reason: "[DEMO ONLY] Automatic secret rotation disabled for demo simplicity. PRODUCTION REQUIRES automatic rotation (e.g., 30-90 days).",
                 },
             ],
             true
