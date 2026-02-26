@@ -125,7 +125,7 @@ export class Database extends Construct {
                 DB_PROXY_ENDPOINT: this.proxyEndpoint,
                 DB_NAME: this.databaseName,
                 DB_USERNAME: "postgres",
-                DB_PASSWORD: this.databaseSecret.secretValueFromJson("password").unsafeUnwrap(),
+                DB_SECRET_ARN: this.databaseSecret.secretArn,
             },
         });
 

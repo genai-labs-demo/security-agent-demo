@@ -170,7 +170,7 @@
 ### Credential Management
 - Database credentials are auto-generated via `Credentials.fromGeneratedSecret("postgres")` and stored in AWS Secrets Manager — no hardcoded credentials exist in the codebase
 - Lambda functions retrieve credentials at runtime via `databaseSecret.grantRead()`, and the secret ARN is passed as an environment variable (`DATABASE_SECRET_ARN`)
-- The seed function receives the database password via environment variable using `secretValueFromJson("password").unsafeUnwrap()` — this is a known CDK pattern for custom resources but means the password is visible in the Lambda configuration
+- The seed function retrieves the database password securely from Secrets Manager at runtime using the boto3 SDK, avoiding exposure in CloudFormation templates or Lambda environment variables
 
 ### Database Access Controls
 - RDS IAM Authentication is enabled (`iamAuthentication: true`), providing an alternative to password-based access
@@ -186,7 +186,6 @@
 ### Gaps & Recommendations
 - Enable `requireTLS: true` on the RDS Proxy to encrypt database connections in transit (currently `requireTLS: false`)
 - Enable Secrets Manager automatic rotation (`AwsSolutions-SMG4` is currently suppressed)
-- Avoid passing database password via `unsafeUnwrap()` in the seed function environment — use the Secrets Manager SDK at runtime instead
 - Consider implementing break-glass procedures with CloudTrail alerting for privileged operations
 - Add MFA to the Cognito user pool for administrative users (currently suppressed via `AwsSolutions-COG2`)
 

@@ -88,8 +88,8 @@ export class FederateUserPoolClient extends UserPoolClient {
                               },
                               clientId: scope.node.getContext("projectId"),
                               clientSecret: SecretValue.secretsManager(
-                                  `${getProfile(scope)}-federateSecret`
-                              ).unsafeUnwrap(),
+                                `${getProfile(scope)}-federateSecret`
+                            ),
                               attributeRequestMethod: OidcAttributeRequestMethod.GET,
                               issuerUrl: getAccountDetail(scope, "prod")
                                   ? "https://idp.federate.amazon.com"
