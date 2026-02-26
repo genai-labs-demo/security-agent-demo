@@ -79,6 +79,64 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
     return db_data
 
 
+def _recalculate_health(connection, account_id: str) -> None:
+    """
+    Update account health_status and health_score fields.
+    Uses weighted scoring: 40% activity recency + 30% opportunity count + 30% pipeline value.
+    Status thresholds: Green >= 70, Yellow >= 40, Red < 40.
+    """
+    if not account_id:
+        return
+    
+    import math
+    cur = connection.cursor()
+    
+    try:
+        fetch_sql = "SELECT last_activity_date, opportunity_count, total_opportunity_value FROM accounts WHERE id = %s AND deleted_at IS NULL"
+        cur.execute(fetch_sql, (account_id,))
+        fetched = cur.fetchone()
+        
+        if fetched is None:
+            return
+        
+        date_last_act, qty_opps, amt_opps = fetched
+        
+        # Initialize weighted components
+        weight_activity = 0
+        weight_count = 0
+        weight_value = 0
+        
+        # Weight 1: Activity recency (40 points max)
+        if date_last_act is not None:
+            time_delta = (datetime.utcnow() - date_last_act).days
+            if time_delta <= 30:
+                weight_activity = 40
+            elif time_delta <= 90:
+                weight_activity = 25
+            elif time_delta <= 180:
+                weight_activity = 10
+        
+        # Weight 2: Opportunity quantity (30 points max)
+        if qty_opps is not None and qty_opps > 0:
+            weight_count = min(30, qty_opps * 10)
+        
+        # Weight 3: Pipeline monetary value (30 points max)
+        if amt_opps is not None and amt_opps > 0:
+            weight_value = min(30, int(math.log10(float(amt_opps) + 1) * 5))
+        
+        final_score = weight_activity + weight_count + weight_value
+        final_status = 'Green' if final_score >= 70 else 'Yellow' if final_score >= 40 else 'Red'
+        
+        update_sql = "UPDATE accounts SET health_status = %s, health_score = %s WHERE id = %s"
+        cur.execute(update_sql, (final_status, final_score, account_id))
+        connection.commit()
+        logger.info(f"Recalculated health for account {account_id}: {final_status} (score: {final_score})")
+    except Exception as error:
+        logger.error(f"Error in health recalculation for account {account_id}: {error}")
+    finally:
+        cur.close()
+
+
 def list_accounts(connection) -> List[Dict[str, Any]]:
     """
     Query all accounts from the database.
