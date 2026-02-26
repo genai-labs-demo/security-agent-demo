@@ -1,9 +1,12 @@
 import { CloudfrontWebAcl } from "@aws/pdk/static-website";
-import { Aspects, CfnOutput, StackProps } from "aws-cdk-lib";
+import { Aspects, CfnOutput, Duration, StackProps } from "aws-cdk-lib";
 import { Certificate, CertificateValidation } from "aws-cdk-lib/aws-certificatemanager";
 import {
     AllowedMethods,
     Distribution,
+    HeadersFrameOption,
+    HeadersReferrerPolicy,
+    ResponseHeadersPolicy,
     OriginRequestPolicy,
     SecurityPolicyProtocol,
     SSLMethod,
@@ -89,6 +92,59 @@ export class Frontend extends CommonStack {
             validation: CertificateValidation.fromDns(hostedZone),
         });
 
+        // Create Response Headers Policy with Content Security Policy
+        const responseHeadersPolicy = new ResponseHeadersPolicy(this, "responseHeadersPolicy", {
+            responseHeadersPolicyName: `${this.stackName}-security-headers`,
+            comment: "Security headers including CSP for XSS protection",
+            securityHeadersBehavior: {
+                contentSecurityPolicy: {
+                    contentSecurityPolicy: [
+                        "default-src 'self'",
+                        "script-src 'self'",
+                        "style-src 'self' 'unsafe-inline'",
+                        "img-src 'self' data: https:",
+                        "font-src 'self' data:",
+                        "connect-src 'self' https://secagentdemo.jossai.people.aws.dev https://*.amazonaws.com",
+                        "object-src 'none'",
+                        "base-uri 'self'",
+                        "frame-ancestors 'none'",
+                        "upgrade-insecure-requests",
+                    ].join("; "),
+                    override: true,
+                },
+                contentTypeOptions: {
+                    override: true,
+                },
+                frameOptions: {
+                    frameOption: HeadersFrameOption.DENY,
+                    override: true,
+                },
+                referrerPolicy: {
+                    referrerPolicy: HeadersReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN,
+                    override: true,
+                },
+                strictTransportSecurity: {
+                    accessControlMaxAge: Duration.seconds(31536000),
+                    includeSubdomains: true,
+                    override: true,
+                },
+                xssProtection: {
+                    protection: true,
+                    modeBlock: true,
+                    override: true,
+                },
+            },
+            customHeadersBehavior: {
+                customHeaders: [
+                    {
+                        header: "Permissions-Policy",
+                        value: "geolocation=(), microphone=(), camera=()",
+                        override: true,
+                    },
+                ],
+            },
+        });
+
         const distribution = new Distribution(this, "distribution", {
             defaultRootObject: "index.html",
             domainNames: [CUSTOM_DOMAIN],
@@ -98,6 +154,7 @@ export class Frontend extends CommonStack {
                 viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                 allowedMethods: AllowedMethods.ALLOW_ALL,
                 originRequestPolicy: OriginRequestPolicy.CORS_S3_ORIGIN,
+                responseHeadersPolicy: responseHeadersPolicy,
             },
             additionalBehaviors: {
                 "/assets/*": {
@@ -105,6 +162,7 @@ export class Frontend extends CommonStack {
                     viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                     allowedMethods: AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
                     originRequestPolicy: OriginRequestPolicy.CORS_S3_ORIGIN,
+                    responseHeadersPolicy: responseHeadersPolicy,
                 },
             },
             errorResponses: [
