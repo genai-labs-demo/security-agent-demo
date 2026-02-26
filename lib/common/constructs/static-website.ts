@@ -1,3 +1,4 @@
+import * as path from "path";
 import { CustomResource, Duration, Stack } from "aws-cdk-lib";
 import { Distribution } from "aws-cdk-lib/aws-cloudfront";
 import {
@@ -100,24 +101,13 @@ export class StaticWebsiteBuild extends Construct {
             { id: "AwsSolutions-IAM5", reason: "Wildcard permissions required for S3 sync and CloudFront invalidation" },
         ], true);
 
-        const triggerCode =
-            'const{CodeBuildClient,StartBuildCommand,BatchGetBuildsCommand}=require("@aws-sdk/client-codebuild");' +
-            "const cb=new CodeBuildClient();const sleep=ms=>new Promise(r=>setTimeout(r,ms));" +
-            "exports.handler=async event=>{const pn=event.ResourceProperties.ProjectName;" +
-            'if(event.RequestType==="Delete")return{PhysicalResourceId:event.PhysicalResourceId};' +
-            "const{build}=await cb.send(new StartBuildCommand({projectName:pn}));" +
-            'console.log("Started:",build.id);' +
-            "for(let i=0;i<90;i++){await sleep(10000);" +
-            "const r=await cb.send(new BatchGetBuildsCommand({ids:[build.id]}));" +
-            'const s=r.builds[0].buildStatus;console.log("Status:",s);' +
-            'if(s==="SUCCEEDED")return{PhysicalResourceId:build.id};' +
-            'if(["FAILED","FAULT","STOPPED","TIMED_OUT"].includes(s))throw new Error("CodeBuild "+s+": "+build.id);}' +
-            'throw new Error("Build timed out");};';
+        // Lambda code is now in a separate file for better auditability and security scanning
+        const triggerCodePath = path.join(__dirname, "static-website-trigger");
 
         const triggerFunction = new Function(this, "triggerFunction", {
             runtime: Runtime.NODEJS_22_X,
             handler: "index.handler",
-            code: Code.fromInline(triggerCode),
+            code: Code.fromAsset(triggerCodePath),
             timeout: Duration.minutes(15),
             memorySize: 128,
         });
