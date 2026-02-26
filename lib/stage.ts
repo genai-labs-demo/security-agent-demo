@@ -1,5 +1,5 @@
 import { Aspects, Stage, StageProps } from "aws-cdk-lib";
-import { AwsSolutionsChecks, NagSuppressions } from "cdk-nag";
+import { AwsSolutionsChecks } from "cdk-nag";
 import { Construct } from "constructs";
 import { Backend } from "./stacks/backend";
 import { DnsRoleStack } from "./stacks/dns";
@@ -25,28 +25,6 @@ export class ApplicationStage extends Stage {
             environmentVariables: backend.environmentVariables,
         });
 
-        NagSuppressions.addResourceSuppressions(
-            this,
-            [
-                {
-                    id: "AwsSolutions-IAM4",
-                    reason: "Lambda functions can require managed policies.",
-                    appliesTo: [
-                        "Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
-                        "Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole",
-                    ],
-                },
-                {
-                    id: "AwsSolutions-IAM5",
-                    reason: "High-level constructs can require wildcards for dynamic resource creation and management.",
-                },
-                {
-                    id: "AwsSolutions-L1",
-                    reason: "High-level constructs can set their own runtimes.",
-                },
-            ],
-            true
-        );
         Aspects.of(this).add(new AwsSolutionsChecks());
     }
 }
