@@ -9,6 +9,7 @@ from datetime import datetime
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
+from validation import validate_opportunity, ValidationError
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -408,6 +409,7 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Insert a new opportunity record into the database.
     Validates that account_id and owner_id reference existing records.
+    Validates all input data including initial stage assignment.
     
     Args:
         connection: Database connection object
@@ -421,6 +423,12 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     """
     try:
         logger.info(f"Creating new opportunity: {data.get('name')}")
+        # Validate input data (no current_stage for new opportunities)
+        try:
+            validate_opportunity(data, is_update=False, current_stage=None)
+        except ValidationError as e:
+            raise Exception(f"Validation failed: {e.message}")
+        
         
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
@@ -505,7 +513,7 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         connection.rollback()
         # Re-raise if it's already our custom exception
-        if "Invalid account ID" in str(e) or "Invalid owner ID" in str(e):
+        if "Invalid account ID" in str(e) or "Invalid owner ID" in str(e) or "Validation failed" in str(e):
             raise
         logger.error(f"Unexpected error creating opportunity: {str(e)}")
         raise
@@ -514,6 +522,7 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
 def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     Update an existing opportunity record in the database.
+    Validates stage transitions to enforce business workflow rules.
     
     Args:
         connection: Database connection object
@@ -528,6 +537,29 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
     """
     try:
         logger.info(f"Updating opportunity: {opportunity_id}")
+        cursor = connection.cursor(cursor_factory=RealDictCursor)
+        
+        # Retrieve current opportunity stage to validate transitions
+        current_opportunity = None
+        if 'stage' in data:
+            cursor.execute(
+                "SELECT stage FROM opportunities WHERE id = %s AND deleted_at IS NULL",
+                (opportunity_id,)
+            )
+            current_opportunity = cursor.fetchone()
+            if not current_opportunity:
+                cursor.close()
+                logger.info(f"Opportunity not found for update: {opportunity_id}")
+                return None
+        
+        # Validate input data including stage transition rules
+        try:
+            current_stage_value = current_opportunity.get('stage') if current_opportunity else None
+            validate_opportunity(data, is_update=True, current_stage=current_stage_value)
+        except ValidationError as e:
+            cursor.close()
+            raise Exception(f"Validation failed: {e.message}")
+        
         
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
@@ -546,8 +578,6 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
             logger.warning("No fields to update")
             # Return current opportunity
             return get_opportunity(connection, opportunity_id)
-        
-        cursor = connection.cursor(cursor_factory=RealDictCursor)
         
         # Validate account_id exists if being updated
         if 'account_id' in db_data and db_data['account_id']:
@@ -616,7 +646,7 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         raise Exception(f"Failed to update opportunity: {str(e)}")
     except Exception as e:
         connection.rollback()
-        # Re-raise if it's already our custom exception
+        if "Invalid account ID" in str(e) or "Invalid owner ID" in str(e) or "Invalid amount" in str(e) or "Validation failed" in str(e):
         if "Invalid account ID" in str(e) or "Invalid owner ID" in str(e) or "Invalid amount" in str(e):
             raise
         logger.error(f"Unexpected error updating opportunity {opportunity_id}: {str(e)}")
