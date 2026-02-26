@@ -127,14 +127,18 @@ export class Frontend extends CommonStack {
             logFilePrefix: "distribution",
         });
         NagSuppressions.addResourceSuppressions(distribution, [
+        
+        // CloudFront configuration suppressions - acceptable for global demo distribution
             {
                 id: "AwsSolutions-CFR1",
                 reason: "Distribution should be globally accessible.",
-            },
+                reason: "CloudFront distribution is globally accessible (no geo-restriction). This is intentional for a demo environment. " +
+                        "For production, consider enabling geo-restriction if your application has geographic requirements.",
             {
                 id: "AwsSolutions-CFR4",
                 reason: "Distribution is configured with TLS_V1_2_2021.",
-            },
+                reason: "CloudFront uses TLS 1.2 as minimum protocol version (SecurityPolicyProtocol.TLS_V1_2_2021). " +
+                        "This meets current security standards. Acceptable for both demo and production.",
         ]);
 
         // Route 53 alias record: secagentdemo.jossai.people.aws.dev -> CloudFront

@@ -64,14 +64,21 @@ export class Auth extends Construct {
                 postConfirmation: hydrationFunction,
             },
         });
+        
+        // DEMO ENVIRONMENT ONLY: These Cognito security controls are disabled for demo convenience.
+        // WARNING: For production environments, you should:
+        // 1. Enable MFA (set mfa: MfaType.REQUIRED or OPTIONAL in UserPool config)
+        // 2. Use FeaturePlan.ESSENTIALS or higher which includes advanced security features
+        // 3. Remove these suppressions and implement proper authentication security
         NagSuppressions.addResourceSuppressions(userPool, [
             {
                 id: "AwsSolutions-COG2",
-                reason: "Cognito user pool should not require MFA for demos.",
+                reason: "[DEMO ONLY] MFA is disabled for demo convenience. PRODUCTION REQUIRES MFA - enable with mfa: MfaType.OPTIONAL or REQUIRED.",
             },
             {
                 id: "AwsSolutions-COG3",
-                reason: "AdvancedSecurityMode is set to depreciate. Using Cognito feature plan's essential security feature.",
+                reason: "[DEMO ONLY] Advanced security mode disabled for demo. Note: FeaturePlan.ESSENTIALS provides basic security. " +
+                        "For production, consider using advanced security features and threat protection.",
             },
         ]);
 

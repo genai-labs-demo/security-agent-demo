@@ -78,12 +78,14 @@ export class RestApi extends Construct {
             cloudWatchRole: true,
             cloudWatchRoleRemovalPolicy: RemovalPolicy.DESTROY,
         });
+        
+        // AWS managed policy for API Gateway CloudWatch logging - standard AWS pattern
         NagSuppressions.addResourceSuppressions(
             restApi,
             [
                 {
                     id: "AwsSolutions-IAM4",
-                    reason: "RestApi requires the AmazonAPIGatewayPushToCloudWatchLogs policy for logging.",
+                    reason: "API Gateway requires AWS managed policy (AmazonAPIGatewayPushToCloudWatchLogs) for access logging. This is acceptable for both demo and production.",
                 },
             ],
             true

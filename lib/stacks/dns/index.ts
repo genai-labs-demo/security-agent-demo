@@ -77,10 +77,14 @@ export class DnsRoleStack extends CommonStack {
             );
 
             NagSuppressions.addResourceSuppressions(role, [
+            // Route53 wildcard required for dynamic hosted zone management
+            // This is necessary because hosted zone ARNs are not known at policy creation time
                 {
                     id: "AwsSolutions-IAM5",
                     reason: "Route 53 hosted zone ARNs are not known ahead of time; wildcard is required for zone creation.",
-                },
+                    reason: "Route 53 requires wildcard resource (*) because hosted zone ARNs are generated dynamically during zone creation. " +
+                            "This is a limitation of Route53 IAM policies for zone management. The role is limited to specific Route53 actions. " +
+                            "Acceptable for both demo and production when managing dynamic hosted zones.",
             ]);
 
             new CfnOutput(this, "roleName", {

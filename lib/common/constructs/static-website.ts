@@ -95,9 +95,13 @@ export class StaticWebsiteBuild extends Construct {
             resources: [`arn:aws:cloudfront::${Stack.of(this).account}:distribution/${distribution.distributionId}`],
         }));
 
+        // DEMO ENVIRONMENT ONLY: CodeBuild project uses simplified configuration
+        // For production, consider enabling KMS encryption for build artifacts
         NagSuppressions.addResourceSuppressions(this.project, [
-            { id: "AwsSolutions-CB4", reason: "KMS encryption not required for demo environment" },
-            { id: "AwsSolutions-IAM5", reason: "Wildcard permissions required for S3 sync and CloudFront invalidation" },
+            { id: "AwsSolutions-CB4", 
+              reason: "[DEMO ONLY] KMS encryption disabled for CodeBuild to reduce complexity. Production should enable KMS encryption for build artifacts." },
+            { id: "AwsSolutions-IAM5", 
+              reason: "Wildcard permissions required for S3 sync (s3:PutObject/*) and CloudFront invalidation. This is necessary for website deployment. Acceptable for both demo and production." },
         ], true);
 
         const triggerCode =
@@ -129,17 +133,21 @@ export class StaticWebsiteBuild extends Construct {
         }));
 
         NagSuppressions.addResourceSuppressions(triggerFunction, [
+        // Lambda trigger function uses standard AWS patterns for custom resources
             { id: "AwsSolutions-IAM4", reason: "Lambda basic execution role required for logging." },
-            { id: "AwsSolutions-L1", reason: "Using Node.js 22, the latest supported runtime." },
-        ], true);
+            { id: "AwsSolutions-IAM4", 
+              reason: "Lambda uses AWS managed policy (AWSLambdaBasicExecutionRole) for CloudWatch logging. Standard AWS pattern, acceptable for both demo and production." },
+            { id: "AwsSolutions-L1", 
+              reason: "Using Node.js 22 (NODEJS_22_X), the latest Lambda runtime available. This is current and acceptable." },
 
         const provider = new Provider(this, "provider", { onEventHandler: triggerFunction });
 
         NagSuppressions.addResourceSuppressions(provider, [
+        // CDK Provider framework uses managed policies - this is required by the framework
             { id: "AwsSolutions-IAM4", reason: "Provider framework requires managed policies." },
-            { id: "AwsSolutions-IAM5", reason: "Provider framework requires wildcard log permissions." },
-            { id: "AwsSolutions-L1", reason: "Provider framework manages its own runtime." },
-        ], true);
+            { id: "AwsSolutions-IAM4", reason: "CDK Provider framework requires AWS managed policies for Lambda execution. This is a framework requirement." },
+            { id: "AwsSolutions-IAM5", reason: "CDK Provider framework requires wildcard permissions for CloudWatch Logs. This is a framework requirement." },
+            { id: "AwsSolutions-L1", reason: "CDK Provider framework manages its own Lambda runtime version. This is controlled by the CDK version." },
 
         new CustomResource(this, "buildTrigger", {
             serviceToken: provider.serviceToken,

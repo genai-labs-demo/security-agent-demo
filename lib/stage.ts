@@ -25,12 +25,18 @@ export class ApplicationStage extends Stage {
             environmentVariables: backend.environmentVariables,
         });
 
+        // DEMO ENVIRONMENT ONLY: The following suppressions are for cost and convenience in a
+        // security training demo. In production, these should be removed and proper security
+        // controls should be implemented instead.
+        //
+        // WARNING: Do not use these suppressions in production environments.
         NagSuppressions.addResourceSuppressions(
             this,
             [
                 {
                     id: "AwsSolutions-IAM4",
-                    reason: "Lambda functions can require managed policies.",
+                    reason: "[DEMO ONLY] Lambda functions use AWS managed policies (AWSLambdaBasicExecutionRole, AWSLambdaVPCAccessExecutionRole). " +
+                            "This is acceptable for Lambda execution roles but should be reviewed for production.",
                     appliesTo: [
                         "Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
                         "Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole",
@@ -38,11 +44,12 @@ export class ApplicationStage extends Stage {
                 },
                 {
                     id: "AwsSolutions-IAM5",
-                    reason: "High-level constructs can require wildcards for dynamic resource creation and management.",
+                    reason: "[DEMO ONLY] High-level CDK constructs use wildcard permissions for dynamic resource creation. " +
+                            "For production, review each wildcard and scope to specific resources where possible.",
                 },
                 {
                     id: "AwsSolutions-L1",
-                    reason: "High-level constructs can set their own runtimes.",
+                    reason: "[DEMO ONLY] Lambda runtimes are managed by high-level constructs. For production, explicitly pin runtime versions.",
                 },
             ],
             true
