@@ -141,15 +141,15 @@ export class RestApi extends Construct {
         }
 
         // Add unauthenticated security demo endpoints BEFORE the catch-all proxy
-        // These must be explicitly defined so pen test scanners can reach them without a JWT
+        // Security demo endpoints - security-profile now requires Cognito authentication to prevent IDOR
         const lambdaInteg = new LambdaIntegration(proxyFunction);
         const noAuth = { authorizationType: AuthorizationType.NONE };
 
         const secProfile = restApi.root.addResource("security-profile");
-        secProfile.addMethod("GET", lambdaInteg, noAuth);
-        secProfile.addMethod("POST", lambdaInteg, noAuth);
+        secProfile.addMethod("GET", lambdaInteg);
+        secProfile.addMethod("POST", lambdaInteg);
         const secProfileId = secProfile.addResource("{id}");
-        secProfileId.addMethod("GET", lambdaInteg, noAuth);
+        secProfileId.addMethod("GET", lambdaInteg);
 
         const secComments = restApi.root.addResource("security-comments");
         secComments.addMethod("GET", lambdaInteg, noAuth);
@@ -191,7 +191,7 @@ export class RestApi extends Construct {
                 reason: "Security demo endpoints are intentionally unauthenticated to allow pen test scanners to test for vulnerabilities without requiring Cognito JWT tokens.",
             },
         ];
-        for (const resource of [secProfile, secProfileId, secComments, secSearch, secTools, secPing, secNslookup, secHealth, secXssPage, secXssComments, secXssSearch]) {
+        for (const resource of [secComments, secSearch, secTools, secPing, secNslookup, secHealth, secXssPage, secXssComments, secXssSearch]) {
             NagSuppressions.addResourceSuppressions(resource, securityDemoNagSuppression, true);
         }
 
