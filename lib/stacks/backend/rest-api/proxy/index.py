@@ -21,6 +21,7 @@ from handlers import accounts_handler, opportunities_handler, team_members_handl
 from handlers import security_handler
 from s3_integration import enhance_with_images
 from cors_handler import process_cors
+from authorization import extract_user_context, filter_accounts, filter_opportunities, filter_team_members
 from error_handler import (
     handle_validation_error,
     handle_not_found_error,
@@ -68,6 +69,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         if event.get('httpMethod') == 'OPTIONS':
             return process_cors(event)
         
+        # Extract user identity and authorization context from Cognito JWT
+        # For authenticated endpoints, this provides role-based access control
+        user_context = extract_user_context(event)
+        
         # Parse API Gateway event to extract route information
         route_info = parse_api_gateway_event(event)
         
@@ -85,7 +90,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             start_time = time.time()
             
             # Route to appropriate handler and execute operation
-            result = execute_operation(connection, route_info, operation)
+            result = execute_operation(connection, route_info, operation, user_context)
             
             # Calculate and publish search latency metrics
             elapsed_time = (time.time() - start_time) * 1000  # Convert to milliseconds
@@ -163,7 +168,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
 
 def execute_operation(connection, route_info, operation: str) -> Any:
-    """
+def execute_operation(connection, route_info, operation: str, user_context) -> Any:
     Execute the appropriate CRUD operation based on route information.
     
     Args:
@@ -171,6 +176,7 @@ def execute_operation(connection, route_info, operation: str) -> Any:
         route_info: Parsed route information
         operation: Operation type ('list', 'get', 'create', 'update', 'delete')
         
+        user_context: User authorization context from Cognito JWT
     Returns:
         Operation result (record, list of records, or boolean)
         
@@ -187,19 +193,25 @@ def execute_operation(connection, route_info, operation: str) -> Any:
     # Route to accounts handler
     if resource_type == 'accounts':
         if operation == 'list':
-            return accounts_handler.list_accounts(connection)
+            result = accounts_handler.list_accounts(connection)
+            # Apply authorization-based field filtering
+            return filter_accounts(result, user_context)
         elif operation == 'get':
             result = accounts_handler.get_account(connection, resource_id)
             if result is None:
                 raise ValueError(f"Account with id {resource_id} not found")
-            return result
+            # Apply authorization-based field filtering
+            return filter_accounts(result, user_context)
         elif operation == 'create':
-            return accounts_handler.create_account(connection, body)
+            result = accounts_handler.create_account(connection, body)
+            # Apply authorization-based field filtering
+            return filter_accounts(result, user_context)
         elif operation == 'update':
             result = accounts_handler.update_account(connection, resource_id, body)
             if result is None:
                 raise ValueError(f"Account with id {resource_id} not found")
-            return result
+            # Apply authorization-based field filtering
+            return filter_accounts(result, user_context)
         elif operation == 'delete':
             success = accounts_handler.delete_account(connection, resource_id)
             if not success:
@@ -217,21 +229,27 @@ def execute_operation(connection, route_info, operation: str) -> Any:
         if operation == 'list' or is_search_endpoint:
             # If search query is provided, perform search instead of list
             if search_query:
-                return opportunities_handler.search_opportunities(connection, search_query, account_id)
+                result = opportunities_handler.search_opportunities(connection, search_query, account_id)
             else:
-                return opportunities_handler.list_opportunities(connection, account_id)
+                result = opportunities_handler.list_opportunities(connection, account_id)
+            # Apply authorization-based field filtering
+            return filter_opportunities(result, user_context)
         elif operation == 'get':
             result = opportunities_handler.get_opportunity(connection, resource_id)
             if result is None:
                 raise ValueError(f"Opportunity with id {resource_id} not found")
-            return result
+            # Apply authorization-based field filtering
+            return filter_opportunities(result, user_context)
         elif operation == 'create':
-            return opportunities_handler.create_opportunity(connection, body)
+            result = opportunities_handler.create_opportunity(connection, body)
+            # Apply authorization-based field filtering
+            return filter_opportunities(result, user_context)
         elif operation == 'update':
             result = opportunities_handler.update_opportunity(connection, resource_id, body)
             if result is None:
                 raise ValueError(f"Opportunity with id {resource_id} not found")
-            return result
+            # Apply authorization-based field filtering
+            return filter_opportunities(result, user_context)
         elif operation == 'delete':
             success = opportunities_handler.delete_opportunity(connection, resource_id)
             if not success:
@@ -242,19 +260,25 @@ def execute_operation(connection, route_info, operation: str) -> Any:
     elif resource_type == 'team-members':
         if operation == 'list':
             return team_members_handler.list_team_members(connection)
-        elif operation == 'get':
+            result = team_members_handler.list_team_members(connection)
+            # Apply authorization-based field filtering
+            return filter_team_members(result, user_context)
             result = team_members_handler.get_team_member(connection, resource_id)
             if result is None:
                 raise ValueError(f"Team member with id {resource_id} not found")
             return result
-        elif operation == 'create':
+            # Apply authorization-based field filtering
+            return filter_team_members(result, user_context)
             return team_members_handler.create_team_member(connection, body)
-        elif operation == 'update':
+            result = team_members_handler.create_team_member(connection, body)
+            # Apply authorization-based field filtering
+            return filter_team_members(result, user_context)
             result = team_members_handler.update_team_member(connection, resource_id, body)
             if result is None:
                 raise ValueError(f"Team member with id {resource_id} not found")
             return result
-        elif operation == 'delete':
+            # Apply authorization-based field filtering
+            return filter_team_members(result, user_context)
             success = team_members_handler.delete_team_member(connection, resource_id)
             if not success:
                 raise ValueError(f"Team member with id {resource_id} not found")
