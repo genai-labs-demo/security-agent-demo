@@ -79,6 +79,117 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
     return db_data
 
 
+def _recalculate_health(connection, account_id: str) -> None:
+    """
+    Calculate health metrics for an account from opportunity data.
+    
+    Computes health_score (0-100), health_status, opportunity_count,
+    and total_opportunity_value based on the account's opportunities.
+    
+    Args:
+        connection: Database connection object
+        account_id: ID of the account to update
+    
+    Raises:
+        Exception: On database errors
+    """
+    try:
+        logger.info(f"Calculating health for account: {account_id}")
+        
+        cursor = connection.cursor(cursor_factory=RealDictCursor)
+        
+        # Fetch opportunity statistics
+        stats_query = """
+            SELECT 
+                COUNT(*) as opp_count,
+                COALESCE(SUM(value), 0) as total_val,
+                COUNT(CASE WHEN stage = 'closed-won' THEN 1 END) as wins,
+                COUNT(CASE WHEN stage IN ('closed-won', 'closed-lost') THEN 1 END) as closed
+            FROM opportunities
+            WHERE account_id = %s AND deleted_at IS NULL
+        """
+        
+        cursor.execute(stats_query, (account_id,))
+        result = cursor.fetchone()
+        
+        if not result:
+            result = {'opp_count': 0, 'total_val': 0, 'wins': 0, 'closed': 0}
+        
+        opp_count = result['opp_count']
+        total_val = float(result['total_val'])
+        wins = result['wins']
+        closed = result['closed']
+        
+        # Fetch last activity timestamp
+        cursor.execute(
+            "SELECT last_activity_date FROM accounts WHERE id = %s",
+            (account_id,)
+        )
+        account_rec = cursor.fetchone()
+        last_activity = account_rec['last_activity_date'] if account_rec else None
+        
+        # Calculate score components
+        
+        # Component 1: Opportunity volume (max score at 5 opportunities)
+        volume_component = min(100.0, (opp_count / 5.0) * 100.0)
+        
+        # Component 2: Revenue potential (max score at $500K)
+        revenue_component = min(100.0, (total_val / 500000.0) * 100.0)
+        
+        # Component 3: Success rate
+        if closed > 0:
+            success_rate = (wins / float(closed)) * 100.0
+        else:
+            success_rate = 50.0  # Default neutral value
+        
+        # Component 4: Engagement recency
+        if last_activity:
+            days_inactive = (datetime.utcnow().date() - last_activity).days
+            # Linear decay: 100 at 0 days, 0 at 180+ days
+            recency_component = max(0.0, 100.0 - (days_inactive / 180.0) * 100.0)
+        else:
+            recency_component = 50.0  # Default neutral value
+        
+        # Weighted average (weights: 30%, 30%, 25%, 15%)
+        final_score = (
+            volume_component * 0.30 +
+            revenue_component * 0.30 +
+            success_rate * 0.25 +
+            recency_component * 0.15
+        )
+        
+        final_score = int(round(final_score))
+        
+        # Map score to status category
+        if final_score >= 80:
+            status = 'excellent'
+        elif final_score >= 60:
+            status = 'good'
+        elif final_score >= 40:
+            status = 'fair'
+        else:
+            status = 'poor'
+        
+        # Persist computed values
+        cursor.execute(
+            "UPDATE accounts SET health_score = %s, health_status = %s, opportunity_count = %s, total_opportunity_value = %s WHERE id = %s",
+            (final_score, status, opp_count, total_val, account_id)
+        )
+        connection.commit()
+        cursor.close()
+        
+        logger.info(f"Health updated for {account_id}: score={final_score}, status={status}")
+        
+    except psycopg2.Error as db_err:
+        connection.rollback()
+        logger.error(f"DB error calculating health for {account_id}: {str(db_err)}")
+        raise Exception(f"Health calculation failed: {str(db_err)}")
+    except Exception as err:
+        connection.rollback()
+        logger.error(f"Error calculating health for {account_id}: {str(err)}")
+        raise
+
+
 def list_accounts(connection) -> List[Dict[str, Any]]:
     """
     Query all accounts from the database.
