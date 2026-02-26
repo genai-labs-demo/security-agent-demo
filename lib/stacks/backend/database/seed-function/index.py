@@ -66,11 +66,22 @@ def send_response(event, context, response_status, response_data):
 
 
 def get_database_connection():
-    """Create database connection"""
+    """Create database connection
+    
+    Retrieves database password securely from AWS Secrets Manager at runtime
+    instead of using environment variables to avoid secret exposure in CloudFormation.
+    """
+    secret_arn = os.environ['DB_SECRET_ARN']
+    
+    # Retrieve secret from Secrets Manager
+    secrets_manager = boto3.client('secretsmanager')
+    response = secrets_manager.get_secret_value(SecretId=secret_arn)
+    credentials = json.loads(response['SecretString'])
+    
     db_endpoint = os.environ['DB_PROXY_ENDPOINT']
     db_name = os.environ['DB_NAME']
     db_username = os.environ['DB_USERNAME']
-    db_password = os.environ['DB_PASSWORD']
+    db_password = credentials['password']
     
     print(f"Connecting to {db_endpoint}/{db_name}...")
     
