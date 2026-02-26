@@ -1,5 +1,6 @@
 import { StackProps, Stage } from "aws-cdk-lib";
 import { NagSuppressions } from "cdk-nag";
+import { Effect, PolicyStatement } from "aws-cdk-lib/aws-iam";
 import { Construct } from "constructs";
 import { CommonStack } from "../../common/constructs/stack";
 import { Auth } from "./constructs/auth";
@@ -29,7 +30,55 @@ export class Backend extends CommonStack {
         const storage = new Storage(this, "storage", {
             urls,
         });
-        storage.storageBucket.grantReadWrite(auth.identityPool.authenticatedRole);
+        
+        // Implement object-level authorization with user-specific path restrictions
+        // This prevents authenticated users from accessing each other's private files
+        // Users can only access objects under their own Cognito Identity ID prefix
+        
+        // Grant full access (read/write/delete) to user-specific private folder
+        auth.identityPool.authenticatedRole.addToPrincipalPolicy(
+            new PolicyStatement({
+                effect: Effect.ALLOW,
+                actions: [
+                    "s3:PutObject",
+                    "s3:GetObject",
+                    "s3:DeleteObject",
+                ],
+                resources: [
+                    // Users can only access objects under their own user-specific prefix
+                    // ${cognito-identity.amazonaws.com:sub} is replaced by AWS with the user's Identity ID at runtime
+                    `${storage.storageBucket.bucketArn}/private/\${cognito-identity.amazonaws.com:sub}/*`,
+                ],
+            })
+        );
+
+        // Grant read-only access to shared/public resources (CRM assets)
+        auth.identityPool.authenticatedRole.addToPrincipalPolicy(
+            new PolicyStatement({
+                effect: Effect.ALLOW,
+                actions: ["s3:GetObject"],
+                resources: [
+                    // Read-only access to shared CRM assets
+                    `${storage.storageBucket.bucketArn}/logos/*`,
+                    `${storage.storageBucket.bucketArn}/avatars/*`,
+                    `${storage.storageBucket.bucketArn}/icons/*`,
+                ],
+            })
+        );
+
+        // Grant list access with path restrictions
+        auth.identityPool.authenticatedRole.addToPrincipalPolicy(
+            new PolicyStatement({
+                effect: Effect.ALLOW,
+                actions: ["s3:ListBucket"],
+                resources: [storage.storageBucket.bucketArn],
+                conditions: {
+                    StringLike: {
+                        "s3:prefix": ["private/\${cognito-identity.amazonaws.com:sub}/*", "logos/*", "avatars/*", "icons/*"],
+                    },
+                },
+            })
+        );
 
         // CRM Database
         const database = new Database(this, "database", {
