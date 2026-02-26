@@ -85,8 +85,9 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
 def _recalculate_account_aggregates(connection, account_id: str) -> None:
     """
     Recalculate and update the aggregate fields (opportunity_count, total_opportunity_value)
-    on the parent account after any opportunity create/update/delete.
+    on the parent account after any opportunity create/update/delete with row-level locking.
     
+    Uses SELECT FOR UPDATE to prevent race conditions during concurrent aggregate updates.
     Args:
         connection: Database connection object
         account_id: Account ID whose aggregates need recalculation
@@ -96,6 +97,17 @@ def _recalculate_account_aggregates(connection, account_id: str) -> None:
     
     cursor = connection.cursor()
     try:
+        cursor.execute("""
+            SELECT id FROM accounts WHERE id = %s FOR UPDATE
+        """, (account_id,))
+        
+        # Verify account exists before attempting update
+        if not cursor.fetchone():
+            logger.warning(f"Account {account_id} not found for aggregate recalculation")
+            return
+        
+        # Perform the aggregate update - account row is locked until commit
+        # This prevents race conditions when multiple requests update the same account
         cursor.execute("""
             UPDATE accounts
             SET opportunity_count = sub.cnt,
