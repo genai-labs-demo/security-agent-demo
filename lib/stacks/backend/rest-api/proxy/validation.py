@@ -5,6 +5,7 @@ Validates required fields, data types, and enum values for all entity types.
 
 import re
 from typing import Dict, Any, List, Optional
+from datetime import datetime, timedelta
 
 
 # Define allowed enum values based on database schema
@@ -157,13 +158,42 @@ def validate_opportunity(data: Dict[str, Any], is_update: bool = False) -> None:
                 field='amount'
             )
     
-    # Validate closeDate (ISO 8601 date string)
+    # Validate closeDate (ISO 8601 date string with business logic constraints)
     if 'closeDate' in data:
         if not isinstance(data['closeDate'], str) or not data['closeDate'].strip():
             raise ValidationError("Field 'closeDate' must be a non-empty string in ISO 8601 format", field='closeDate')
         # Basic ISO date format validation (YYYY-MM-DD)
         if not re.match(r'^\d{4}-\d{2}-\d{2}', data['closeDate']):
             raise ValidationError("Field 'closeDate' must be in ISO 8601 date format (YYYY-MM-DD)", field='closeDate')
+        
+        # Parse and validate date is actually valid (e.g., not 2024-02-30)
+        try:
+            close_date = datetime.fromisoformat(data['closeDate'])
+        except (ValueError, TypeError) as e:
+            raise ValidationError(
+                f"Field 'closeDate' must be a valid date in ISO 8601 format (YYYY-MM-DD)",
+                field='closeDate'
+            )
+        
+        # Business logic validation: date range constraints
+        # Prevent pipeline manipulation by enforcing reasonable forecast windows
+        today = datetime.now()
+        max_future_date = today + timedelta(days=730)  # 24 months (~2 years)
+        min_past_date = today - timedelta(days=365)    # 12 months
+        
+        if close_date > max_future_date:
+            raise ValidationError(
+                f"Field 'closeDate' cannot be more than 24 months in the future. "
+                f"Maximum allowed date: {max_future_date.strftime('%Y-%m-%d')}",
+                field='closeDate'
+            )
+        
+        if close_date < min_past_date:
+            raise ValidationError(
+                f"Field 'closeDate' cannot be more than 12 months in the past. "
+                f"Minimum allowed date: {min_past_date.strftime('%Y-%m-%d')}",
+                field='closeDate'
+            )
     
     # Validate stage enum
     if 'stage' in data:
