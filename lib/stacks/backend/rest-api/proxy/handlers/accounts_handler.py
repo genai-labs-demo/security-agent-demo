@@ -9,7 +9,7 @@ from datetime import datetime
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-# Configure logging
+from validation import validate_account, ValidationError
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
@@ -130,6 +130,26 @@ COMPUTED_FIELDS = {'health_status', 'health_score', 'opportunity_count', 'total_
 
 
 
+def _recalculate_health(connection, account_id: str) -> None:
+    """
+    Recalculate and update the health status and health score for an account.
+    This is a placeholder function that can be expanded with business logic.
+    
+    Args:
+        connection: Database connection object
+        account_id: Account ID whose health metrics need recalculation
+    """
+    if not account_id:
+        return
+    
+    # Placeholder: In a real implementation, this would calculate health_status
+    # and health_score based on business metrics (opportunity_count, 
+    # total_opportunity_value, last_activity_date, etc.)
+    # For now, we just log that the function was called
+    logger.info(f"Health metrics recalculation requested for account {account_id}")
+    # The database may have triggers or the computed fields may be set to defaults
+
+
 def get_account(connection, account_id: str) -> Optional[Dict[str, Any]]:
     """
     Query a single account by ID from the database.
@@ -197,6 +217,12 @@ def create_account(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     """
     try:
         logger.info(f"Creating new account: {data.get('name')}")
+        
+        # Validate input data
+        try:
+            validate_account(data, is_update=False)
+        except ValidationError as e:
+            raise ValueError(str(e))
         
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
@@ -288,6 +314,12 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
     """
     try:
         logger.info(f"Updating account: {account_id}")
+        # Validate input data
+        try:
+            validate_account(data, is_update=True)
+        except ValidationError as e:
+            raise ValueError(str(e))
+        
         
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
