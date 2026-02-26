@@ -65,6 +65,17 @@ export class RestApi extends Construct {
                 allowHeaders: Cors.DEFAULT_HEADERS,
             },
             deployOptions: {
+                // Add throttling to prevent resource exhaustion from concurrent complex queries (CWE-400)
+                // Rate limit: 100 requests per second per API key/account
+                // Burst limit: 200 requests (allows short bursts but prevents sustained flooding)
+                throttleSettings: {
+                    rateLimit: 100,  // Steady-state requests per second
+                    burstLimit: 200, // Maximum concurrent requests
+                },
+                // Enable throttling metrics for monitoring
+                throttlingRateLimit: 100,
+                throttlingBurstLimit: 200,
+                // Existing logging configuration
                 accessLogDestination: new LogGroupLogDestination(
                     new LogGroup(this, "restApiLogGroup", {
                         removalPolicy: RemovalPolicy.DESTROY,
