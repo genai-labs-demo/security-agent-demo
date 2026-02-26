@@ -4,6 +4,7 @@ import { Certificate, CertificateValidation } from "aws-cdk-lib/aws-certificatem
 import {
     AllowedMethods,
     Distribution,
+    ResponseHeadersPolicy,
     OriginRequestPolicy,
     SecurityPolicyProtocol,
     SSLMethod,
@@ -89,6 +90,58 @@ export class Frontend extends CommonStack {
             validation: CertificateValidation.fromDns(hostedZone),
         });
 
+        // Create Response Headers Policy with Content Security Policy
+        const responseHeadersPolicy = new ResponseHeadersPolicy(this, "responseHeadersPolicy", {
+            responseHeadersPolicyName: "SecurityHeadersPolicy",
+            comment: "Security headers including CSP for frontend application",
+            securityHeadersBehavior: {
+                contentSecurityPolicy: {
+                    contentSecurityPolicy: [
+                        "default-src 'self'",
+                        "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+                        "style-src 'self' 'unsafe-inline'",
+                        "img-src 'self' data: https:",
+                        "font-src 'self' data:",
+                        "connect-src 'self'",
+                        "frame-ancestors 'none'",
+                        "base-uri 'self'",
+                        "form-action 'self'",
+                    ].join("; "),
+                    override: true,
+                },
+                contentTypeOptions: {
+                    override: true,
+                },
+                frameOptions: {
+                    frameOption: "DENY",
+                    override: true,
+                },
+                referrerPolicy: {
+                    referrerPolicy: "strict-origin-when-cross-origin",
+                    override: true,
+                },
+                strictTransportSecurity: {
+                    accessControlMaxAge: { seconds: 31536000 },
+                    includeSubdomains: true,
+                    override: true,
+                },
+                xssProtection: {
+                    protection: true,
+                    modeBlock: true,
+                    override: true,
+                },
+            },
+            customHeadersBehavior: {
+                customHeaders: [
+                    {
+                        header: "Permissions-Policy",
+                        value: "geolocation=(), microphone=(), camera=()",
+                        override: true,
+                    },
+                ],
+            },
+        });
+
         const distribution = new Distribution(this, "distribution", {
             defaultRootObject: "index.html",
             domainNames: [CUSTOM_DOMAIN],
@@ -98,6 +151,7 @@ export class Frontend extends CommonStack {
                 viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                 allowedMethods: AllowedMethods.ALLOW_ALL,
                 originRequestPolicy: OriginRequestPolicy.CORS_S3_ORIGIN,
+                responseHeadersPolicy: responseHeadersPolicy,
             },
             additionalBehaviors: {
                 "/assets/*": {
@@ -105,6 +159,7 @@ export class Frontend extends CommonStack {
                     viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                     allowedMethods: AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
                     originRequestPolicy: OriginRequestPolicy.CORS_S3_ORIGIN,
+                    responseHeadersPolicy: responseHeadersPolicy,
                 },
             },
             errorResponses: [
