@@ -9,6 +9,7 @@ from datetime import datetime
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
+from authorization import check_resource_authorization
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -120,7 +121,7 @@ def _recalculate_account_aggregates(connection, account_id: str) -> None:
 
 def search_opportunities(connection, search_query: str, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
-    Perform full text search on opportunities using multiple keywords.
+def search_opportunities(connection, search_query: str, user_id: str, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
     
     Args:
         connection: Database connection object
@@ -128,6 +129,7 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
         account_id: Optional account ID to filter opportunities
     
     Returns:
+        user_id: Authenticated user's ID from JWT token
         List of opportunity dictionaries in API format, ordered by relevance
     
     Raises:
@@ -220,6 +222,8 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
         """
         
         # Add account filter if specified
+        # Add user ownership filter to prevent IDOR
+        query += " AND o.owner_id = %s"
         if account_id:
             query += " AND o.account_id = %s"
             keyword_params.append(account_id)
@@ -234,6 +238,9 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
         
         # Prepare all parameters
         all_params = keyword_params.copy()  # WHERE clause parameters
+        
+        # Add user_id parameter for ownership filter
+        all_params.append(user_id)
         
         # Add parameters for relevance scoring (5 per keyword)
         for keyword in keywords:
@@ -302,12 +309,13 @@ def _validate_amount(amount) -> None:
 def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Query opportunities from the database with optional account filter.
-    
+def list_opportunities(connection, user_id: str, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
     Args:
         connection: Database connection object
         account_id: Optional account ID to filter opportunities
     
     Returns:
+        user_id: Authenticated user's ID from JWT token
         List of opportunity dictionaries in API format
     
     Raises:
@@ -316,7 +324,7 @@ def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dic
     try:
         logger.info(f"Listing opportunities{f' for account {account_id}' if account_id else ''}")
         
-        cursor = connection.cursor(cursor_factory=RealDictCursor)
+        logger.info(f"Listing opportunities for user {user_id}{f' and account {account_id}' if account_id else ''}")
         
         query = """
             SELECT 
@@ -328,7 +336,9 @@ def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dic
             WHERE deleted_at IS NULL
         """
         
-        params = []
+        # Filter by user ownership to prevent IDOR
+        query += " AND owner_id = %s"
+        params = [user_id]
         if account_id:
             query += " AND account_id = %s"
             params.append(account_id)
@@ -355,20 +365,21 @@ def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dic
 
 def get_opportunity(connection, opportunity_id: str) -> Optional[Dict[str, Any]]:
     """
-    Query a single opportunity by ID from the database.
+def get_opportunity(connection, opportunity_id: str, user_id: str) -> Optional[Dict[str, Any]]:
     
     Args:
         connection: Database connection object
         opportunity_id: Opportunity ID to retrieve
     
     Returns:
+        user_id: Authenticated user's ID from JWT token
         Opportunity dictionary in API format, or None if not found
     
     Raises:
         Exception: If database query fails
     """
     try:
-        logger.info(f"Getting opportunity with ID: {opportunity_id}")
+        logger.info(f"Getting opportunity {opportunity_id} for user {user_id}")
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
@@ -393,6 +404,9 @@ def get_opportunity(connection, opportunity_id: str) -> Optional[Dict[str, Any]]
         # Map to API format
         opportunity = _map_opportunity_to_api_format(dict(record))
         
+        # Authorization check: verify user owns this opportunity
+        check_resource_authorization(opportunity, user_id, 'opportunity', opportunity_id)
+        
         logger.info(f"Retrieved opportunity: {opportunity_id}")
         return opportunity
         
@@ -405,7 +419,7 @@ def get_opportunity(connection, opportunity_id: str) -> Optional[Dict[str, Any]]
 
 
 def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
-    """
+def create_opportunity(connection, data: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     Insert a new opportunity record into the database.
     Validates that account_id and owner_id reference existing records.
     
@@ -413,16 +427,21 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         connection: Database connection object
         data: Opportunity data in API format (camelCase)
     
+        user_id: Authenticated user's ID from JWT token (will be set as owner)
     Returns:
         Created opportunity dictionary in API format
     
     Raises:
         Exception: If database insert fails or validation fails
     """
-    try:
+        logger.info(f"Creating new opportunity: {data.get('name')} for user {user_id}")
         logger.info(f"Creating new opportunity: {data.get('name')}")
         
         # Map API format to database format
+        
+        # Set owner_id to the authenticated user (prevent privilege escalation)
+        # This ensures users can only create opportunities they own
+        db_data['owner_id'] = user_id
         db_data = _map_api_to_db_format(data)
         
         # Validate amount bounds
@@ -514,7 +533,7 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
 def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     Update an existing opportunity record in the database.
-    
+def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any], user_id: str) -> Optional[Dict[str, Any]]:
     Args:
         connection: Database connection object
         opportunity_id: Opportunity ID to update
@@ -522,13 +541,23 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
     
     Returns:
         Updated opportunity dictionary in API format, or None if not found
+        user_id: Authenticated user's ID from JWT token
     
     Raises:
         Exception: If database update fails or validation fails
     """
     try:
         logger.info(f"Updating opportunity: {opportunity_id}")
+        logger.info(f"Updating opportunity {opportunity_id} for user {user_id}")
         
+        # Authorization check: verify user owns this opportunity before allowing update
+        existing_opportunity = get_opportunity(connection, opportunity_id, user_id)
+        if existing_opportunity is None:
+            logger.info(f"Opportunity not found for update: {opportunity_id}")
+            return None
+        
+        # check_resource_authorization is called within get_opportunity
+        # If we reach here, authorization passed
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
         
@@ -539,13 +568,16 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         # Remove id if present (shouldn't be updated)
         db_data.pop('id', None)
         
+        # Prevent owner_id changes (users cannot transfer ownership)
+        db_data.pop('owner_id', None)
+        
         # Update last_modified_date
         db_data['last_modified_date'] = datetime.utcnow()
         
         if not db_data or (len(db_data) == 1 and 'last_modified_date' in db_data):
             logger.warning("No fields to update")
             # Return current opportunity
-            return get_opportunity(connection, opportunity_id)
+            return existing_opportunity
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
@@ -626,7 +658,7 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
 def delete_opportunity(connection, opportunity_id: str) -> bool:
     """
     Soft-delete an opportunity record by marking it as deleted.
-    The record is retained in the database for recovery purposes.
+def delete_opportunity(connection, opportunity_id: str, user_id: str) -> bool:
     Recalculates parent account aggregates after deletion.
 
     Args:
@@ -635,13 +667,22 @@ def delete_opportunity(connection, opportunity_id: str) -> bool:
 
     Returns:
         True if opportunity was soft-deleted, False if not found
+        user_id: Authenticated user's ID from JWT token
 
     Raises:
         Exception: If database update fails
     """
     try:
         logger.info(f"Soft-deleting opportunity: {opportunity_id}")
-
+        logger.info(f"Soft-deleting opportunity {opportunity_id} for user {user_id}")
+        
+        # Authorization check: verify user owns this opportunity before allowing deletion
+        existing_opportunity = get_opportunity(connection, opportunity_id, user_id)
+        if existing_opportunity is None:
+            logger.info(f"Opportunity not found for deletion: {opportunity_id}")
+            return False
+        
+        # check_resource_authorization is called within get_opportunity
         cursor = connection.cursor()
 
         # Check if opportunity exists and capture account_id for aggregate recalculation

@@ -9,6 +9,7 @@ from datetime import datetime
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
+from authorization import check_resource_authorization
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -80,12 +81,13 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def list_accounts(connection) -> List[Dict[str, Any]]:
-    """
+def list_accounts(connection, user_id: str) -> List[Dict[str, Any]]:
     Query all accounts from the database.
-    
+    Query accounts owned by the authenticated user.
     Args:
         connection: Database connection object
     
+        user_id: Authenticated user's ID from JWT token
     Returns:
         List of account dictionaries in API format
     
@@ -93,7 +95,7 @@ def list_accounts(connection) -> List[Dict[str, Any]]:
         Exception: If database query fails
     """
     try:
-        logger.info("Listing all accounts")
+        logger.info(f"Listing accounts for user {user_id}")
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
@@ -104,11 +106,11 @@ def list_accounts(connection) -> List[Dict[str, Any]]:
                 opportunity_count, total_opportunity_value,
                 last_activity_date, created_date, logo_url
             FROM accounts
-            WHERE deleted_at IS NULL
+            WHERE deleted_at IS NULL AND owner_id = %s
             ORDER BY name ASC
         """
         
-        cursor.execute(query)
+        cursor.execute(query, (user_id,))
         records = cursor.fetchall()
         cursor.close()
         
@@ -130,20 +132,21 @@ COMPUTED_FIELDS = {'health_status', 'health_score', 'opportunity_count', 'total_
 
 
 
-def get_account(connection, account_id: str) -> Optional[Dict[str, Any]]:
+def get_account(connection, account_id: str, user_id: str) -> Optional[Dict[str, Any]]:
     """
     Query a single account by ID from the database.
     
     Args:
         connection: Database connection object
         account_id: Account ID to retrieve
+        user_id: Authenticated user's ID from JWT token
     
     Returns:
         Account dictionary in API format, or None if not found
     
     Raises:
         Exception: If database query fails
-    """
+        logger.info(f"Getting account {account_id} for user {user_id}")
     try:
         logger.info(f"Getting account with ID: {account_id}")
         
@@ -170,6 +173,9 @@ def get_account(connection, account_id: str) -> Optional[Dict[str, Any]]:
         # Map to API format
         account = _map_account_to_api_format(dict(record))
         
+        # Authorization check: verify user owns this account
+        check_resource_authorization(account, user_id, 'account', account_id)
+        
         logger.info(f"Retrieved account: {account_id}")
         return account
         
@@ -182,20 +188,21 @@ def get_account(connection, account_id: str) -> Optional[Dict[str, Any]]:
 
 
 def create_account(connection, data: Dict[str, Any]) -> Dict[str, Any]:
-    """
+def create_account(connection, data: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     Insert a new account record into the database.
     
     Args:
         connection: Database connection object
         data: Account data in API format (camelCase)
     
+        user_id: Authenticated user's ID from JWT token (will be set as owner)
     Returns:
         Created account dictionary in API format
     
     Raises:
         Exception: If database insert fails or validation fails
     """
-    try:
+        logger.info(f"Creating new account: {data.get('name')} for user {user_id}")
         logger.info(f"Creating new account: {data.get('name')}")
         
         # Map API format to database format
@@ -221,6 +228,10 @@ def create_account(connection, data: Dict[str, Any]) -> Dict[str, Any]:
             db_data['last_activity_date'] = datetime.utcnow()
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
+        # Set owner_id to the authenticated user (prevent privilege escalation)
+        # This ensures users can only create accounts they own
+        db_data['owner_id'] = user_id
+        
         
         # Build INSERT query dynamically based on provided fields
         columns = list(db_data.keys())
@@ -243,11 +254,8 @@ def create_account(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         cursor.close()
         
         # Calculate health score from business metrics
-        _recalculate_health(connection, db_data['id'])
-        
-        # Re-fetch to include computed fields
-        account = get_account(connection, db_data['id'])
-        
+        # Fetch the created account (with authorization check)
+        account = get_account(connection, db_data['id'], user_id)
         logger.info(f"Created account with ID: {db_data['id']}")
         return account
         
@@ -271,7 +279,7 @@ def create_account(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         raise
 
 
-def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def update_account(connection, account_id: str, data: Dict[str, Any], user_id: str) -> Optional[Dict[str, Any]]:
     """
     Update an existing account record in the database.
     
@@ -279,13 +287,23 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
         connection: Database connection object
         account_id: Account ID to update
         data: Partial account data in API format (camelCase)
+        user_id: Authenticated user's ID from JWT token
     
     Returns:
         Updated account dictionary in API format, or None if not found
     
     Raises:
         Exception: If database update fails or validation fails
-    """
+        logger.info(f"Updating account {account_id} for user {user_id}")
+        
+        # Authorization check: verify user owns this account before allowing update
+        existing_account = get_account(connection, account_id, user_id)
+        if existing_account is None:
+            logger.info(f"Account not found for update: {account_id}")
+            return None
+        
+        # check_resource_authorization is called within get_account
+        # If we reach here, authorization passed
     try:
         logger.info(f"Updating account: {account_id}")
         
@@ -295,11 +313,14 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
         # Remove id if present (shouldn't be updated)
         db_data.pop('id', None)
         
+        
+        # Prevent owner_id changes (users cannot transfer ownership)
+        db_data.pop('owner_id', None)
         # Strip computed fields — these are derived from business metrics, not user input
         for field in COMPUTED_FIELDS:
             db_data.pop(field, None)
         
-        if not db_data:
+            return existing_account
             logger.warning("No fields to update")
             # Return current account
             return get_account(connection, account_id)
@@ -334,11 +355,8 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
         connection.commit()
         cursor.close()
         
-        # Recalculate health score from business metrics
-        _recalculate_health(connection, account_id)
-        
-        # Re-fetch to include recomputed fields
-        account = get_account(connection, account_id)
+        # Re-fetch to include updated fields (with authorization check)
+        account = get_account(connection, account_id, user_id)
         
         logger.info(f"Updated account: {account_id}")
         return account
@@ -363,7 +381,7 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
         raise
 
 
-def delete_account(connection, account_id: str) -> bool:
+def delete_account(connection, account_id: str, user_id: str) -> bool:
     """
     Soft-delete an account record by marking it as deleted.
     The record is retained in the database for recovery purposes.
@@ -372,13 +390,22 @@ def delete_account(connection, account_id: str) -> bool:
     Args:
         connection: Database connection object
         account_id: Account ID to soft-delete
+        user_id: Authenticated user's ID from JWT token
 
     Returns:
         True if account was soft-deleted, False if not found
 
     Raises:
         Exception: If account has active opportunities or database update fails
-    """
+        logger.info(f"Soft-deleting account {account_id} for user {user_id}")
+        
+        # Authorization check: verify user owns this account before allowing deletion
+        existing_account = get_account(connection, account_id, user_id)
+        if existing_account is None:
+            logger.info(f"Account not found for deletion: {account_id}")
+            return False
+        
+        # check_resource_authorization is called within get_account
     try:
         logger.info(f"Soft-deleting account: {account_id}")
 
