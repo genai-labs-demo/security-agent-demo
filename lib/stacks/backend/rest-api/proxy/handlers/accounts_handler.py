@@ -8,6 +8,7 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from validation import validate_account, ValidationError
 
 # Configure logging
 logger = logging.getLogger()
@@ -198,6 +199,9 @@ def create_account(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     try:
         logger.info(f"Creating new account: {data.get('name')}")
         
+        # Validate input data using comprehensive validation module
+        validate_account(data, is_update=False)
+        
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
         
@@ -251,6 +255,10 @@ def create_account(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         logger.info(f"Created account with ID: {db_data['id']}")
         return account
         
+    except ValidationError as e:
+        connection.rollback()
+        logger.error(f"Validation error creating account: {e.message}")
+        raise Exception(e.message)
     except psycopg2.IntegrityError as e:
         connection.rollback()
         logger.error(f"Integrity error creating account: {str(e)}")
@@ -288,6 +296,9 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
     """
     try:
         logger.info(f"Updating account: {account_id}")
+        
+        # Validate input data using comprehensive validation module
+        validate_account(data, is_update=True)
         
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
@@ -343,6 +354,10 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
         logger.info(f"Updated account: {account_id}")
         return account
         
+    except ValidationError as e:
+        connection.rollback()
+        logger.error(f"Validation error updating account {account_id}: {e.message}")
+        raise Exception(e.message)
     except psycopg2.IntegrityError as e:
         connection.rollback()
         logger.error(f"Integrity error updating account {account_id}: {str(e)}")
