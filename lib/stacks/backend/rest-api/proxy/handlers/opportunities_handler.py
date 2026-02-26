@@ -82,6 +82,42 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
     return db_data
 
 
+def _recalculate_account_aggregates(connection, account_id: str) -> None:
+    """
+    Recalculate and update the aggregate fields (opportunity_count, total_opportunity_value)
+    on the parent account after any opportunity create/update/delete.
+    
+    Args:
+        connection: Database connection object
+        account_id: Account ID whose aggregates need recalculation
+    """
+    if not account_id:
+        return
+    
+    cursor = connection.cursor()
+    try:
+        cursor.execute("""
+            UPDATE accounts
+            SET opportunity_count = sub.cnt,
+                total_opportunity_value = sub.total
+            FROM (
+                SELECT
+                    COUNT(*)::int AS cnt,
+                    COALESCE(SUM(amount), 0) AS total
+                FROM opportunities
+                WHERE account_id = %s AND deleted_at IS NULL
+            ) sub
+            WHERE accounts.id = %s
+        """, (account_id, account_id))
+        connection.commit()
+        logger.info(f"Recalculated aggregates for account {account_id}")
+    except Exception as e:
+        logger.error(f"Failed to recalculate aggregates for account {account_id}: {str(e)}")
+        # Don't rollback here — let the caller handle transaction management
+    finally:
+        cursor.close()
+
+
 def search_opportunities(connection, search_query: str, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Perform full text search on opportunities using multiple keywords.
@@ -102,6 +138,13 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
             return []
         
         keywords = search_query.strip().split()
+        
+        # Limit keyword count to prevent resource exhaustion via query explosion
+        MAX_KEYWORDS = 10
+        if len(keywords) > MAX_KEYWORDS:
+            logger.warning(f"Search query truncated from {len(keywords)} to {MAX_KEYWORDS} keywords")
+            keywords = keywords[:MAX_KEYWORDS]
+        
         logger.info(f"Searching opportunities for keywords: {keywords}")
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
@@ -172,7 +215,8 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
             JOIN accounts a ON o.account_id = a.id
             LEFT JOIN team_members tm ON o.owner_id = tm.id
             WHERE 
-                {where_clause}
+                o.deleted_at IS NULL
+                AND {where_clause}
         """
         
         # Add account filter if specified
@@ -224,6 +268,36 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
         logger.error(f"Unexpected error searching opportunities: {str(e)}")
         raise
 
+# Maximum allowed opportunity amount ($10M) to prevent pipeline inflation
+MAX_OPPORTUNITY_AMOUNT = 10_000_000
+
+
+def _validate_amount(amount) -> None:
+    """
+    Validate opportunity amount is within acceptable bounds.
+    Rejects negative values and amounts exceeding the upper limit.
+
+    Args:
+        amount: The opportunity amount to validate
+
+    Raises:
+        ValueError: If amount is negative or exceeds the maximum
+    """
+    if amount is None:
+        return
+    try:
+        amount_val = float(amount)
+    except (TypeError, ValueError):
+        raise ValueError(f"Invalid amount: must be a number")
+    if amount_val < 0:
+        raise ValueError(f"Invalid amount: cannot be negative")
+    if amount_val > MAX_OPPORTUNITY_AMOUNT:
+        raise ValueError(
+            f"Invalid amount: ${amount_val:,.2f} exceeds the maximum allowed "
+            f"amount of ${MAX_OPPORTUNITY_AMOUNT:,.2f}. Contact an administrator "
+            f"for opportunities above this threshold."
+        )
+
 
 def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
@@ -251,11 +325,12 @@ def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dic
                 forecast_category, owner_id, owner_name, probability,
                 created_date, last_modified_date
             FROM opportunities
+            WHERE deleted_at IS NULL
         """
         
         params = []
         if account_id:
-            query += " WHERE account_id = %s"
+            query += " AND account_id = %s"
             params.append(account_id)
         
         query += " ORDER BY close_date DESC LIMIT 1000"
@@ -304,7 +379,7 @@ def get_opportunity(connection, opportunity_id: str) -> Optional[Dict[str, Any]]
                 forecast_category, owner_id, owner_name, probability,
                 created_date, last_modified_date
             FROM opportunities
-            WHERE id = %s
+            WHERE id = %s AND deleted_at IS NULL
         """
         
         cursor.execute(query, (opportunity_id,))
@@ -349,6 +424,9 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
+        
+        # Validate amount bounds
+        _validate_amount(db_data.get('amount'))
         
         # Generate ID if not provided
         if 'id' not in data:
@@ -404,6 +482,9 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         # Map to API format
         opportunity = _map_opportunity_to_api_format(dict(record))
         
+        # Recalculate parent account aggregates
+        _recalculate_account_aggregates(connection, db_data.get('account_id'))
+        
         logger.info(f"Created opportunity with ID: {opportunity['id']}")
         return opportunity
         
@@ -450,6 +531,10 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
+        
+        # Validate amount bounds if being updated
+        if 'amount' in db_data:
+            _validate_amount(db_data.get('amount'))
         
         # Remove id if present (shouldn't be updated)
         db_data.pop('id', None)
@@ -509,6 +594,9 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         # Map to API format
         opportunity = _map_opportunity_to_api_format(dict(record))
         
+        # Recalculate parent account aggregates (handles amount or account changes)
+        _recalculate_account_aggregates(connection, record.get('account_id'))
+        
         logger.info(f"Updated opportunity: {opportunity_id}")
         return opportunity
         
@@ -529,7 +617,7 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
     except Exception as e:
         connection.rollback()
         # Re-raise if it's already our custom exception
-        if "Invalid account ID" in str(e) or "Invalid owner ID" in str(e):
+        if "Invalid account ID" in str(e) or "Invalid owner ID" in str(e) or "Invalid amount" in str(e):
             raise
         logger.error(f"Unexpected error updating opportunity {opportunity_id}: {str(e)}")
         raise
@@ -537,43 +625,57 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
 
 def delete_opportunity(connection, opportunity_id: str) -> bool:
     """
-    Delete an opportunity record from the database.
-    
+    Soft-delete an opportunity record by marking it as deleted.
+    The record is retained in the database for recovery purposes.
+    Recalculates parent account aggregates after deletion.
+
     Args:
         connection: Database connection object
-        opportunity_id: Opportunity ID to delete
-    
+        opportunity_id: Opportunity ID to soft-delete
+
     Returns:
-        True if opportunity was deleted, False if not found
-    
+        True if opportunity was soft-deleted, False if not found
+
     Raises:
-        Exception: If database delete fails
+        Exception: If database update fails
     """
     try:
-        logger.info(f"Deleting opportunity: {opportunity_id}")
-        
+        logger.info(f"Soft-deleting opportunity: {opportunity_id}")
+
         cursor = connection.cursor()
-        
-        # Check if opportunity exists
-        cursor.execute("SELECT id FROM opportunities WHERE id = %s", (opportunity_id,))
-        if not cursor.fetchone():
+
+        # Check if opportunity exists and capture account_id for aggregate recalculation
+        cursor.execute(
+            "SELECT id, account_id FROM opportunities WHERE id = %s AND (deleted_at IS NULL)",
+            (opportunity_id,)
+        )
+        row = cursor.fetchone()
+        if not row:
             cursor.close()
             logger.info(f"Opportunity not found for deletion: {opportunity_id}")
             return False
-        
-        # Delete the opportunity
-        cursor.execute("DELETE FROM opportunities WHERE id = %s", (opportunity_id,))
+
+        account_id = row[1]
+
+        # Soft-delete: set deleted_at timestamp instead of removing the row
+        cursor.execute(
+            "UPDATE opportunities SET deleted_at = NOW() WHERE id = %s",
+            (opportunity_id,)
+        )
         connection.commit()
         cursor.close()
-        
-        logger.info(f"Deleted opportunity: {opportunity_id}")
+
+        # Recalculate parent account aggregates
+        _recalculate_account_aggregates(connection, account_id)
+
+        logger.info(f"Soft-deleted opportunity: {opportunity_id}")
         return True
-        
+
     except psycopg2.Error as e:
         connection.rollback()
-        logger.error(f"Database error deleting opportunity {opportunity_id}: {str(e)}")
+        logger.error(f"Database error soft-deleting opportunity {opportunity_id}: {str(e)}")
         raise Exception(f"Failed to delete opportunity: {str(e)}")
     except Exception as e:
         connection.rollback()
-        logger.error(f"Unexpected error deleting opportunity {opportunity_id}: {str(e)}")
+        logger.error(f"Unexpected error soft-deleting opportunity {opportunity_id}: {str(e)}")
         raise

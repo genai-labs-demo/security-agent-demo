@@ -1,5 +1,5 @@
 {
-    "name": "aws-security-agent-demo",
+    "name": "security-agent-demo",
     "description": "project description",
     "version": "4.0.0",
     "author": "AWS Technical Product Marketing",
@@ -26,10 +26,9 @@
         "build": "tsc",
         "watch": "tsc -w",
         "test": "jest",
-        "cdk": "npx aws-cdk@2.1023.0"
+        "cdk": "npx aws-cdk@2.1105.0"
     },
-    "lint-staged": {
-    },
+    "lint-staged": {},
     "config": {
         "commitizen": {
             "path": "./node_modules/cz-conventional-changelog"
@@ -52,7 +51,8 @@
         "@typescript-eslint/eslint-plugin": "^8.37.0",
         "@typescript-eslint/parser": "^8.37.0",
         "archiver": "^7.0.1",
-        "aws-cdk": "^2.1023.0",
+        "aws-cdk": "^2.1105.0",
+        "case": "1.6.3",
         "chalk": "4.1.0",
         "commander": "^14.0.0",
         "commitizen": "^4.3.1",
@@ -79,11 +79,15 @@
         "@aws-sdk/client-s3": "^3.857.0",
         "@aws/pdk": "^0.26.14",
         "@cdklabs/generative-ai-cdk-constructs": "^0.1.309",
+        "@iarna/toml": "2.2.5",
         "aws-appsync": "^4.1.10",
         "aws-cdk-lib": "^2.208.0",
         "cdk-nag": "^2.37.53",
+        "comment-json": "4.5.1",
         "constructs": "^10.4.2",
+        "fast-json-patch": "3.1.1",
         "pg": "^8.13.1",
-        "source-map-support": "^0.5.21"
+        "source-map-support": "^0.5.21",
+        "xmlbuilder2": "4.0.3"
     }
 }

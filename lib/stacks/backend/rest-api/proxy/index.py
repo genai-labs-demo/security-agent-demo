@@ -309,12 +309,22 @@ def execute_operation(connection, route_info, operation: str) -> Any:
         return {"success": True, "status": "healthy", "version": "1.0.0", "endpoints": [
             "/security-profile", "/security-profile/{id}", "/security-comments",
             "/security-search", "/security-tools/ping", "/security-tools/nslookup",
-            "/security-health", "/security-xss-page"
+            "/security-health", "/security-xss-page", "/security-xss-comments",
+            "/security-xss-search"
         ]}
     
     # Route to security XSS page (returns HTML for reflected XSS detection)
     elif resource_type == 'security-xss-page':
         return security_handler.render_xss_page(query_params)
+
+    # Route to security XSS comments page (returns HTML with stored XSS for pen-test detection)
+    elif resource_type == 'security-xss-comments':
+        return security_handler.render_xss_comments_page(connection)
+
+    # Route to security XSS search page (returns HTML with reflected XSS for pen-test detection)
+    elif resource_type == 'security-xss-search':
+        search_query = query_params.get('q', '') or body.get('q', '')
+        return security_handler.render_xss_search_page(connection, search_query)
     
     else:
         raise ValueError(f"Unsupported resource type: {resource_type}")
@@ -365,7 +375,7 @@ def format_success_response(result: Any, route_info, operation: str) -> Dict[str
     if resource_type.startswith('security-'):
         enhanced_result = result
         # security-xss-page returns raw HTML — use text/html content type
-        if resource_type == 'security-xss-page' and isinstance(result, dict) and result.get('_html'):
+        if isinstance(result, dict) and result.get('_html'):
             return {
                 'statusCode': status_code,
                 'headers': {

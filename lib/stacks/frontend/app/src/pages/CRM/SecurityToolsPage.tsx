@@ -8,7 +8,8 @@ import {
 } from "@cloudscape-design/components";
 import { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { post } from "aws-amplify/api";
+
+const API_BASE = import.meta.env.VITE_REST_API_URL?.replace(/\/$/, "") ?? "";
 
 const SAMPLE_PAYLOADS = [
     "google.com; ls -la",
@@ -34,13 +35,12 @@ const SecurityToolsPage = () => {
         setError(null);
         setResult(null);
         try {
-            const restOp = post({
-                apiName: "restApi",
-                path: "/security-tools/ping",
-                options: { body: { host } as any },
+            const res = await fetch(`${API_BASE}/security-tools/ping`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ host }),
             });
-            const response = await restOp.response;
-            const data = await response.body.json() as any;
+            const data = await res.json();
             setResult(data);
         } catch (err: any) {
             setError(err?.message || "Request failed");

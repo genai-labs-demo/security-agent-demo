@@ -237,6 +237,8 @@ The `/security-*` API endpoints contain intentional vulnerabilities for educatio
 2. **Stored XSS** (`/security-comments`): Comment content stored and returned without sanitization
 3. **Reflected XSS** (`/security-search`): Search query reflected in response without encoding
 4. **Command Injection** (`/security-tools/ping`): User input passed to `os.popen()` without sanitization
+5. **Stored XSS (HTML)** (`/security-xss-comments`): Stored comments rendered as HTML page for pen-test scanner detection
+6. **Reflected XSS (HTML)** (`/security-xss-search`): Search query reflected in HTML page for pen-test scanner detection
 
 These endpoints are protected by Cognito authentication but intentionally bypass input validation for demonstration purposes.
 

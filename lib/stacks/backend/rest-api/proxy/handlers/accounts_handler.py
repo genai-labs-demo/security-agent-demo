@@ -56,6 +56,9 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
     db_data = {}
     
     # Map fields if they exist in the input
+    # NOTE: healthStatus, healthScore, opportunityCount, and totalOpportunityValue
+    # are computed fields — they are NOT accepted from API input to prevent
+    # manual manipulation. They are recalculated from business metrics automatically.
     field_mapping = {
         'name': 'name',
         'domain': 'domain',
@@ -64,10 +67,6 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
         'employeeCount': 'employee_count',
         'ownerId': 'owner_id',
         'ownerName': 'owner_name',
-        'healthStatus': 'health_status',
-        'healthScore': 'health_score',
-        'opportunityCount': 'opportunity_count',
-        'totalOpportunityValue': 'total_opportunity_value',
         'lastActivityDate': 'last_activity_date',
         'createdDate': 'created_date',
         'logoUrl': 'logo_url'
@@ -105,6 +104,7 @@ def list_accounts(connection) -> List[Dict[str, Any]]:
                 opportunity_count, total_opportunity_value,
                 last_activity_date, created_date, logo_url
             FROM accounts
+            WHERE deleted_at IS NULL
             ORDER BY name ASC
         """
         
@@ -124,6 +124,10 @@ def list_accounts(connection) -> List[Dict[str, Any]]:
     except Exception as e:
         logger.error(f"Unexpected error listing accounts: {str(e)}")
         raise
+
+# Fields that are computed from business metrics and cannot be set directly by users
+COMPUTED_FIELDS = {'health_status', 'health_score', 'opportunity_count', 'total_opportunity_value'}
+
 
 
 def get_account(connection, account_id: str) -> Optional[Dict[str, Any]]:
@@ -152,7 +156,7 @@ def get_account(connection, account_id: str) -> Optional[Dict[str, Any]]:
                 opportunity_count, total_opportunity_value,
                 last_activity_date, created_date, logo_url
             FROM accounts
-            WHERE id = %s
+            WHERE id = %s AND deleted_at IS NULL
         """
         
         cursor.execute(query, (account_id,))
@@ -197,6 +201,10 @@ def create_account(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
         
+        # Strip computed fields — these are derived from business metrics, not user input
+        for field in COMPUTED_FIELDS:
+            db_data.pop(field, None)
+        
         # Generate ID if not provided
         if 'id' not in data:
             import uuid
@@ -234,10 +242,13 @@ def create_account(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         connection.commit()
         cursor.close()
         
-        # Map to API format
-        account = _map_account_to_api_format(dict(record))
+        # Calculate health score from business metrics
+        _recalculate_health(connection, db_data['id'])
         
-        logger.info(f"Created account with ID: {account['id']}")
+        # Re-fetch to include computed fields
+        account = get_account(connection, db_data['id'])
+        
+        logger.info(f"Created account with ID: {db_data['id']}")
         return account
         
     except psycopg2.IntegrityError as e:
@@ -284,6 +295,10 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
         # Remove id if present (shouldn't be updated)
         db_data.pop('id', None)
         
+        # Strip computed fields — these are derived from business metrics, not user input
+        for field in COMPUTED_FIELDS:
+            db_data.pop(field, None)
+        
         if not db_data:
             logger.warning("No fields to update")
             # Return current account
@@ -319,8 +334,11 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
         connection.commit()
         cursor.close()
         
-        # Map to API format
-        account = _map_account_to_api_format(dict(record))
+        # Recalculate health score from business metrics
+        _recalculate_health(connection, account_id)
+        
+        # Re-fetch to include recomputed fields
+        account = get_account(connection, account_id)
         
         logger.info(f"Updated account: {account_id}")
         return account
@@ -347,67 +365,74 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
 
 def delete_account(connection, account_id: str) -> bool:
     """
-    Delete an account record from the database.
-    Checks for foreign key constraints (opportunities) before deletion.
-    
+    Soft-delete an account record by marking it as deleted.
+    The record is retained in the database for recovery purposes.
+    Checks for active (non-deleted) opportunities before allowing deletion.
+
     Args:
         connection: Database connection object
-        account_id: Account ID to delete
-    
+        account_id: Account ID to soft-delete
+
     Returns:
-        True if account was deleted, False if not found
-    
+        True if account was soft-deleted, False if not found
+
     Raises:
-        Exception: If account has associated opportunities or database delete fails
+        Exception: If account has active opportunities or database update fails
     """
     try:
-        logger.info(f"Deleting account: {account_id}")
-        
+        logger.info(f"Soft-deleting account: {account_id}")
+
         cursor = connection.cursor()
-        
-        # Check if account exists
-        cursor.execute("SELECT id FROM accounts WHERE id = %s", (account_id,))
+
+        # Check if account exists and is not already deleted
+        cursor.execute(
+            "SELECT id FROM accounts WHERE id = %s AND (deleted_at IS NULL)",
+            (account_id,)
+        )
         if not cursor.fetchone():
             cursor.close()
             logger.info(f"Account not found for deletion: {account_id}")
             return False
-        
-        # Check for associated opportunities (foreign key constraint)
+
+        # Check for active (non-deleted) associated opportunities
         cursor.execute(
-            "SELECT COUNT(*) as count FROM opportunities WHERE account_id = %s",
+            "SELECT COUNT(*) as count FROM opportunities WHERE account_id = %s AND (deleted_at IS NULL)",
             (account_id,)
         )
         result = cursor.fetchone()
         opportunity_count = result[0] if result else 0
-        
+
         if opportunity_count > 0:
             cursor.close()
-            logger.warning(f"Cannot delete account {account_id}: has {opportunity_count} associated opportunities")
+            logger.warning(f"Cannot delete account {account_id}: has {opportunity_count} active opportunities")
             raise Exception(
-                f"Cannot delete account: account has {opportunity_count} associated opportunities. "
-                f"Delete the opportunities first."
+                f"Cannot delete account: account has {opportunity_count} active opportunities. "
+                f"Delete or archive the opportunities first."
             )
-        
-        # Delete the account
-        cursor.execute("DELETE FROM accounts WHERE id = %s", (account_id,))
+
+        # Soft-delete: set deleted_at timestamp instead of removing the row
+        cursor.execute(
+            "UPDATE accounts SET deleted_at = NOW() WHERE id = %s",
+            (account_id,)
+        )
         connection.commit()
         cursor.close()
-        
-        logger.info(f"Deleted account: {account_id}")
+
+        logger.info(f"Soft-deleted account: {account_id}")
         return True
-        
+
     except psycopg2.IntegrityError as e:
         connection.rollback()
-        logger.error(f"Integrity error deleting account {account_id}: {str(e)}")
+        logger.error(f"Integrity error soft-deleting account {account_id}: {str(e)}")
         raise Exception(f"Cannot delete account: has associated records")
     except psycopg2.Error as e:
         connection.rollback()
-        logger.error(f"Database error deleting account {account_id}: {str(e)}")
+        logger.error(f"Database error soft-deleting account {account_id}: {str(e)}")
         raise Exception(f"Failed to delete account: {str(e)}")
     except Exception as e:
         connection.rollback()
         # Re-raise if it's already our custom exception
         if "Cannot delete account" in str(e):
             raise
-        logger.error(f"Unexpected error deleting account {account_id}: {str(e)}")
+        logger.error(f"Unexpected error soft-deleting account {account_id}: {str(e)}")
         raise

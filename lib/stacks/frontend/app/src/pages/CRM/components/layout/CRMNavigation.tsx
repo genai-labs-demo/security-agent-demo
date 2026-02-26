@@ -43,6 +43,19 @@ const CRMNavigation = ({ activeHref: propActiveHref }: CRMNavigationProps) => {
             items={[
                 {
                     type: "section" as const,
+                    text: "Security",
+                    defaultExpanded: true,
+                    items: [
+                        {
+                            type: "link" as const,
+                            text: "Security Agent",
+                            href: "/crm",
+                        }
+                    ]
+                },
+                { type: "divider" as const },
+                {
+                    type: "section" as const,
                     text: "App",
                     items: [
                         {
@@ -85,18 +98,6 @@ const CRMNavigation = ({ activeHref: propActiveHref }: CRMNavigationProps) => {
                                     info: <Badge color="green">Live</Badge>
                                 }
                             ]
-                        }
-                    ]
-                },
-                { type: "divider" as const },
-                {
-                    type: "section" as const,
-                    text: "Security",
-                    items: [
-                        {
-                            type: "link" as const,
-                            text: "Security Agent",
-                            href: "/crm",
                         }
                     ]
                 }

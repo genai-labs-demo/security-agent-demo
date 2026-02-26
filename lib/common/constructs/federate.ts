@@ -78,7 +78,7 @@ export class FederateUserPoolClient extends UserPoolClient {
                 ? [
                       UserPoolClientIdentityProvider.custom(
                           new UserPoolIdentityProviderOidc(scope, "userPoolIdentityProvider", {
-                              userPool: props.userPool,
+                              userPool: props.userPool as UserPool,
                               name: "AmazonFederate",
                               attributeMapping: {
                                   email: ProviderAttribute.other("EMAIL"),

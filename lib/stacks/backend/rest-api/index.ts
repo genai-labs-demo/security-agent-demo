@@ -171,6 +171,30 @@ export class RestApi extends Construct {
         const secXssPage = restApi.root.addResource("security-xss-page");
         secXssPage.addMethod("GET", lambdaInteg, noAuth);
 
+        const secXssComments = restApi.root.addResource("security-xss-comments");
+        secXssComments.addMethod("GET", lambdaInteg, noAuth);
+
+        const secXssSearch = restApi.root.addResource("security-xss-search");
+        secXssSearch.addMethod("GET", lambdaInteg, noAuth);
+
+        // Suppress cdk-nag authorization warnings for intentionally vulnerable security demo endpoints.
+        // These endpoints are deliberately unauthenticated to allow pen test scanners to discover
+        // and exploit vulnerabilities (IDOR, SQLi, XSS, Command Injection, Mass Assignment)
+        // as part of the AWS Security Agent educational demo.
+        const securityDemoNagSuppression = [
+            {
+                id: "AwsSolutions-APIG4",
+                reason: "Security demo endpoints are intentionally unauthenticated to allow pen test scanners to test for vulnerabilities without requiring Cognito JWT tokens.",
+            },
+            {
+                id: "AwsSolutions-COG4",
+                reason: "Security demo endpoints are intentionally unauthenticated to allow pen test scanners to test for vulnerabilities without requiring Cognito JWT tokens.",
+            },
+        ];
+        for (const resource of [secProfile, secProfileId, secComments, secSearch, secTools, secPing, secNslookup, secHealth, secXssPage, secXssComments, secXssSearch]) {
+            NagSuppressions.addResourceSuppressions(resource, securityDemoNagSuppression, true);
+        }
+
         // Catch-all proxy for remaining (authenticated) CRM endpoints
         restApi.root.addProxy({
             defaultIntegration: lambdaInteg,

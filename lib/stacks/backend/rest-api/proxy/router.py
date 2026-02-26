@@ -259,6 +259,8 @@ def route_request(route_info: RouteInfo) -> str:
         'security-tools': 'security-tools',
         'security-health': 'security-health',
         'security-xss-page': 'security-xss-page',
+        'security-xss-comments': 'security-xss-comments',
+        'security-xss-search': 'security-xss-search',
     }
     
     handler = handler_map.get(resource_type)

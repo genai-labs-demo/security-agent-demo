@@ -1,0 +1,506 @@
+/* ============================================================
+   Login Page — Animated, modern glassmorphism design
+   ============================================================ */
+
+/* ── Keyframes ── */
+@keyframes gradientShift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px) rotate(0deg); opacity: 0.6; }
+  50% { transform: translateY(-20px) rotate(5deg); opacity: 0.9; }
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(30px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes orb1 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  25% { transform: translate(80px, -60px) scale(1.1); }
+  50% { transform: translate(-40px, -100px) scale(0.9); }
+  75% { transform: translate(-80px, 40px) scale(1.05); }
+}
+
+@keyframes orb2 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  25% { transform: translate(-60px, 80px) scale(0.95); }
+  50% { transform: translate(100px, 40px) scale(1.1); }
+  75% { transform: translate(40px, -60px) scale(1); }
+}
+
+@keyframes orb3 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(60px, 60px) scale(1.15); }
+  66% { transform: translate(-80px, -40px) scale(0.9); }
+}
+
+/* ── Root overrides ── */
+html:has(.login-page),
+body:has(.login-page) {
+  margin: 0 !important;
+  padding: 0 !important;
+  background: #0a0a1a !important;
+  color-scheme: dark !important;
+  overflow: hidden !important;
+}
+
+/* ── Full-viewport overlay ── */
+.login-page {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: linear-gradient(-45deg, #0a0a1a, #1a0a2e, #0a1628, #0d1117);
+  background-size: 400% 400%;
+  animation: gradientShift 15s ease infinite;
+  z-index: 99999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 20px 16px;
+  box-sizing: border-box;
+}
+
+/* ── Animated background orbs ── */
+.login-page::before,
+.login-page::after {
+  content: '';
+  position: fixed;
+  border-radius: 50%;
+  filter: blur(80px);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.login-page::before {
+  width: 500px;
+  height: 500px;
+  background: radial-gradient(circle, rgba(99, 102, 241, 0.3), transparent 70%);
+  top: -100px;
+  right: -100px;
+  animation: orb1 20s ease-in-out infinite;
+}
+
+.login-page::after {
+  width: 400px;
+  height: 400px;
+  background: radial-gradient(circle, rgba(168, 85, 247, 0.25), transparent 70%);
+  bottom: -80px;
+  left: -80px;
+  animation: orb2 25s ease-in-out infinite;
+}
+
+.login-orb-3 {
+  position: fixed;
+  width: 300px;
+  height: 300px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.2), transparent 70%);
+  filter: blur(60px);
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  animation: orb3 18s ease-in-out infinite;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ── Warning banner ── */
+.login-banner {
+  width: 100%;
+  max-width: 460px;
+  margin-bottom: 20px;
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(239, 68, 68, 0.08));
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: #fca5a5;
+  text-align: center;
+  padding: 10px 20px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: system-ui, -apple-system, sans-serif;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  box-sizing: border-box;
+  flex-shrink: 0;
+  z-index: 1;
+  animation: fadeInUp 0.6s ease-out;
+}
+
+/* ── Glassmorphism card ── */
+.login-card {
+  width: 100%;
+  max-width: 460px;
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.4),
+    0 0 0 1px rgba(255, 255, 255, 0.05) inset,
+    0 -1px 0 0 rgba(255, 255, 255, 0.05) inset;
+  padding: 36px 32px 32px;
+  box-sizing: border-box;
+  flex-shrink: 0;
+  z-index: 1;
+  animation: fadeInUp 0.8s ease-out 0.1s both;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Subtle top gradient accent */
+.login-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #6366f1, #a855f7, #3b82f6);
+  border-radius: 24px 24px 0 0;
+}
+
+/* ============================================================
+   Amplify Authenticator — dark glass theme
+   ============================================================ */
+.login-card [data-amplify-authenticator] {
+  all: unset !important;
+  display: block !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+
+  --amplify-colors-background-primary: transparent;
+  --amplify-colors-background-secondary: rgba(255, 255, 255, 0.04);
+  --amplify-colors-background-tertiary: rgba(255, 255, 255, 0.06);
+  --amplify-colors-border-primary: rgba(255, 255, 255, 0.12);
+  --amplify-colors-border-secondary: rgba(255, 255, 255, 0.08);
+  --amplify-colors-font-primary: #e2e8f0;
+  --amplify-colors-font-secondary: #94a3b8;
+  --amplify-colors-font-interactive: #818cf8;
+  --amplify-colors-brand-primary-10: rgba(99, 102, 241, 0.1);
+  --amplify-colors-brand-primary-80: #6366f1;
+  --amplify-colors-brand-primary-90: #4f46e5;
+  --amplify-colors-brand-primary-100: #4338ca;
+  --amplify-components-authenticator-router-border-width: 0;
+  --amplify-components-authenticator-router-box-shadow: none;
+  --amplify-components-authenticator-router-background-color: transparent;
+  --amplify-components-authenticator-form-padding: 0;
+  --amplify-components-authenticator-width: 100%;
+  --amplify-components-fieldcontrol-border-color: rgba(255, 255, 255, 0.12);
+  --amplify-components-fieldcontrol-color: #e2e8f0;
+  --amplify-components-button-primary-background-color: #6366f1;
+  --amplify-components-button-primary-color: white;
+}
+
+.login-card [data-amplify-authenticator] *,
+.login-card [data-amplify-router],
+.login-card [data-amplify-router] *,
+.login-card [data-amplify-form],
+.login-card [data-amplify-authenticator-signin] {
+  max-width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+}
+
+.login-card [data-amplify-router],
+.login-card [data-amplify-form],
+.login-card [data-amplify-authenticator-signin] {
+  width: 100% !important;
+  border: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+.login-card .amplify-flex {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+}
+
+.login-card .amplify-field,
+.login-card .amplify-field-group,
+.login-card .amplify-field-group__field-wrapper {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+}
+
+.login-card form {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+}
+
+.login-card .amplify-tabs,
+.login-card .amplify-heading {
+  display: none !important;
+}
+
+/* ============================================================
+   Form inputs — dark glass style
+   ============================================================ */
+.login-card .amplify-input,
+.login-card input {
+  background-color: rgba(255, 255, 255, 0.06) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-radius: 12px !important;
+  padding: 12px 16px !important;
+  font-size: 14px !important;
+  color: #e2e8f0 !important;
+  -webkit-text-fill-color: #e2e8f0 !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+  transition: all 0.2s ease;
+}
+
+.login-card .amplify-input:focus,
+.login-card input:focus {
+  border-color: rgba(99, 102, 241, 0.5) !important;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15) !important;
+  background-color: rgba(255, 255, 255, 0.08) !important;
+  outline: none !important;
+}
+
+.login-card .amplify-input::placeholder,
+.login-card input::placeholder {
+  color: #64748b !important;
+  -webkit-text-fill-color: #64748b !important;
+}
+
+.login-card .amplify-field-group__outer-end .amplify-button {
+  background: transparent !important;
+  border: none !important;
+  color: #94a3b8 !important;
+  box-shadow: none !important;
+}
+
+/* ============================================================
+   Buttons
+   ============================================================ */
+.login-card .amplify-button--primary {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6) !important;
+  border-radius: 12px !important;
+  font-weight: 600 !important;
+  padding: 12px 0 !important;
+  font-size: 15px !important;
+  border: none !important;
+  color: white !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3);
+}
+
+.login-card .amplify-button--primary:hover {
+  background: linear-gradient(135deg, #4f46e5, #7c3aed) !important;
+  box-shadow: 0 6px 20px rgba(99, 102, 241, 0.4);
+  transform: translateY(-1px);
+}
+
+.login-card .amplify-label {
+  font-weight: 500 !important;
+  color: #cbd5e1 !important;
+  font-size: 13px !important;
+  letter-spacing: 0.02em;
+}
+
+.login-card .amplify-button--link {
+  color: #818cf8 !important;
+}
+
+.login-card .amplify-text,
+.login-card p,
+.login-card span,
+.login-card label {
+  color: #cbd5e1 !important;
+}
+
+/* ── Custom "or" divider ── */
+.login-divider {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 18px 0 12px;
+  width: 100%;
+}
+
+.login-divider-line {
+  flex: 1;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.login-divider-text {
+  font-size: 11px !important;
+  color: #64748b !important;
+  font-family: system-ui, -apple-system, sans-serif !important;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  flex-shrink: 0;
+  background: transparent !important;
+  padding: 0 !important;
+  border: none !important;
+}
+
+/* Hide any Amplify-injected dividers */
+.login-card .amplify-divider {
+  display: none !important;
+}
+
+/* Non-primary buttons (e.g. Midway SSO) */
+.login-card .amplify-button:not(.amplify-button--primary):not(.amplify-button--link) {
+  color: #e2e8f0 !important;
+  border-color: rgba(255, 255, 255, 0.15) !important;
+  background: rgba(255, 255, 255, 0.06) !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+  border-radius: 12px !important;
+  transition: all 0.2s ease;
+}
+
+.login-card .amplify-button:not(.amplify-button--primary):not(.amplify-button--link):hover {
+  background: rgba(255, 255, 255, 0.1) !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+/* ============================================================
+   Custom elements
+   ============================================================ */
+.login-title {
+  text-align: center;
+  margin-bottom: 28px;
+  width: 100%;
+}
+
+.login-title .login-icon {
+  width: 48px;
+  height: 48px;
+  margin: 0 auto 16px;
+  background: linear-gradient(135deg, #6366f1, #a855f7);
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3);
+}
+
+.login-title h1 {
+  font-size: 24px;
+  font-weight: 700;
+  color: #f1f5f9 !important;
+  margin: 0 0 6px 0;
+  font-family: system-ui, -apple-system, sans-serif;
+  white-space: normal;
+  word-break: break-word;
+  letter-spacing: -0.02em;
+}
+
+.login-title p {
+  font-size: 14px;
+  color: #94a3b8 !important;
+  margin: 0;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+.demo-creds {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 12px;
+  padding: 14px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 8px;
+}
+
+.demo-creds-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #94a3b8 !important;
+  margin-bottom: 10px;
+  font-family: system-ui, -apple-system, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.demo-creds-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  transition: background 0.2s ease;
+}
+
+.demo-creds-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.demo-creds-row:last-child {
+  margin-bottom: 0;
+}
+
+.demo-creds-text {
+  font-size: 13px;
+  color: #cbd5e1 !important;
+  font-family: 'SF Mono', 'Fira Code', monospace, system-ui;
+}
+
+.demo-creds-text strong {
+  font-weight: 600;
+  color: #e2e8f0 !important;
+}
+
+.demo-copy-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  cursor: pointer;
+  padding: 4px 8px;
+  color: #94a3b8;
+  font-size: 13px;
+  flex-shrink: 0;
+  margin-left: 8px;
+  line-height: 1;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.demo-copy-btn:hover {
+  background: rgba(99, 102, 241, 0.15);
+  border-color: rgba(99, 102, 241, 0.3);
+  color: #818cf8;
+}
+
+/* ── Particle canvas ── */
+.login-particles {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}

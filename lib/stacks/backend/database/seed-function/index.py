@@ -188,6 +188,16 @@ def initialize_schema(conn):
         author_role VARCHAR(100),
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
     );
+
+    -- Migrations: add columns if they don't exist (idempotent)
+    ALTER TABLE security_comments ADD COLUMN IF NOT EXISTS author_name VARCHAR(255);
+    ALTER TABLE security_comments ADD COLUMN IF NOT EXISTS author_role VARCHAR(100);
+
+    -- Soft-delete support: add deleted_at columns for accounts and opportunities
+    ALTER TABLE accounts ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE;
+    ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE;
+    CREATE INDEX IF NOT EXISTS idx_accounts_deleted_at ON accounts(deleted_at);
+    CREATE INDEX IF NOT EXISTS idx_opportunities_deleted_at ON opportunities(deleted_at);
     """
     
     cursor = conn.cursor()

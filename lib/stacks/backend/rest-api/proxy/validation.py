@@ -37,8 +37,9 @@ def validate_account(data: Dict[str, Any], is_update: bool = False) -> None:
         ValidationError: If validation fails with field-specific details
     """
     # Required fields for creation
+    # NOTE: healthStatus and healthScore are computed fields — not required from user input
     required_fields = ['name', 'domain', 'industry', 'annualRevenue', 'employeeCount', 
-                      'ownerId', 'healthStatus', 'healthScore']
+                      'ownerId']
     
     if not is_update:
         for field in required_fields:
@@ -83,20 +84,8 @@ def validate_account(data: Dict[str, Any], is_update: bool = False) -> None:
         if not isinstance(data['ownerId'], str) or not data['ownerId'].strip():
             raise ValidationError("Field 'ownerId' must be a non-empty string", field='ownerId')
     
-    # Validate healthStatus enum
-    if 'healthStatus' in data:
-        if data['healthStatus'] not in HEALTH_STATUS_VALUES:
-            raise ValidationError(
-                f"Field 'healthStatus' must be one of: {', '.join(HEALTH_STATUS_VALUES)}",
-                field='healthStatus'
-            )
-    
-    # Validate healthScore
-    if 'healthScore' in data:
-        if not isinstance(data['healthScore'], int):
-            raise ValidationError("Field 'healthScore' must be an integer", field='healthScore')
-        if not (0 <= data['healthScore'] <= 100):
-            raise ValidationError("Field 'healthScore' must be between 0 and 100", field='healthScore')
+    # NOTE: healthStatus and healthScore are computed from business metrics
+    # and are not accepted from user input. They are ignored if provided.
     
     # Validate optional fields if present
     if 'ownerName' in data and data['ownerName'] is not None:
@@ -154,12 +143,19 @@ def validate_opportunity(data: Dict[str, Any], is_update: bool = False) -> None:
         if not isinstance(data['accountId'], str) or not data['accountId'].strip():
             raise ValidationError("Field 'accountId' must be a non-empty string", field='accountId')
     
-    # Validate amount
+    # Validate amount (with upper bound to prevent pipeline inflation)
+    MAX_OPPORTUNITY_AMOUNT = 100_000_000  # $100M reasonable upper bound
     if 'amount' in data:
         if not isinstance(data['amount'], (int, float)):
             raise ValidationError("Field 'amount' must be a number", field='amount')
         if data['amount'] < 0:
             raise ValidationError("Field 'amount' must be non-negative", field='amount')
+        if data['amount'] > MAX_OPPORTUNITY_AMOUNT:
+            raise ValidationError(
+                f"Field 'amount' must not exceed {MAX_OPPORTUNITY_AMOUNT:,.0f}. "
+                f"Contact an administrator for opportunities exceeding this threshold.",
+                field='amount'
+            )
     
     # Validate closeDate (ISO 8601 date string)
     if 'closeDate' in data:

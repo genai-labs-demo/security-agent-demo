@@ -8,7 +8,8 @@ import {
 } from "@cloudscape-design/components";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { get, post } from "aws-amplify/api";
+
+const API_BASE = import.meta.env.VITE_REST_API_URL?.replace(/\/$/, "") ?? "";
 
 const XSS_PAYLOADS = [
     '<script>alert("XSS")</script>',
@@ -28,19 +29,22 @@ const SecurityCommentsPage = () => {
     const [postResult, setPostResult] = useState<any>(null);
     const [loading, setLoading] = useState(false);
     const [searchLoading, setSearchLoading] = useState(false);
+    const [loadError, setLoadError] = useState<string | null>(null);
     const commentsRef = useRef<HTMLDivElement>(null);
 
     const loadComments = useCallback(async () => {
+        setLoadError(null);
         try {
-            const restOp = get({ apiName: "restApi", path: "/security-comments" });
-            const response = await restOp.response;
-            const data = await response.body.json() as any;
+            const res = await fetch(`${API_BASE}/security-comments`);
+            const data = await res.json();
             if (data.success) {
                 setComments(data.data || []);
-                if (data.educational) setPostResult(data);
+            } else {
+                setLoadError(data.error || "Failed to load comments");
             }
-        } catch (err) {
+        } catch (err: any) {
             console.error("Failed to load comments:", err);
+            setLoadError(err?.message || String(err) || "Failed to load comments");
         }
     }, []);
 
@@ -51,20 +55,20 @@ const SecurityCommentsPage = () => {
         setLoading(true);
         setPostResult(null);
         try {
-            const restOp = post({
-                apiName: "restApi",
-                path: "/security-comments",
-                options: { body: { user_id: 1, content: commentInput } as any },
+            const res = await fetch(`${API_BASE}/security-comments`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ user_id: 1, content: commentInput }),
             });
-            const response = await restOp.response;
-            const data = await response.body.json() as any;
+            const data = await res.json();
+            setPostResult(data);
             if (data.success) {
                 setCommentInput("");
-                setPostResult(data);
-                loadComments();
+                await loadComments();
             }
         } catch (err: any) {
-            setPostResult({ success: false, error: err?.message || "Failed" });
+            console.error("Post comment error:", err);
+            setPostResult({ success: false, error: err?.message || String(err) || "Failed to post comment" });
         } finally {
             setLoading(false);
         }
@@ -75,9 +79,12 @@ const SecurityCommentsPage = () => {
         setSearchLoading(true);
         setSearchResults(null);
         try {
-            const restOp = post({ apiName: "restApi", path: "/security-search", options: { body: { q: searchInput } as any } });
-            const response = await restOp.response;
-            const data = await response.body.json() as any;
+            const res = await fetch(`${API_BASE}/security-search`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ q: searchInput }),
+            });
+            const data = await res.json();
             setSearchResults(data);
         } catch (err: any) {
             setSearchResults({ success: false, error: err?.message || "Search failed" });
@@ -117,6 +124,14 @@ element.textContent = userInput;`}</pre>
                         <Box color="text-body-secondary">Post a comment with XSS payloads. The malicious script will be stored and executed when anyone views the comments!</Box>
                         <Textarea value={commentInput} onChange={({ detail }) => setCommentInput(detail.value)} placeholder="Enter your comment (try XSS payloads!)" rows={3} />
                         <Button variant="primary" onClick={postComment} loading={loading}>Post Comment</Button>
+                        {postResult && !postResult.success && (
+                            <Alert type="error" header="Failed to post comment">{postResult.error}</Alert>
+                        )}
+                        {postResult && postResult.success && (
+                            <Alert type="success" header="Comment posted">
+                                {postResult.message || "Comment created successfully"}
+                            </Alert>
+                        )}
 
                         <Container header={<Header variant="h3">📝 Sample XSS Payloads</Header>}>
                             <Box color="text-body-secondary" margin={{ bottom: "s" }}>Click any payload below to try it:</Box>
@@ -162,7 +177,8 @@ element.textContent = userInput;`}</pre>
                 <div ref={commentsRef}>
                     <Container header={<Header variant="h2" actions={<Button onClick={loadComments}>Refresh</Button>}>All Comments</Header>}>
                         <SpaceBetween size="s">
-                            {comments.length === 0 ? (
+                            {loadError && <Alert type="error" header="Failed to load comments">{loadError}</Alert>}
+                            {!loadError && comments.length === 0 ? (
                                 <Box color="text-body-secondary">No comments yet. Be the first to comment!</Box>
                             ) : comments.map((comment, i) => (
                                 <Container key={i}>

@@ -67,11 +67,14 @@ const CRM = () => {
         return breadcrumbs;
     };
 
+    const isSecurityLanding = location.pathname === "/" || location.pathname === "/crm" || location.pathname === "/crm/" || location.pathname === "/crm/security";
+
     return (
         <CRMProvider>
             <Layout
                 navigation={<CRMNavigation />}
                 breadcrumbs={
+                    isSecurityLanding ? undefined :
                     <BreadcrumbGroup
                         items={getBreadcrumbs()}
                         onFollow={(event) => {
@@ -81,24 +84,33 @@ const CRM = () => {
                     />
                 }
                 content={
-                    <ContentLayout>
-                        <SpaceBetween size="l">
-                            <ErrorBoundary>
-                                <Routes>
-                                    <Route index element={<SecurityPage />} />
-                                    <Route path="pipeline" element={<PipelinePage />} />
-                                    <Route path="accounts" element={<AccountsPage />} />
-                                    <Route path="my-opportunities" element={<MyOpportunitiesPage />} />
-                                    <Route path="team" element={<TeamPerformancePage />} />
-                                    <Route path="security" element={<SecurityPage />} />
-                                    <Route path="security/profile" element={<SecurityProfilePage />} />
-                                    <Route path="security/comments" element={<SecurityCommentsPage />} />
-                                    <Route path="security/xss-advanced" element={<SecurityXssAdvancedPage />} />
-                                    <Route path="security/tools" element={<SecurityToolsPage />} />
-                                </Routes>
-                            </ErrorBoundary>
-                        </SpaceBetween>
-                    </ContentLayout>
+                    isSecurityLanding ? (
+                        <ErrorBoundary>
+                            <Routes>
+                                <Route index element={<SecurityPage />} />
+                                <Route path="security" element={<SecurityPage />} />
+                            </Routes>
+                        </ErrorBoundary>
+                    ) : (
+                        <ContentLayout>
+                            <SpaceBetween size="l">
+                                <ErrorBoundary>
+                                    <Routes>
+                                        <Route index element={<SecurityPage />} />
+                                        <Route path="pipeline" element={<PipelinePage />} />
+                                        <Route path="accounts" element={<AccountsPage />} />
+                                        <Route path="my-opportunities" element={<MyOpportunitiesPage />} />
+                                        <Route path="team" element={<TeamPerformancePage />} />
+                                        <Route path="security" element={<SecurityPage />} />
+                                        <Route path="security/profile" element={<SecurityProfilePage />} />
+                                        <Route path="security/comments" element={<SecurityCommentsPage />} />
+                                        <Route path="security/xss-advanced" element={<SecurityXssAdvancedPage />} />
+                                        <Route path="security/tools" element={<SecurityToolsPage />} />
+                                    </Routes>
+                                </ErrorBoundary>
+                            </SpaceBetween>
+                        </ContentLayout>
+                    )
                 }
             />
         </CRMProvider>

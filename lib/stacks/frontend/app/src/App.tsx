@@ -42,10 +42,12 @@ Amplify.configure(
                         redirectSignIn: [
                             "http://localhost:3000",
                             import.meta.env.VITE_CALLBACK_URL,
+                            ...(import.meta.env.VITE_CLOUDFRONT_URL ? [import.meta.env.VITE_CLOUDFRONT_URL] : []),
                         ],
                         redirectSignOut: [
                             "http://localhost:3000",
                             import.meta.env.VITE_CALLBACK_URL,
+                            ...(import.meta.env.VITE_CLOUDFRONT_URL ? [import.meta.env.VITE_CLOUDFRONT_URL] : []),
                         ],
                         responseType: "code",
                     },
@@ -89,7 +91,7 @@ export default function App() {
 
     return (
         <ErrorBoundary>
-            <div>
+            <div style={{ minHeight: "100vh" }}>
                 {authStatus === "configuring" && <Spinner />}
                 {authStatus === "unauthenticated" && <Login />}
                 {authStatus === "authenticated" && (

@@ -1,145 +1,106 @@
 /**
- * Pipeline Stage Metrics Component
- * 
- * Displays horizontal cards showing key pipeline stage metrics including:
- * - Open Pipeline
- * - New opportunities
- * - Won opportunities
- * - Increased value
- * - Moved In
- * - Moved Out
- * - Decreased value
- * - Lost opportunities
- * - Overdue opportunities
- * 
- * Uses Cloudscape Cards and ColumnLayout for responsive design.
+ * Pipeline Stage Metrics — Animated, modern metric cards
  */
-
-import React from 'react';
-import { ColumnLayout, Box, SpaceBetween } from '@cloudscape-design/components';
+import React, { useEffect, useState, useRef } from 'react';
+import { Box, SpaceBetween } from '@cloudscape-design/components';
+import { motion, useInView } from 'motion/react';
 import { PipelineMetrics } from '../../types';
 import { formatCompactCurrency } from '../../utils/formatters';
 
 interface StageMetricsProps {
-  /** Pipeline metrics to display */
-  metrics: PipelineMetrics;
+    metrics: PipelineMetrics;
 }
 
 interface MetricCardData {
-  label: string;
-  value: number;
-  color: 'blue' | 'green' | 'red' | 'orange' | 'grey';
-  icon?: string;
+    label: string;
+    value: number;
+    color: string;
+    bgColor: string;
+    icon: string;
 }
 
-/**
- * StageMetrics Component
- * 
- * Displays pipeline stage metrics in a responsive card layout.
- * Cards are color-coded based on metric type (green for positive, red for negative).
- * 
- * Optimized with React.memo to prevent unnecessary re-renders.
- */
-export const StageMetrics: React.FC<StageMetricsProps> = React.memo(({ metrics }) => {
-  // Define metric cards with labels, values, and color coding
-  const metricCards: MetricCardData[] = [
-    {
-      label: 'Open Pipeline',
-      value: metrics.openPipeline,
-      color: 'blue',
-    },
-    {
-      label: 'New',
-      value: metrics.newOpportunities,
-      color: 'blue',
-    },
-    {
-      label: 'Won',
-      value: metrics.wonOpportunities,
-      color: 'green',
-    },
-    {
-      label: 'Increased',
-      value: metrics.increasedValue,
-      color: 'green',
-    },
-    {
-      label: 'Moved In',
-      value: metrics.movedIn,
-      color: 'blue',
-    },
-    {
-      label: 'Moved Out',
-      value: metrics.movedOut,
-      color: 'orange',
-    },
-    {
-      label: 'Decreased',
-      value: metrics.decreasedValue,
-      color: 'orange',
-    },
-    {
-      label: 'Lost',
-      value: metrics.lostOpportunities,
-      color: 'red',
-    },
-    {
-      label: 'Overdue',
-      value: metrics.overdueOpportunities,
-      color: 'red',
-    },
-  ];
+/* Animated number that counts up */
+const AnimatedValue = ({ value, color }: { value: number; color: string }) => {
+    const [display, setDisplay] = useState(0);
+    const ref = useRef<HTMLDivElement>(null);
+    const inView = useInView(ref, { once: true });
 
-  // Get color styles for metric values
-  const getColorStyle = (color: MetricCardData['color']): React.CSSProperties => {
-    const colorMap = {
-      blue: '#0972D3',
-      green: '#037F0C',
-      red: '#D91515',
-      orange: '#F89406',
-      grey: '#5F6B7A',
-    };
-    return { color: colorMap[color] };
-  };
+    useEffect(() => {
+        if (!inView) return;
+        let start = 0;
+        const step = value / 40;
+        const id = setInterval(() => {
+            start += step;
+            if (start >= value) { setDisplay(value); clearInterval(id); }
+            else setDisplay(Math.floor(start));
+        }, 20);
+        return () => clearInterval(id);
+    }, [inView, value]);
 
-  return (
-    <ColumnLayout 
-      columns={5} 
-      variant="text-grid" 
-      minColumnWidth={150}
-    >
-      {metricCards.map((card, index) => (
-        <div
-          key={index}
-          style={{
-            padding: '16px',
-            border: '1px solid #E9EBED',
-            borderRadius: '8px',
-            backgroundColor: 'white',
-            minHeight: '100px',
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'space-between',
-          }}
-        >
-          <SpaceBetween size="xs">
-            <Box
-              variant="small"
-              color="text-label"
-              fontSize="body-s"
-            >
-              {card.label}
-            </Box>
-            <div style={{ ...getColorStyle(card.color), fontSize: '24px', fontWeight: 'bold' }}>
-              {formatCompactCurrency(card.value)}
-            </div>
-          </SpaceBetween>
+    return (
+        <div ref={ref} style={{ color, fontSize: '22px', fontWeight: 700, letterSpacing: '-0.02em' }}>
+            {formatCompactCurrency(display)}
         </div>
-      ))}
-    </ColumnLayout>
-  );
+    );
+};
+
+export const StageMetrics: React.FC<StageMetricsProps> = React.memo(({ metrics }) => {
+    const metricCards: MetricCardData[] = [
+        { label: 'Open Pipeline', value: metrics.openPipeline, color: '#6366f1', bgColor: 'rgba(99,102,241,0.08)', icon: '📊' },
+        { label: 'New', value: metrics.newOpportunities, color: '#3b82f6', bgColor: 'rgba(59,130,246,0.08)', icon: '✨' },
+        { label: 'Won', value: metrics.wonOpportunities, color: '#22c55e', bgColor: 'rgba(34,197,94,0.08)', icon: '🏆' },
+        { label: 'Increased', value: metrics.increasedValue, color: '#10b981', bgColor: 'rgba(16,185,129,0.08)', icon: '📈' },
+        { label: 'Moved In', value: metrics.movedIn, color: '#06b6d4', bgColor: 'rgba(6,182,212,0.08)', icon: '➡️' },
+        { label: 'Moved Out', value: metrics.movedOut, color: '#f59e0b', bgColor: 'rgba(245,158,11,0.08)', icon: '⬅️' },
+        { label: 'Decreased', value: metrics.decreasedValue, color: '#f97316', bgColor: 'rgba(249,115,22,0.08)', icon: '📉' },
+        { label: 'Lost', value: metrics.lostOpportunities, color: '#ef4444', bgColor: 'rgba(239,68,68,0.08)', icon: '❌' },
+        { label: 'Overdue', value: metrics.overdueOpportunities, color: '#dc2626', bgColor: 'rgba(220,38,38,0.08)', icon: '⏰' },
+    ];
+
+    return (
+        <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
+            gap: '12px',
+        }}>
+            {metricCards.map((card, index) => (
+                <motion.div
+                    key={card.label}
+                    initial={{ opacity: 0, y: 16 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.4, delay: index * 0.04 }}
+                    whileHover={{ y: -3, transition: { duration: 0.15 } }}
+                    style={{
+                        padding: '18px',
+                        borderRadius: '14px',
+                        background: card.bgColor,
+                        border: `1px solid ${card.color}18`,
+                        position: 'relative',
+                        overflow: 'hidden',
+                        cursor: 'default',
+                    }}
+                >
+                    {/* Top accent line */}
+                    <div style={{
+                        position: 'absolute', top: 0, left: 0, right: 0, height: '2px',
+                        background: `linear-gradient(90deg, transparent, ${card.color}, transparent)`,
+                        opacity: 0.6,
+                    }} />
+
+                    <SpaceBetween size="xs">
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Box variant="small" color="text-label" fontSize="body-s">
+                                {card.label}
+                            </Box>
+                            <span style={{ fontSize: '16px' }}>{card.icon}</span>
+                        </div>
+                        <AnimatedValue value={card.value} color={card.color} />
+                    </SpaceBetween>
+                </motion.div>
+            ))}
+        </div>
+    );
 });
 
 StageMetrics.displayName = 'StageMetrics';
-
 export default StageMetrics;

@@ -1,61 +1,155 @@
-// @export {"replace": ", Button, Divider, Flex ", "with": ""}
-import { Authenticator, Button, Divider, Flex, View, Text } from "@aws-amplify/ui-react";
-// @export {"deleteLines": 2}
+import { Authenticator, Button } from "@aws-amplify/ui-react";
 import { signInWithRedirect } from "aws-amplify/auth";
+import { useEffect, useRef } from "react";
 import Amazicon from "./amazicon.svg";
+import "./Login.css";
+
+/** Lightweight particle system drawn on a background canvas */
+function useParticles(canvasRef: React.RefObject<HTMLCanvasElement | null>) {
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+
+        let animId: number;
+        const dpr = window.devicePixelRatio || 1;
+
+        const resize = () => {
+            canvas.width = window.innerWidth * dpr;
+            canvas.height = window.innerHeight * dpr;
+            canvas.style.width = `${window.innerWidth}px`;
+            canvas.style.height = `${window.innerHeight}px`;
+            ctx.scale(dpr, dpr);
+        };
+        resize();
+        window.addEventListener("resize", resize);
+
+        interface Particle { x: number; y: number; vx: number; vy: number; r: number; o: number; }
+        const particles: Particle[] = Array.from({ length: 60 }, () => ({
+            x: Math.random() * window.innerWidth,
+            y: Math.random() * window.innerHeight,
+            vx: (Math.random() - 0.5) * 0.4,
+            vy: (Math.random() - 0.5) * 0.4,
+            r: Math.random() * 2 + 0.5,
+            o: Math.random() * 0.4 + 0.1,
+        }));
+
+        const draw = () => {
+            ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+            const w = window.innerWidth, h = window.innerHeight;
+
+            for (const p of particles) {
+                p.x += p.vx; p.y += p.vy;
+                if (p.x < 0) p.x = w; if (p.x > w) p.x = 0;
+                if (p.y < 0) p.y = h; if (p.y > h) p.y = 0;
+
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(148, 163, 184, ${p.o})`;
+                ctx.fill();
+            }
+
+            // Draw connections
+            for (let i = 0; i < particles.length; i++) {
+                for (let j = i + 1; j < particles.length; j++) {
+                    const dx = particles[i].x - particles[j].x;
+                    const dy = particles[i].y - particles[j].y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist < 120) {
+                        ctx.beginPath();
+                        ctx.moveTo(particles[i].x, particles[i].y);
+                        ctx.lineTo(particles[j].x, particles[j].y);
+                        ctx.strokeStyle = `rgba(99, 102, 241, ${0.08 * (1 - dist / 120)})`;
+                        ctx.lineWidth = 0.5;
+                        ctx.stroke();
+                    }
+                }
+            }
+            animId = requestAnimationFrame(draw);
+        };
+        draw();
+
+        return () => {
+            cancelAnimationFrame(animId);
+            window.removeEventListener("resize", resize);
+        };
+    }, [canvasRef]);
+}
 
 const Login = () => {
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+    useParticles(canvasRef);
+
+    const copy = (text: string) => {
+        navigator.clipboard.writeText(text);
+    };
+
     return (
-        <Authenticator
-            // @export {"replace": "true", "with": "false"}
-            hideSignUp={true}
-            variation="modal"
-            // socialProviders={["amazon"]}
-            // @export {"deleteLines": 19}
-            components={{
-                SignIn: {
-                    Header: () => {
-                        return (
-                            <Flex direction="column" padding="2rem 2rem 0">
-                                <Button onClick={() => signInWithRedirect()} gap="1rem" isFullWidth>
-                                    <img
-                                        src={Amazicon}
-                                        alt="Amazon icon"
-                                        style={{ width: "15px" }}
-                                    />
-                                    Sign in with Midway
-                                </Button>
-                                <Divider label="or" size="small" />
-                            </Flex>
-                        );
-                    },
-                    Footer: () => {
-                        return (
-                            <View
-                                padding="1rem 2rem 2rem"
-                            >
-                                <View
-                                    backgroundColor="rgba(0, 0, 0, 0.06)"
-                                    borderRadius="8px"
-                                    padding="12px 16px"
-                                    border="1px solid rgba(0, 0, 0, 0.15)"
-                                >
-                                    <Text fontSize="13px" color="#232f3e" fontWeight="600" marginBottom="4px">
-                                        Demo Credentials
-                                    </Text>
-                                    <Text fontSize="12px" color="#545b64">
-                                        Username: user_test@example.com
-                                    </Text>
-                                    <Text fontSize="12px" color="#545b64">
-                                        Password: AWS123xyz!
-                                    </Text>
-                                </View>
-                            </View>
-                        );
-                    },
-                },
-            }}
-        />
+        <div className="login-page">
+            <canvas ref={canvasRef} className="login-particles" />
+            <div className="login-orb-3" />
+
+            <div className="login-banner">
+                {"⚠️ This is an intentionally vulnerable application for educational purposes only"}
+            </div>
+
+            <div className="login-card">
+                <Authenticator
+                    hideSignUp={true}
+                    components={{
+                        SignIn: {
+                            Header: () => (
+                                <div style={{ display: "flex", flexDirection: "column", paddingBottom: "8px", width: "100%", boxSizing: "border-box" }}>
+                                    <div className="login-title">
+                                        <div className="login-icon">🛡️</div>
+                                        <h1>AWS Security Agent Demo</h1>
+                                        <p>Educational Vulnerability Testing Platform</p>
+                                    </div>
+
+                                    <Button
+                                        onClick={() => signInWithRedirect()}
+                                        gap="0.75rem"
+                                        isFullWidth
+                                    >
+                                        <img src={Amazicon} alt="Amazon icon" style={{ width: "15px", flexShrink: 0, filter: "brightness(0) invert(1)" }} />
+                                        Sign in with Midway
+                                    </Button>
+                                    <div className="login-divider">
+                                        <span className="login-divider-line" />
+                                        <span className="login-divider-text">or</span>
+                                        <span className="login-divider-line" />
+                                    </div>
+                                </div>
+                            ),
+                            Footer: () => (
+                                <div style={{ padding: "8px 0 0", width: "100%", boxSizing: "border-box" }}>
+                                    <div className="demo-creds">
+                                        <div className="demo-creds-title">Demo Credentials</div>
+                                        <div className="demo-creds-row">
+                                            <span className="demo-creds-text">
+                                                <strong>User:</strong> user_test@example.com
+                                            </span>
+                                            <button type="button" className="demo-copy-btn" onClick={() => copy("user_test@example.com")} title="Copy username" aria-label="Copy username">
+                                                📋
+                                            </button>
+                                        </div>
+                                        <div className="demo-creds-row">
+                                            <span className="demo-creds-text">
+                                                <strong>Pass:</strong> AWS123xyz!
+                                            </span>
+                                            <button type="button" className="demo-copy-btn" onClick={() => copy("AWS123xyz!")} title="Copy password" aria-label="Copy password">
+                                                📋
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            ),
+                        },
+                    }}
+                />
+            </div>
+        </div>
     );
 };
 

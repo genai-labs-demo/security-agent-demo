@@ -11,6 +11,8 @@ Vulnerability inventory (matches pen-test target set):
   5. Command Injection #1   — POST /security-tools/ping   (shell=True with user input)
   6. Command Injection #2   — POST /security-tools/ping   (pipe / semicolon chaining)
   7. Mass Assignment        — POST /security-comments     (author_name & role accepted from body)
+  8. Stored XSS (HTML)      — GET /security-xss-comments  (renders stored comments as HTML for pen-test detection)
+  9. Reflected XSS (HTML)   — GET /security-xss-search?q= (reflects search query in HTML for pen-test detection)
 """
 
 import json
@@ -106,7 +108,8 @@ def get_security_profile(connection, user_id):
     cursor = connection.cursor()
     try:
         # VULNERABILITY: SQL Injection - string concatenation instead of parameterized query
-        query = f"SELECT id, username, email, role, bio, created_at FROM security_users WHERE id = '{user_id}'"
+        # Cast id to TEXT so string-based payloads (e.g. admin' --) work without type errors
+        query = f"SELECT id, username, email, role, bio, created_at FROM security_users WHERE id::text = '{user_id}'"
         logger.info(f"[VULNERABLE] Executing SQL query: {query}")
 
         cursor.execute(query)
@@ -359,6 +362,121 @@ def render_xss_page(query_params):
 </html>"""
 
     return {"_html": True, "content": html}
+
+def render_xss_comments_page(connection):
+    """
+    GET /security-xss-comments
+    VULNERABILITY: Stored XSS — renders stored comments as HTML without encoding.
+    Returns text/html so pen-test scanners can detect stored XSS payloads executing
+    in a real HTML page context (unlike the JSON API which returns application/json).
+    """
+    cursor = connection.cursor()
+    try:
+        cursor.execute("""
+            SELECT c.id, c.user_id, c.content, c.author_name, c.author_role, c.created_at, u.username
+            FROM security_comments c
+            LEFT JOIN security_users u ON c.user_id = u.id
+            ORDER BY c.created_at DESC
+            LIMIT 50
+        """)
+        columns = [desc[0] for desc in cursor.description]
+        rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+        comments_html = ""
+        for row in rows:
+            username = row.get("username") or "Anonymous"
+            # VULNERABILITY: Stored XSS — content rendered directly in HTML without encoding
+            content = row.get("content", "")
+            comments_html += f"""
+            <div style="border:1px solid #333;border-radius:6px;padding:12px;margin:8px 0;background:#16213e;">
+                <strong style="color:#ffa07a;">{username}</strong>
+                <div style="margin-top:6px;color:#e0e0e0;">{content}</div>
+            </div>"""
+
+        html = f"""<!DOCTYPE html>
+<html>
+<head><title>CRM Comments - Security Demo</title></head>
+<body style="font-family:Arial,sans-serif;max-width:800px;margin:40px auto;padding:0 20px;background:#1a1a2e;color:#e0e0e0;">
+<h1 style="color:#ff6b6b;">CRM Comments Board</h1>
+<p>Showing all comments from the CRM system.</p>
+<div id="comments">{comments_html if comments_html else '<p>No comments yet.</p>'}</div>
+<hr style="border-color:#333;margin:24px 0;">
+<form method="GET" action="">
+  <label for="q" style="color:#ffa07a;">Search comments:</label><br>
+  <input type="text" name="q" id="q" style="padding:8px;width:60%;background:#0f3460;color:#e0e0e0;border:1px solid #533483;border-radius:4px;" placeholder="Search...">
+  <button type="submit" style="padding:8px 16px;background:#e94560;color:white;border:none;border-radius:4px;cursor:pointer;">Search</button>
+</form>
+</body>
+</html>"""
+
+        return {"_html": True, "content": html}
+
+    except Exception as e:
+        logger.error(f"[VULNERABLE] Error rendering comments page: {str(e)}")
+        connection.rollback()
+        return {"_html": True, "content": f"<html><body><h1>Error</h1><p>{str(e)}</p></body></html>"}
+    finally:
+        cursor.close()
+
+
+def render_xss_search_page(connection, query):
+    """
+    GET /security-xss-search?q=...
+    VULNERABILITY: Reflected XSS — search query reflected directly in HTML response.
+    Returns text/html so pen-test scanners can detect reflected XSS in a real HTML context.
+    """
+    results_html = ""
+    if query:
+        cursor = connection.cursor()
+        try:
+            cursor.execute("""
+                SELECT c.id, c.content, c.created_at, u.username
+                FROM security_comments c
+                LEFT JOIN security_users u ON c.user_id = u.id
+                WHERE c.content ILIKE %s
+                ORDER BY c.created_at DESC
+                LIMIT 20
+            """, (f"%{query}%",))
+            columns = [desc[0] for desc in cursor.description]
+            rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+            for row in rows:
+                username = row.get("username") or "Anonymous"
+                # VULNERABILITY: Stored XSS — content rendered without encoding
+                content = row.get("content", "")
+                results_html += f"""
+                <div style="border:1px solid #333;border-radius:6px;padding:12px;margin:8px 0;background:#16213e;">
+                    <strong style="color:#ffa07a;">{username}</strong>
+                    <div style="margin-top:6px;color:#e0e0e0;">{content}</div>
+                </div>"""
+
+            if not rows:
+                results_html = "<p>No results found.</p>"
+        except Exception as e:
+            logger.error(f"[VULNERABLE] Search error: {str(e)}")
+            connection.rollback()
+            results_html = f"<p>Search error: {str(e)}</p>"
+        finally:
+            cursor.close()
+
+    # VULNERABILITY: Reflected XSS — query injected directly into HTML without encoding
+    html = f"""<!DOCTYPE html>
+<html>
+<head><title>Search Results - Security Demo</title></head>
+<body style="font-family:Arial,sans-serif;max-width:800px;margin:40px auto;padding:0 20px;background:#1a1a2e;color:#e0e0e0;">
+<h1 style="color:#ff6b6b;">Comment Search</h1>
+<form method="GET" action="">
+  <input type="text" name="q" value="{query}" style="padding:8px;width:60%;background:#0f3460;color:#e0e0e0;border:1px solid #533483;border-radius:4px;">
+  <button type="submit" style="padding:8px 16px;background:#e94560;color:white;border:none;border-radius:4px;cursor:pointer;">Search</button>
+</form>
+<h2 style="color:#ffa07a;">Results for: {query}</h2>
+<div id="results">{results_html}</div>
+</body>
+</html>"""
+
+    return {"_html": True, "content": html}
+
+
 
 
 # ============================================================

@@ -8,13 +8,14 @@ import {
 } from "@cloudscape-design/components";
 import { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { post } from "aws-amplify/api";
+
+const API_BASE = import.meta.env.VITE_REST_API_URL?.replace(/\/$/, "") ?? "";
 
 const SAMPLE_PAYLOADS = [
-    "1 OR 1=1",
     "1' OR '1'='1",
+    "1' OR '1'='1' --",
     "admin' --",
-    "1' UNION SELECT * FROM security_users --",
+    "1' UNION SELECT id, username, email, role, bio, created_at FROM security_users --",
 ];
 
 const SecurityProfilePage = () => {
@@ -32,9 +33,12 @@ const SecurityProfilePage = () => {
         setError(null);
         setResult(null);
         try {
-            const restOp = post({ apiName: "restApi", path: "/security-profile", options: { body: { user_id: searchId } as any } });
-            const response = await restOp.response;
-            const data = await response.body.json() as any;
+            const res = await fetch(`${API_BASE}/security-profile`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ user_id: searchId }),
+            });
+            const data = await res.json();
             setResult(data);
         } catch (err: any) {
             setError(err?.message || "Request failed");
