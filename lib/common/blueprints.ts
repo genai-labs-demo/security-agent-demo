@@ -11,6 +11,7 @@ import { PythonFunction, PythonFunctionProps } from "@aws-cdk/aws-lambda-python-
 import { LogGroup, LogGroupProps, RetentionDays } from "aws-cdk-lib/aws-logs";
 import { BlockPublicAccess, Bucket, BucketProps } from "aws-cdk-lib/aws-s3";
 import { Construct } from "constructs";
+import { isProductionEnvironment } from "./utilities";
 
 export class LogGroupInjector implements IPropertyInjector {
     public readonly constructUniqueId: string;
@@ -76,11 +77,23 @@ export class BucketInjector implements IPropertyInjector {
             ...(originalProps?.serverAccessLogsBucket && {
                 serverAccessLogsPrefix: `${context.id}/`,
             }),
-            autoDeleteObjects: true,
             ...originalProps,
-            ...((originalProps?.autoDeleteObjects ?? true) && {
-                removalPolicy: RemovalPolicy.DESTROY,
-            }),
+            // Environment-aware deletion policies: safe defaults for production
+            ...((() => {
+                const isProduction = isProductionEnvironment(context.scope);
+                const autoDeleteObjects = originalProps?.autoDeleteObjects ?? !isProduction;
+                
+                // Only set DESTROY removal policy if autoDeleteObjects is enabled
+                // Otherwise default to RETAIN for production, DESTROY for dev
+                const removalPolicy = originalProps?.removalPolicy ?? 
+                    (autoDeleteObjects ? RemovalPolicy.DESTROY : 
+                        (isProduction ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY));
+                
+                return {
+                    autoDeleteObjects,
+                    removalPolicy,
+                };
+            })()),
             blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
             enforceSSL: true,
         };

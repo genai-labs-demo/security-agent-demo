@@ -25,6 +25,7 @@ import { Provider } from "aws-cdk-lib/custom-resources";
 import { PythonFunction } from "@aws-cdk/aws-lambda-python-alpha";
 import { NagSuppressions } from "cdk-nag";
 import * as path from "path";
+import { isProductionEnvironment } from "../../common/utilities";
 
 export interface DatabaseProps {
     vpc: IVpc;
@@ -46,6 +47,11 @@ export class Database extends Construct {
         const { vpc, securityGroup, imagesBucket } = props;
 
         this.databaseName = "crmdb";
+        // Enable deletion protection in production environments
+        // Disable in dev/demo for easier cleanup
+        const isProduction = isProductionEnvironment(this);
+        const deletionProtection = isProduction;
+
 
         this.database = new DatabaseInstance(this, "database", {
             engine: DatabaseInstanceEngine.postgres({
@@ -65,7 +71,7 @@ export class Database extends Construct {
             enablePerformanceInsights: true,
             iamAuthentication: true,
             publiclyAccessible: false,
-            deletionProtection: false,
+            deletionProtection,
             removalPolicy: RemovalPolicy.SNAPSHOT,
         });
 
@@ -82,7 +88,7 @@ export class Database extends Construct {
                 },
                 {
                     id: "AwsSolutions-RDS10",
-                    reason: "Deletion protection disabled for demo environment - allows easy cleanup",
+                    reason: "Deletion protection conditionally enabled based on environment (prod: enabled, dev/demo: disabled)",
                 },
                 {
                     id: "AwsSolutions-RDS11",
