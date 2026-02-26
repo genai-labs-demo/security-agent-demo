@@ -14,6 +14,12 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 
+# Fields that are computed from opportunity metrics and cannot be set directly by users
+# These fields are automatically recalculated when opportunities are created/updated/deleted
+COMPUTED_FIELDS = {'pipeline_value', 'closed_won_value', 'quota_attainment', 
+                   'win_rate', 'opportunity_count'}
+
+
 def _map_team_member_to_api_format(db_record: Dict[str, Any]) -> Dict[str, Any]:
     """
     Map database snake_case columns to camelCase API response fields.
@@ -43,6 +49,10 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Map camelCase API fields to snake_case database columns.
     
+    NOTE: Computed fields (pipeline_value, closed_won_value, quota_attainment, 
+    win_rate, opportunity_count) are automatically stripped to prevent manual 
+    manipulation. These fields are recalculated from opportunity data.
+    
     Args:
         api_data: API request data with camelCase field names
     
@@ -69,6 +79,10 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
         if api_field in api_data:
             db_data[db_field] = api_data[api_field]
     
+    
+    # Strip computed fields — these are derived from opportunity metrics, not user input
+    for field in COMPUTED_FIELDS:
+        db_data.pop(field, None)
     return db_data
 
 

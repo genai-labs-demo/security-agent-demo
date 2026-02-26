@@ -118,6 +118,89 @@ def _recalculate_account_aggregates(connection, account_id: str) -> None:
         cursor.close()
 
 
+def _recalculate_team_member_aggregates(connection, owner_id: str) -> None:
+    """
+    Recalculate and update aggregate metrics for a team member based on their opportunities.
+    
+    Calculates:
+    - pipeline_value: Sum of all non-closed opportunity amounts
+    - closed_won_value: Sum of 'Closed Won' opportunity amounts
+    - opportunity_count: Count of all active (non-deleted) opportunities
+    - win_rate: Percentage of closed opportunities that were won
+    - quota_attainment: (closed_won_value / quota) * 100
+    
+    Args:
+        connection: Database connection object
+        owner_id: Team member ID whose aggregates need recalculation
+    """
+    if not owner_id:
+        return
+    
+    cursor = connection.cursor()
+    try:
+        cursor.execute("""
+            UPDATE team_members
+            SET 
+                pipeline_value = sub.pipeline_val,
+                closed_won_value = sub.closed_won_val,
+                opportunity_count = sub.opp_count,
+                win_rate = sub.calculated_win_rate,
+                quota_attainment = sub.calculated_quota_attainment
+            FROM (
+                SELECT
+                    -- Pipeline value: sum of all non-closed opportunities
+                    COALESCE(SUM(
+                        CASE 
+                            WHEN stage NOT IN ('Closed Won', 'Closed Lost') 
+                            THEN amount 
+                            ELSE 0 
+                        END
+                    ), 0) AS pipeline_val,
+                    
+                    -- Closed won value: sum of won opportunities
+                    COALESCE(SUM(
+                        CASE 
+                            WHEN stage = 'Closed Won' 
+                            THEN amount 
+                            ELSE 0 
+                        END
+                    ), 0) AS closed_won_val,
+                    
+                    -- Total opportunity count
+                    COUNT(*)::int AS opp_count,
+                    
+                    -- Win rate: percentage of closed opportunities that were won
+                    CASE 
+                        WHEN COUNT(CASE WHEN stage IN ('Closed Won', 'Closed Lost') THEN 1 END) > 0
+                        THEN (COUNT(CASE WHEN stage = 'Closed Won' THEN 1 END)::numeric / 
+                              COUNT(CASE WHEN stage IN ('Closed Won', 'Closed Lost') THEN 1 END)::numeric * 100)
+                        ELSE 0
+                    END AS calculated_win_rate,
+                    
+                    -- Quota attainment: (closed_won_value / quota) * 100
+                    CASE 
+                        WHEN tm.quota > 0 
+                        THEN (COALESCE(SUM(CASE WHEN stage = 'Closed Won' THEN amount ELSE 0 END), 0) / tm.quota * 100)
+                        ELSE 0
+                    END AS calculated_quota_attainment
+                    
+                FROM opportunities
+                CROSS JOIN team_members tm
+                WHERE opportunities.owner_id = %s 
+                  AND opportunities.deleted_at IS NULL
+                  AND tm.id = %s
+            ) sub
+            WHERE team_members.id = %s
+        """, (owner_id, owner_id, owner_id))
+        connection.commit()
+        logger.info(f"Recalculated aggregates for team member {owner_id}")
+    except Exception as e:
+        logger.error(f"Failed to recalculate aggregates for team member {owner_id}: {str(e)}")
+        # Don't rollback here — let the caller handle transaction management
+    finally:
+        cursor.close()
+
+
 def search_opportunities(connection, search_query: str, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Perform full text search on opportunities using multiple keywords.
@@ -485,6 +568,9 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         # Recalculate parent account aggregates
         _recalculate_account_aggregates(connection, db_data.get('account_id'))
         
+        # Recalculate owner team member aggregates
+        _recalculate_team_member_aggregates(connection, db_data.get('owner_id'))
+        
         logger.info(f"Created opportunity with ID: {opportunity['id']}")
         return opportunity
         
@@ -597,6 +683,9 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         # Recalculate parent account aggregates (handles amount or account changes)
         _recalculate_account_aggregates(connection, record.get('account_id'))
         
+        # Recalculate owner team member aggregates
+        _recalculate_team_member_aggregates(connection, record.get('owner_id'))
+        
         logger.info(f"Updated opportunity: {opportunity_id}")
         return opportunity
         
@@ -645,7 +734,7 @@ def delete_opportunity(connection, opportunity_id: str) -> bool:
         cursor = connection.cursor()
 
         # Check if opportunity exists and capture account_id for aggregate recalculation
-        cursor.execute(
+            "SELECT id, account_id, owner_id FROM opportunities WHERE id = %s AND (deleted_at IS NULL)",
             "SELECT id, account_id FROM opportunities WHERE id = %s AND (deleted_at IS NULL)",
             (opportunity_id,)
         )
@@ -655,6 +744,7 @@ def delete_opportunity(connection, opportunity_id: str) -> bool:
             logger.info(f"Opportunity not found for deletion: {opportunity_id}")
             return False
 
+        owner_id = row[2]
         account_id = row[1]
 
         # Soft-delete: set deleted_at timestamp instead of removing the row
@@ -667,6 +757,9 @@ def delete_opportunity(connection, opportunity_id: str) -> bool:
 
         # Recalculate parent account aggregates
         _recalculate_account_aggregates(connection, account_id)
+
+        # Recalculate owner team member aggregates
+        _recalculate_team_member_aggregates(connection, owner_id)
 
         logger.info(f"Soft-deleted opportunity: {opportunity_id}")
         return True
