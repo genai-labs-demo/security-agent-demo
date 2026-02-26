@@ -38,7 +38,9 @@ def _map_opportunity_to_api_format(db_record: Dict[str, Any]) -> Dict[str, Any]:
         'forecastCategory': db_record.get('forecast_category'),
         'ownerId': db_record.get('owner_id'),
         'ownerName': db_record.get('owner_name'),
+        'createdDate': db_record.get('created_date').isoformat() if db_record.get('created_date') else None,
         'probability': db_record.get('probability'),
+        'actualClosedDate': db_record.get('actual_closed_date').isoformat() if db_record.get('actual_closed_date') else None
         'createdDate': db_record.get('created_date').isoformat() if db_record.get('created_date') else None,
         'lastModifiedDate': db_record.get('last_modified_date').isoformat() if db_record.get('last_modified_date') else None
     }
@@ -72,6 +74,8 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
         'ownerName': 'owner_name',
         'probability': 'probability',
         'createdDate': 'created_date',
+        'createdDate': 'created_date',
+        'actualClosedDate': 'actual_closed_date'
         'lastModifiedDate': 'last_modified_date'
     }
     
@@ -204,7 +208,7 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
                 o.forecast_category, o.owner_id, o.owner_name, o.probability,
                 o.created_date, o.last_modified_date,
                 -- Calculate relevance score based on keyword matches
-                (
+                o.created_date, o.last_modified_date, o.actual_closed_date,
                     {relevance_sql}
                 ) as relevance_score,
                 -- Count total keyword matches across all fields
@@ -324,7 +328,7 @@ def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dic
                 stage, next_step, recent_activity, recent_activity_date,
                 forecast_category, owner_id, owner_name, probability,
                 created_date, last_modified_date
-            FROM opportunities
+                created_date, last_modified_date, actual_closed_date
             WHERE deleted_at IS NULL
         """
         
@@ -378,7 +382,7 @@ def get_opportunity(connection, opportunity_id: str) -> Optional[Dict[str, Any]]
                 stage, next_step, recent_activity, recent_activity_date,
                 forecast_category, owner_id, owner_name, probability,
                 created_date, last_modified_date
-            FROM opportunities
+                created_date, last_modified_date, actual_closed_date
             WHERE id = %s AND deleted_at IS NULL
         """
         
@@ -471,7 +475,7 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
                 id, name, account_id, account_name, amount, close_date,
                 stage, next_step, recent_activity, recent_activity_date,
                 forecast_category, owner_id, owner_name, probability,
-                created_date, last_modified_date
+                created_date, last_modified_date, actual_closed_date
         """
         
         cursor.execute(query, values)
@@ -529,6 +533,14 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
     try:
         logger.info(f"Updating opportunity: {opportunity_id}")
         
+        # Check if stage is being changed to ClosedWon and set actualClosedDate
+        if 'stage' in data and data['stage'] == 'Closed Won':
+            # Get current opportunity to check if stage is changing
+            current_opp = get_opportunity(connection, opportunity_id)
+            if current_opp and current_opp.get('stage') != 'Closed Won':
+                # Stage is changing to ClosedWon, set actualClosedDate
+                data['actualClosedDate'] = datetime.utcnow().isoformat()
+        
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
         
@@ -575,7 +587,7 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
             RETURNING 
                 id, name, account_id, account_name, amount, close_date,
                 stage, next_step, recent_activity, recent_activity_date,
-                forecast_category, owner_id, owner_name, probability,
+                created_date, last_modified_date, actual_closed_date
                 created_date, last_modified_date
         """
         

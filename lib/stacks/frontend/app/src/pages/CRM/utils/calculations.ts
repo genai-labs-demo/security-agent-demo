@@ -148,6 +148,7 @@ export function calculateAverageDealSize(opportunities: Opportunity[]): number {
 
 /**
  * Calculate pipeline velocity (average days to close)
+ * Uses actualClosedDate when available for accurate velocity calculation.
  * 
  * @param opportunities - Array of closed opportunities to analyze
  * @returns Average days from creation to close
@@ -166,7 +167,12 @@ export function calculatePipelineVelocity(opportunities: Opportunity[]): number 
   
   const totalDays = closedWonOpportunities.reduce((sum, opp) => {
     const created = new Date(opp.createdDate).getTime();
-    const closed = new Date(opp.lastModifiedDate).getTime();
+    // Use actualClosedDate if available (when opportunity was actually closed),
+    // otherwise fall back to closeDate (expected close date) as best estimate.
+    // lastModifiedDate is NOT used as it reflects any modification, not the close event.
+    const closedDate = opp.actualClosedDate || opp.closeDate;
+    const closed = new Date(closedDate).getTime();
+    
     const days = (closed - created) / (1000 * 60 * 60 * 24);
     return sum + days;
   }, 0);

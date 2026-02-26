@@ -106,6 +106,9 @@ export interface Opportunity {
   
   /** Date opportunity was last modified */
   lastModifiedDate: Date;
+  
+  /** Date opportunity was actually closed (when stage changed to Closed Won) */
+  actualClosedDate?: Date;
 }
 
 /**
