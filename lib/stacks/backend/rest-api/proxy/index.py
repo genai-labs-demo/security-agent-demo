@@ -63,6 +63,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     request_id = context.aws_request_id if context else "unknown"
     logger.info(f"Processing request {request_id}: {event.get('httpMethod')} {event.get('path')}")
     
+    connection = None  # Initialize to prevent NameError in finally block
+    
     try:
         # Handle CORS preflight requests
         if event.get('httpMethod') == 'OPTIONS':
@@ -121,7 +123,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             response = format_success_response(result, route_info, operation)
         finally:
             # Return database connection to pool
-            return_database_connection(connection)
+            # Only return if connection was successfully obtained
+            if connection is not None:
+                return_database_connection(connection)
         
         # Apply CORS headers
         response = process_cors(event, response)
