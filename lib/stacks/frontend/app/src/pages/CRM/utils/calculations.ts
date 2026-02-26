@@ -89,7 +89,9 @@ export function calculateQuotaAttainment(closed: number, quota: number): number 
 }
 
 /**
- * Calculate win rate from opportunities
+ * Calculate win rate from opportunities using amount-based formula
+ * 
+ * Formula: (Total Won Amount / Total Closed Amount) × 100
  * 
  * @param opportunities - Array of opportunities to analyze
  * @returns Win rate percentage (0-100)
@@ -106,11 +108,23 @@ export function calculateWinRate(opportunities: Opportunity[]): number {
     return 0;
   }
   
-  const wonOpportunities = closedOpportunities.filter(
-    (opp) => opp.stage === OpportunityStage.ClosedWon
+  // Calculate total closed amount (won + lost)
+  const totalClosedAmount = closedOpportunities.reduce(
+    (sum, opp) => sum + opp.amount,
+    0
   );
   
-  return (wonOpportunities.length / closedOpportunities.length) * 100;
+  if (totalClosedAmount === 0) {
+    return 0;
+  }
+  
+  // Calculate total won amount
+  const totalWonAmount = closedOpportunities
+    .filter((opp) => opp.stage === OpportunityStage.ClosedWon)
+    .reduce((sum, opp) => sum + opp.amount, 0);
+  
+  // Return amount-based win rate (industry standard)
+  return (totalWonAmount / totalClosedAmount) * 100;
 }
 
 /**
