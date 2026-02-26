@@ -9,6 +9,7 @@ import psycopg2
 from psycopg2.extras import execute_batch
 import os
 import random
+import uuid
 from datetime import datetime, timezone, timedelta
 import urllib3
 
@@ -237,20 +238,23 @@ def seed_data(conn):
         )
     
     # Team members (12 members)
-    team_members = [
-        ('tm-001', 'Sarah Chen', 'sarah.chen@example.com', 'Sales Director', 5000000, 8500000, 4200000, 84, 65, 45, None),
-        ('tm-002', 'Michael Rodriguez', 'michael.rodriguez@example.com', 'Senior AE', 3000000, 4500000, 2800000, 93, 72, 38, None),
-        ('tm-003', 'Emily Watson', 'emily.watson@example.com', 'Account Executive', 2500000, 3200000, 2100000, 84, 68, 32, None),
-        ('tm-004', 'David Kim', 'david.kim@example.com', 'Account Executive', 2500000, 2800000, 1900000, 76, 64, 28, None),
-        ('tm-005', 'Jessica Martinez', 'jessica.martinez@example.com', 'Sales Manager', 4000000, 6200000, 3800000, 95, 70, 42, None),
-        ('tm-006', 'James Anderson', 'james.anderson@example.com', 'Enterprise AE', 3500000, 5100000, 3200000, 91, 75, 35, None),
-        ('tm-007', 'Lisa Thompson', 'lisa.thompson@example.com', 'Account Executive', 2500000, 2900000, 2000000, 80, 66, 30, None),
-        ('tm-008', 'Robert Taylor', 'robert.taylor@example.com', 'Senior AE', 3000000, 4200000, 2700000, 90, 71, 36, None),
-        ('tm-009', 'Amanda White', 'amanda.white@example.com', 'Account Executive', 2500000, 3100000, 2200000, 88, 69, 31, None),
-        ('tm-010', 'Christopher Lee', 'christopher.lee@example.com', 'Sales Manager', 4000000, 5800000, 3600000, 90, 73, 40, None),
-        ('tm-011', 'Michelle Brown', 'michelle.brown@example.com', 'Account Executive', 2500000, 2700000, 1800000, 72, 62, 27, None),
+        (str(uuid.uuid4()), 'Sarah Chen', 'sarah.chen@example.com', 'Sales Director', 5000000, 8500000, 4200000, 84, 65, 45, None),
+        (str(uuid.uuid4()), 'Michael Rodriguez', 'michael.rodriguez@example.com', 'Senior AE', 3000000, 4500000, 2800000, 93, 72, 38, None),
+        (str(uuid.uuid4()), 'Emily Watson', 'emily.watson@example.com', 'Account Executive', 2500000, 3200000, 2100000, 84, 68, 32, None),
+        (str(uuid.uuid4()), 'David Kim', 'david.kim@example.com', 'Account Executive', 2500000, 2800000, 1900000, 76, 64, 28, None),
+        (str(uuid.uuid4()), 'Jessica Martinez', 'jessica.martinez@example.com', 'Sales Manager', 4000000, 6200000, 3800000, 95, 70, 42, None),
+        (str(uuid.uuid4()), 'James Anderson', 'james.anderson@example.com', 'Enterprise AE', 3500000, 5100000, 3200000, 91, 75, 35, None),
+        (str(uuid.uuid4()), 'Lisa Thompson', 'lisa.thompson@example.com', 'Account Executive', 2500000, 2900000, 2000000, 80, 66, 30, None),
+        (str(uuid.uuid4()), 'Robert Taylor', 'robert.taylor@example.com', 'Senior AE', 3000000, 4200000, 2700000, 90, 71, 36, None),
+        (str(uuid.uuid4()), 'Amanda White', 'amanda.white@example.com', 'Account Executive', 2500000, 3100000, 2200000, 88, 69, 31, None),
+        (str(uuid.uuid4()), 'Christopher Lee', 'christopher.lee@example.com', 'Sales Manager', 4000000, 5800000, 3600000, 90, 73, 40, None),
+        (str(uuid.uuid4()), 'Michelle Brown', 'michelle.brown@example.com', 'Account Executive', 2500000, 2700000, 1800000, 72, 62, 27, None),
+        (str(uuid.uuid4()), 'Daniel Garcia', 'daniel.garcia@example.com', 'Enterprise AE', 3500000, 4900000, 3100000, 89, 74, 34, None),
         ('tm-012', 'Daniel Garcia', 'daniel.garcia@example.com', 'Enterprise AE', 3500000, 4900000, 3100000, 89, 74, 34, None),
     ]
+    # Store team member IDs for reference in accounts and opportunities
+    team_member_ids = [member[0] for member in team_members]
+    
     
     for member in team_members:
         cursor.execute(
@@ -262,29 +266,33 @@ def seed_data(conn):
             member
         )
     
-    # Accounts (20 accounts)
+    # Accounts (20 accounts) - Using UUIDs instead of sequential IDs to prevent enumeration
     now = datetime.now(timezone.utc)
+    
+    # Generate UUID-based account IDs
+    account_ids = [str(uuid.uuid4()) for _ in range(20)]
+    
     base_accounts = [
-        ('acc-001', 'Acme Corp', 'acmecorp.com', 'Technology', 50000000, 250, 'tm-001', 'Sarah Chen', 'Green', 85, 3, 450000),
-        ('acc-002', 'TechVision Inc', 'techvision.io', 'Technology', 120000000, 600, 'tm-002', 'Michael Rodriguez', 'Green', 92, 4, 850000),
-        ('acc-003', 'CloudFirst Solutions', 'cloudfirst.com', 'Technology', 85000000, 420, 'tm-003', 'Emily Watson', 'Yellow', 68, 2, 320000),
-        ('acc-004', 'DataStream Tech', 'datastream.tech', 'Technology', 95000000, 480, 'tm-004', 'David Kim', 'Green', 88, 3, 620000),
-        ('acc-005', 'HealthCare Systems', 'healthcaresys.com', 'Healthcare', 220000000, 1200, 'tm-005', 'Jessica Martinez', 'Green', 88, 3, 650000),
-        ('acc-006', 'MedTech Innovations', 'medtech-innov.com', 'Healthcare', 150000000, 800, 'tm-006', 'James Anderson', 'Green', 90, 4, 780000),
-        ('acc-007', 'Digital Health', 'digitalhealth.io', 'Healthcare', 95000000, 520, 'tm-007', 'Lisa Thompson', 'Yellow', 70, 2, 380000),
-        ('acc-008', 'Global Banking', 'globalbanking.com', 'Finance', 280000000, 1500, 'tm-008', 'Robert Taylor', 'Green', 91, 4, 920000),
-        ('acc-009', 'FinTech Innovations', 'fintech-innov.io', 'Finance', 145000000, 780, 'tm-009', 'Amanda White', 'Green', 88, 3, 680000),
-        ('acc-010', 'Investment Analytics', 'investanalytics.com', 'Finance', 165000000, 890, 'tm-010', 'Christopher Lee', 'Green', 93, 4, 850000),
-        ('acc-011', 'E-Commerce Giants', 'ecommerce-g.com', 'Retail', 320000000, 1800, 'tm-011', 'Michelle Brown', 'Green', 92, 4, 950000),
-        ('acc-012', 'Retail Analytics', 'retailanalytics.io', 'Retail', 125000000, 680, 'tm-012', 'Daniel Garcia', 'Green', 86, 3, 570000),
-        ('acc-013', 'Omnichannel Solutions', 'omnichannel.com', 'Retail', 185000000, 1000, 'tm-001', 'Sarah Chen', 'Green', 89, 3, 720000),
-        ('acc-014', 'Smart Factory', 'smartfactory.io', 'Manufacturing', 210000000, 1150, 'tm-002', 'Michael Rodriguez', 'Green', 87, 3, 680000),
-        ('acc-015', 'Industrial IoT', 'industrial-iot.com', 'Manufacturing', 175000000, 950, 'tm-003', 'Emily Watson', 'Green', 90, 4, 820000),
-        ('acc-016', 'Supply Chain Auto', 'supplychain-auto.com', 'Manufacturing', 195000000, 1080, 'tm-004', 'David Kim', 'Yellow', 74, 2, 450000),
-        ('acc-017', 'Quality Control', 'qualitycontrol.io', 'Manufacturing', 142000000, 780, 'tm-005', 'Jessica Martinez', 'Green', 85, 3, 590000),
-        ('acc-018', 'Robotics Mfg', 'robotics-mfg.com', 'Manufacturing', 230000000, 1280, 'tm-006', 'James Anderson', 'Green', 92, 4, 890000),
-        ('acc-019', 'Production Analytics', 'production-analytics.com', 'Manufacturing', 158000000, 860, 'tm-007', 'Lisa Thompson', 'Green', 88, 3, 640000),
-        ('acc-020', 'Mfg Cloud Platform', 'mfg-cloud.io', 'Manufacturing', 188000000, 1020, 'tm-008', 'Robert Taylor', 'Green', 86, 3, 710000),
+        (account_ids[0], 'Acme Corp', 'acmecorp.com', 'Technology', 50000000, 250, team_member_ids[0], 'Sarah Chen', 'Green', 85, 3, 450000),
+        (account_ids[1], 'TechVision Inc', 'techvision.io', 'Technology', 120000000, 600, team_member_ids[1], 'Michael Rodriguez', 'Green', 92, 4, 850000),
+        (account_ids[2], 'CloudFirst Solutions', 'cloudfirst.com', 'Technology', 85000000, 420, team_member_ids[2], 'Emily Watson', 'Yellow', 68, 2, 320000),
+        (account_ids[3], 'DataStream Tech', 'datastream.tech', 'Technology', 95000000, 480, team_member_ids[3], 'David Kim', 'Green', 88, 3, 620000),
+        (account_ids[4], 'HealthCare Systems', 'healthcaresys.com', 'Healthcare', 220000000, 1200, team_member_ids[4], 'Jessica Martinez', 'Green', 88, 3, 650000),
+        (account_ids[5], 'MedTech Innovations', 'medtech-innov.com', 'Healthcare', 150000000, 800, team_member_ids[5], 'James Anderson', 'Green', 90, 4, 780000),
+        (account_ids[6], 'Digital Health', 'digitalhealth.io', 'Healthcare', 95000000, 520, team_member_ids[6], 'Lisa Thompson', 'Yellow', 70, 2, 380000),
+        (account_ids[7], 'Global Banking', 'globalbanking.com', 'Finance', 280000000, 1500, team_member_ids[7], 'Robert Taylor', 'Green', 91, 4, 920000),
+        (account_ids[8], 'FinTech Innovations', 'fintech-innov.io', 'Finance', 145000000, 780, team_member_ids[8], 'Amanda White', 'Green', 88, 3, 680000),
+        (account_ids[9], 'Investment Analytics', 'investanalytics.com', 'Finance', 165000000, 890, team_member_ids[9], 'Christopher Lee', 'Green', 93, 4, 850000),
+        (account_ids[10], 'E-Commerce Giants', 'ecommerce-g.com', 'Retail', 320000000, 1800, team_member_ids[10], 'Michelle Brown', 'Green', 92, 4, 950000),
+        (account_ids[11], 'Retail Analytics', 'retailanalytics.io', 'Retail', 125000000, 680, team_member_ids[11], 'Daniel Garcia', 'Green', 86, 3, 570000),
+        (account_ids[12], 'Omnichannel Solutions', 'omnichannel.com', 'Retail', 185000000, 1000, team_member_ids[0], 'Sarah Chen', 'Green', 89, 3, 720000),
+        (account_ids[13], 'Smart Factory', 'smartfactory.io', 'Manufacturing', 210000000, 1150, team_member_ids[1], 'Michael Rodriguez', 'Green', 87, 3, 680000),
+        (account_ids[14], 'Industrial IoT', 'industrial-iot.com', 'Manufacturing', 175000000, 950, team_member_ids[2], 'Emily Watson', 'Green', 90, 4, 820000),
+        (account_ids[15], 'Supply Chain Auto', 'supplychain-auto.com', 'Manufacturing', 195000000, 1080, team_member_ids[3], 'David Kim', 'Yellow', 74, 2, 450000),
+        (account_ids[16], 'Quality Control', 'qualitycontrol.io', 'Manufacturing', 142000000, 780, team_member_ids[4], 'Jessica Martinez', 'Green', 85, 3, 590000),
+        (account_ids[17], 'Robotics Mfg', 'robotics-mfg.com', 'Manufacturing', 230000000, 1280, team_member_ids[5], 'James Anderson', 'Green', 92, 4, 890000),
+        (account_ids[18], 'Production Analytics', 'production-analytics.com', 'Manufacturing', 158000000, 860, team_member_ids[6], 'Lisa Thompson', 'Green', 88, 3, 640000),
+        (account_ids[19], 'Mfg Cloud Platform', 'mfg-cloud.io', 'Manufacturing', 188000000, 1020, team_member_ids[7], 'Robert Taylor', 'Green', 86, 3, 710000),
     ]
     
     accounts = []
@@ -309,40 +317,40 @@ def seed_data(conn):
     
     conn.commit()
     
-    # Opportunities - Generate 50,000 from diverse base templates
+    # Opportunities - Generate 50,000 from diverse base templates with UUIDs
     print("Generating opportunities...")
     
     base_opportunities = [
-        ('opp-001', 'Cloud Migration Initiative', 'acc-001', 'Acme Corp', 150000, 'Launched', 'Schedule discovery call', 'Initial contact made with CTO', 'Pipeline', 'tm-001', 'Sarah Chen', 10),
-        ('opp-002', 'Enterprise Platform Upgrade', 'acc-002', 'TechVision Inc', 280000, 'Launched', 'Send product overview deck', 'Responded to RFI', 'Pipeline', 'tm-002', 'Michael Rodriguez', 10),
-        ('opp-003', 'Data Analytics Solution', 'acc-004', 'DataStream Tech', 195000, 'Launched', 'Qualify budget and timeline', 'Inbound lead from website', 'Pipeline', 'tm-004', 'David Kim', 10),
-        ('opp-004', 'AI Platform Implementation', 'acc-002', 'TechVision Inc', 145000, 'Launched', 'Schedule technical deep dive', 'Referral from existing customer', 'Pipeline', 'tm-002', 'Michael Rodriguez', 10),
-        ('opp-005', 'Healthcare Compliance System', 'acc-005', 'HealthCare Systems', 210000, 'Launched', 'Review compliance requirements', 'Initial meeting with VP of IT', 'Pipeline', 'tm-005', 'Jessica Martinez', 10),
-        ('opp-031', 'Enterprise Security Suite', 'acc-001', 'Acme Corp', 185000, 'Qualified', 'Security audit presentation', 'Budget confirmed by CFO', 'Best Case', 'tm-001', 'Sarah Chen', 30),
-        ('opp-032', 'Multi-Cloud Strategy', 'acc-002', 'TechVision Inc', 425000, 'Qualified', 'Architecture review session', 'Technical requirements documented', 'Best Case', 'tm-002', 'Michael Rodriguez', 30),
-        ('opp-033', 'Data Governance Platform', 'acc-003', 'CloudFirst Solutions', 160000, 'Qualified', 'Compliance team demo', 'Stakeholder alignment meeting', 'Best Case', 'tm-003', 'Emily Watson', 30),
-        ('opp-034', 'Real-Time Analytics Engine', 'acc-004', 'DataStream Tech', 245000, 'Qualified', 'Performance benchmarking', 'POC scope defined', 'Best Case', 'tm-004', 'David Kim', 30),
-        ('opp-035', 'Banking Security Platform', 'acc-008', 'Global Banking', 470000, 'Qualified', 'Security team workshop', 'Budget approved', 'Best Case', 'tm-008', 'Robert Taylor', 30),
-        ('opp-061', 'Healthcare Data Platform', 'acc-005', 'HealthCare Systems', 225000, 'Proof of Concept', 'POC environment setup', 'Technical validation in progress', 'Commit', 'tm-005', 'Jessica Martinez', 60),
-        ('opp-062', 'Digital Health Records', 'acc-006', 'MedTech Innovations', 260000, 'Proof of Concept', 'Clinical workflow testing', 'POC showing positive results', 'Commit', 'tm-006', 'James Anderson', 60),
-        ('opp-063', 'Telemedicine Integration', 'acc-007', 'Digital Health', 190000, 'Proof of Concept', 'Video quality assessment', 'Integration testing complete', 'Commit', 'tm-007', 'Lisa Thompson', 60),
-        ('opp-064', 'Retail Personalization', 'acc-011', 'E-Commerce Giants', 430000, 'Proof of Concept', 'A/B testing in progress', 'POC metrics looking good', 'Commit', 'tm-011', 'Michelle Brown', 60),
-        ('opp-065', 'Manufacturing Analytics', 'acc-014', 'Smart Factory', 270000, 'Proof of Concept', 'Factory floor testing', 'Positive feedback from ops team', 'Commit', 'tm-002', 'Michael Rodriguez', 60),
-        ('opp-091', 'Financial Trading Platform', 'acc-008', 'Global Banking', 450000, 'Negotiation', 'Contract review with legal', 'Pricing negotiations ongoing', 'Commit', 'tm-008', 'Robert Taylor', 80),
-        ('opp-092', 'Investment Analytics', 'acc-010', 'Investment Analytics', 380000, 'Negotiation', 'Final terms discussion', 'Executive approval pending', 'Commit', 'tm-010', 'Christopher Lee', 80),
-        ('opp-093', 'FinTech Payment Gateway', 'acc-009', 'FinTech Innovations', 275000, 'Negotiation', 'SLA agreement finalization', 'Compliance review complete', 'Commit', 'tm-009', 'Amanda White', 80),
-        ('opp-094', 'Robotics Control System', 'acc-018', 'Robotics Mfg', 445000, 'Negotiation', 'Contract terms finalization', 'Legal review in progress', 'Commit', 'tm-006', 'James Anderson', 80),
-        ('opp-095', 'Production Optimization', 'acc-019', 'Production Analytics', 320000, 'Negotiation', 'Pricing discussion', 'Near final agreement', 'Commit', 'tm-007', 'Lisa Thompson', 80),
-        ('opp-121', 'E-Commerce Platform', 'acc-011', 'E-Commerce Giants', 520000, 'Closed Won', 'Kickoff meeting scheduled', 'Contract signed', 'Closed', 'tm-011', 'Michelle Brown', 100),
-        ('opp-122', 'Retail Analytics Dashboard', 'acc-012', 'Retail Analytics', 190000, 'Closed Won', 'Implementation planning', 'Deal closed successfully', 'Closed', 'tm-012', 'Daniel Garcia', 100),
-        ('opp-123', 'Omnichannel Commerce', 'acc-013', 'Omnichannel Solutions', 360000, 'Closed Won', 'Project team assignment', 'Signed and sealed', 'Closed', 'tm-001', 'Sarah Chen', 100),
-        ('opp-131', 'Smart Factory IoT', 'acc-014', 'Smart Factory', 410000, 'Closed Won', 'Site survey scheduled', 'Contract executed', 'Closed', 'tm-002', 'Michael Rodriguez', 100),
-        ('opp-132', 'Industrial Automation', 'acc-015', 'Industrial IoT', 385000, 'Closed Won', 'Equipment procurement', 'Deal won', 'Closed', 'tm-003', 'Emily Watson', 100),
-        ('opp-133', 'Quality Control AI', 'acc-017', 'Quality Control', 295000, 'Closed Won', 'Training materials prep', 'Successfully closed', 'Closed', 'tm-005', 'Jessica Martinez', 100),
-        ('opp-141', 'Legacy System Migration', 'acc-003', 'CloudFirst Solutions', 160000, 'Closed Lost', 'Post-mortem scheduled', 'Budget constraints', 'Pipeline', 'tm-003', 'Emily Watson', 0),
-        ('opp-142', 'Compliance Platform', 'acc-007', 'Digital Health', 190000, 'Closed Lost', 'Lessons learned review', 'Chose competitor', 'Pipeline', 'tm-007', 'Lisa Thompson', 0),
-        ('opp-143', 'Supply Chain Visibility', 'acc-016', 'Supply Chain Auto', 205000, 'Closed Lost', 'Feedback session', 'Timeline mismatch', 'Pipeline', 'tm-004', 'David Kim', 0),
-        ('opp-144', 'Customer Data Platform', 'acc-012', 'Retail Analytics', 175000, 'Closed Lost', 'Competitive analysis', 'Lost on features', 'Pipeline', 'tm-012', 'Daniel Garcia', 0),
+        (str(uuid.uuid4()), 'Cloud Migration Initiative', account_ids[0], 'Acme Corp', 150000, 'Launched', 'Schedule discovery call', 'Initial contact made with CTO', 'Pipeline', team_member_ids[0], 'Sarah Chen', 10),
+        (str(uuid.uuid4()), 'Enterprise Platform Upgrade', account_ids[1], 'TechVision Inc', 280000, 'Launched', 'Send product overview deck', 'Responded to RFI', 'Pipeline', team_member_ids[1], 'Michael Rodriguez', 10),
+        (str(uuid.uuid4()), 'Data Analytics Solution', account_ids[3], 'DataStream Tech', 195000, 'Launched', 'Qualify budget and timeline', 'Inbound lead from website', 'Pipeline', team_member_ids[3], 'David Kim', 10),
+        (str(uuid.uuid4()), 'AI Platform Implementation', account_ids[1], 'TechVision Inc', 145000, 'Launched', 'Schedule technical deep dive', 'Referral from existing customer', 'Pipeline', team_member_ids[1], 'Michael Rodriguez', 10),
+        (str(uuid.uuid4()), 'Healthcare Compliance System', account_ids[4], 'HealthCare Systems', 210000, 'Launched', 'Review compliance requirements', 'Initial meeting with VP of IT', 'Pipeline', team_member_ids[4], 'Jessica Martinez', 10),
+        (str(uuid.uuid4()), 'Enterprise Security Suite', account_ids[0], 'Acme Corp', 185000, 'Qualified', 'Security audit presentation', 'Budget confirmed by CFO', 'Best Case', team_member_ids[0], 'Sarah Chen', 30),
+        (str(uuid.uuid4()), 'Multi-Cloud Strategy', account_ids[1], 'TechVision Inc', 425000, 'Qualified', 'Architecture review session', 'Technical requirements documented', 'Best Case', team_member_ids[1], 'Michael Rodriguez', 30),
+        (str(uuid.uuid4()), 'Data Governance Platform', account_ids[2], 'CloudFirst Solutions', 160000, 'Qualified', 'Compliance team demo', 'Stakeholder alignment meeting', 'Best Case', team_member_ids[2], 'Emily Watson', 30),
+        (str(uuid.uuid4()), 'Real-Time Analytics Engine', account_ids[3], 'DataStream Tech', 245000, 'Qualified', 'Performance benchmarking', 'POC scope defined', 'Best Case', team_member_ids[3], 'David Kim', 30),
+        (str(uuid.uuid4()), 'Banking Security Platform', account_ids[7], 'Global Banking', 470000, 'Qualified', 'Security team workshop', 'Budget approved', 'Best Case', team_member_ids[7], 'Robert Taylor', 30),
+        (str(uuid.uuid4()), 'Healthcare Data Platform', account_ids[4], 'HealthCare Systems', 225000, 'Proof of Concept', 'POC environment setup', 'Technical validation in progress', 'Commit', team_member_ids[4], 'Jessica Martinez', 60),
+        (str(uuid.uuid4()), 'Digital Health Records', account_ids[5], 'MedTech Innovations', 260000, 'Proof of Concept', 'Clinical workflow testing', 'POC showing positive results', 'Commit', team_member_ids[5], 'James Anderson', 60),
+        (str(uuid.uuid4()), 'Telemedicine Integration', account_ids[6], 'Digital Health', 190000, 'Proof of Concept', 'Video quality assessment', 'Integration testing complete', 'Commit', team_member_ids[6], 'Lisa Thompson', 60),
+        (str(uuid.uuid4()), 'Retail Personalization', account_ids[10], 'E-Commerce Giants', 430000, 'Proof of Concept', 'A/B testing in progress', 'POC metrics looking good', 'Commit', team_member_ids[10], 'Michelle Brown', 60),
+        (str(uuid.uuid4()), 'Manufacturing Analytics', account_ids[13], 'Smart Factory', 270000, 'Proof of Concept', 'Factory floor testing', 'Positive feedback from ops team', 'Commit', team_member_ids[1], 'Michael Rodriguez', 60),
+        (str(uuid.uuid4()), 'Financial Trading Platform', account_ids[7], 'Global Banking', 450000, 'Negotiation', 'Contract review with legal', 'Pricing negotiations ongoing', 'Commit', team_member_ids[7], 'Robert Taylor', 80),
+        (str(uuid.uuid4()), 'Investment Analytics', account_ids[9], 'Investment Analytics', 380000, 'Negotiation', 'Final terms discussion', 'Executive approval pending', 'Commit', team_member_ids[9], 'Christopher Lee', 80),
+        (str(uuid.uuid4()), 'FinTech Payment Gateway', account_ids[8], 'FinTech Innovations', 275000, 'Negotiation', 'SLA agreement finalization', 'Compliance review complete', 'Commit', team_member_ids[8], 'Amanda White', 80),
+        (str(uuid.uuid4()), 'Robotics Control System', account_ids[17], 'Robotics Mfg', 445000, 'Negotiation', 'Contract terms finalization', 'Legal review in progress', 'Commit', team_member_ids[5], 'James Anderson', 80),
+        (str(uuid.uuid4()), 'Production Optimization', account_ids[18], 'Production Analytics', 320000, 'Negotiation', 'Pricing discussion', 'Near final agreement', 'Commit', team_member_ids[6], 'Lisa Thompson', 80),
+        (str(uuid.uuid4()), 'E-Commerce Platform', account_ids[10], 'E-Commerce Giants', 520000, 'Closed Won', 'Kickoff meeting scheduled', 'Contract signed', 'Closed', team_member_ids[10], 'Michelle Brown', 100),
+        (str(uuid.uuid4()), 'Retail Analytics Dashboard', account_ids[11], 'Retail Analytics', 190000, 'Closed Won', 'Implementation planning', 'Deal closed successfully', 'Closed', team_member_ids[11], 'Daniel Garcia', 100),
+        (str(uuid.uuid4()), 'Omnichannel Commerce', account_ids[12], 'Omnichannel Solutions', 360000, 'Closed Won', 'Project team assignment', 'Signed and sealed', 'Closed', team_member_ids[0], 'Sarah Chen', 100),
+        (str(uuid.uuid4()), 'Smart Factory IoT', account_ids[13], 'Smart Factory', 410000, 'Closed Won', 'Site survey scheduled', 'Contract executed', 'Closed', team_member_ids[1], 'Michael Rodriguez', 100),
+        (str(uuid.uuid4()), 'Industrial Automation', account_ids[14], 'Industrial IoT', 385000, 'Closed Won', 'Equipment procurement', 'Deal won', 'Closed', team_member_ids[2], 'Emily Watson', 100),
+        (str(uuid.uuid4()), 'Quality Control AI', account_ids[16], 'Quality Control', 295000, 'Closed Won', 'Training materials prep', 'Successfully closed', 'Closed', team_member_ids[4], 'Jessica Martinez', 100),
+        (str(uuid.uuid4()), 'Legacy System Migration', account_ids[2], 'CloudFirst Solutions', 160000, 'Closed Lost', 'Post-mortem scheduled', 'Budget constraints', 'Pipeline', team_member_ids[2], 'Emily Watson', 0),
+        (str(uuid.uuid4()), 'Compliance Platform', account_ids[6], 'Digital Health', 190000, 'Closed Lost', 'Lessons learned review', 'Chose competitor', 'Pipeline', team_member_ids[6], 'Lisa Thompson', 0),
+        (str(uuid.uuid4()), 'Supply Chain Visibility', account_ids[15], 'Supply Chain Auto', 205000, 'Closed Lost', 'Feedback session', 'Timeline mismatch', 'Pipeline', team_member_ids[3], 'David Kim', 0),
+        (str(uuid.uuid4()), 'Customer Data Platform', account_ids[11], 'Retail Analytics', 175000, 'Closed Lost', 'Competitive analysis', 'Lost on features', 'Pipeline', team_member_ids[11], 'Daniel Garcia', 0),
     ]
     
     # Additional name variations for more diversity
@@ -352,7 +360,8 @@ def seed_data(conn):
     opportunities = []
     multiplier = 1667  # 30 base * 1667 = ~50,000
     
-    for i in range(multiplier):
+            # Use UUID instead of sequential pattern to prevent enumeration (CWE-639)
+            new_opp[0] = str(uuid.uuid4())
         for j, base_opp in enumerate(base_opportunities):
             new_opp = list(base_opp)
             new_opp[0] = f"{base_opp[0]}-{i}-{j}"

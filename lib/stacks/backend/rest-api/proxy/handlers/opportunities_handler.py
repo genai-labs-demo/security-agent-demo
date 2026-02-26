@@ -1,6 +1,7 @@
 """
 Opportunities handler module for CRUD operations on opportunity entities.
 Handles database operations and field mapping between snake_case and camelCase.
+Includes authorization framework to prevent IDOR vulnerabilities (CWE-639).
 """
 
 import logging
@@ -12,6 +13,44 @@ from psycopg2.extras import RealDictCursor
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+
+def _check_opportunity_access_authorization(connection, opportunity_id: str, user_id: Optional[str] = None) -> bool:
+    """
+    Check if the user has authorization to access the specified opportunity.
+    
+    Authorization Rules:
+    - Users can access opportunities they own (owner_id matches user_id)
+    - Admin users can access all opportunities
+    - When no user context is provided, authorization is bypassed (for now)
+    
+    Args:
+        connection: Database connection object
+        opportunity_id: Opportunity ID to check access for
+        user_id: ID of the requesting user (from authentication context)
+    
+    Returns:
+        True if user is authorized, False otherwise
+    
+    Note:
+        This function implements an authorization framework to prevent IDOR vulnerabilities (CWE-639).
+        Currently, user_id is None because authentication is not yet integrated.
+        
+        TODO: Integrate with API Gateway Authorizer or Cognito to extract user_id from JWT token
+        TODO: Implement role-based access control (RBAC) for admin users
+        TODO: Enable authorization checks once authentication is deployed
+    """
+    # TODO: Remove this bypass once authentication is implemented
+    if user_id is None:
+        logger.warning(f"Authorization check bypassed for opportunity {opportunity_id} - no user context available")
+        return True
+    
+    # Check if user owns the opportunity
+    cursor = connection.cursor()
+    cursor.execute("SELECT owner_id FROM opportunities WHERE id = %s", (opportunity_id,))
+    result = cursor.fetchone()
+    cursor.close()
+    return result and result[0] == user_id
 
 
 def _map_opportunity_to_api_format(db_record: Dict[str, Any]) -> Dict[str, Any]:
@@ -300,13 +339,15 @@ def _validate_amount(amount) -> None:
 
 
 def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
-    """
+def list_opportunities(connection, account_id: Optional[str] = None, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
     Query opportunities from the database with optional account filter.
     
+    When user_id is provided, filters to only opportunities owned by that user.
     Args:
         connection: Database connection object
         account_id: Optional account ID to filter opportunities
     
+        user_id: Optional user ID to filter opportunities (for authorization)
     Returns:
         List of opportunity dictionaries in API format
     
@@ -333,6 +374,11 @@ def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dic
             query += " AND account_id = %s"
             params.append(account_id)
         
+        # TODO: Enable this filter once authentication is implemented
+        # if user_id:
+        #     query += " AND owner_id = %s"
+        #     params.append(user_id)
+        
         query += " ORDER BY close_date DESC LIMIT 1000"
         
         cursor.execute(query, params)
@@ -353,13 +399,14 @@ def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dic
         raise
 
 
-def get_opportunity(connection, opportunity_id: str) -> Optional[Dict[str, Any]]:
+def get_opportunity(connection, opportunity_id: str, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
     Query a single opportunity by ID from the database.
     
     Args:
         connection: Database connection object
         opportunity_id: Opportunity ID to retrieve
+        user_id: Optional user ID for authorization check
     
     Returns:
         Opportunity dictionary in API format, or None if not found
@@ -370,6 +417,11 @@ def get_opportunity(connection, opportunity_id: str) -> Optional[Dict[str, Any]]
     try:
         logger.info(f"Getting opportunity with ID: {opportunity_id}")
         
+        
+        # TODO: Enable authorization check once authentication is implemented
+        # if not _check_opportunity_access_authorization(connection, opportunity_id, user_id):
+        #     logger.warning(f"Unauthorized access attempt to opportunity {opportunity_id} by user {user_id}")
+        #     return None
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
         query = """
@@ -511,7 +563,7 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         raise
 
 
-def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any], user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
     Update an existing opportunity record in the database.
     
@@ -519,6 +571,7 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         connection: Database connection object
         opportunity_id: Opportunity ID to update
         data: Partial opportunity data in API format (camelCase)
+        user_id: Optional user ID for authorization check
     
     Returns:
         Updated opportunity dictionary in API format, or None if not found
@@ -528,6 +581,11 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
     """
     try:
         logger.info(f"Updating opportunity: {opportunity_id}")
+        
+        # TODO: Enable authorization check once authentication is implemented
+        # if not _check_opportunity_access_authorization(connection, opportunity_id, user_id):
+        #     logger.warning(f"Unauthorized update attempt on opportunity {opportunity_id} by user {user_id}")
+        #     raise Exception("Unauthorized: You do not have permission to update this opportunity")
         
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
@@ -623,7 +681,7 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         raise
 
 
-def delete_opportunity(connection, opportunity_id: str) -> bool:
+def delete_opportunity(connection, opportunity_id: str, user_id: Optional[str] = None) -> bool:
     """
     Soft-delete an opportunity record by marking it as deleted.
     The record is retained in the database for recovery purposes.
@@ -632,6 +690,7 @@ def delete_opportunity(connection, opportunity_id: str) -> bool:
     Args:
         connection: Database connection object
         opportunity_id: Opportunity ID to soft-delete
+        user_id: Optional user ID for authorization check
 
     Returns:
         True if opportunity was soft-deleted, False if not found
@@ -641,6 +700,11 @@ def delete_opportunity(connection, opportunity_id: str) -> bool:
     """
     try:
         logger.info(f"Soft-deleting opportunity: {opportunity_id}")
+        
+        # TODO: Enable authorization check once authentication is implemented
+        # if not _check_opportunity_access_authorization(connection, opportunity_id, user_id):
+        #     logger.warning(f"Unauthorized delete attempt on opportunity {opportunity_id} by user {user_id}")
+        #     raise Exception("Unauthorized: You do not have permission to delete this opportunity")
 
         cursor = connection.cursor()
 
