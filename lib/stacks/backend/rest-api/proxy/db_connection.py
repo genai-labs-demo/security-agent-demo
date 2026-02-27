@@ -119,7 +119,8 @@ def _initialize_connection_pool() -> psycopg2.pool.SimpleConnectionPool:
             host=credentials['host'],
             port=credentials['port'],
             database=credentials['dbname'],
-            connect_timeout=10
+            connect_timeout=10,
+            sslmode='require'
         )
         
         logger.info("Connection pool initialized successfully")
