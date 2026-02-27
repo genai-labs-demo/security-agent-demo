@@ -130,6 +130,140 @@ COMPUTED_FIELDS = {'health_status', 'health_score', 'opportunity_count', 'total_
 
 
 
+def _recalculate_health(connection, account_id: str) -> None:
+    """
+    Recalculate health metrics for an account based on opportunities and activity.
+    
+    This function computes the following fields:
+    - opportunity_count: Number of active (non-deleted, non-closed-lost) opportunities
+    - total_opportunity_value: Sum of amounts for active opportunities
+    - health_score: Calculated score (0-100) based on business metrics
+    - health_status: Status indicator ('Green', 'Yellow', 'Red') based on score
+    
+    Health Score Calculation:
+    - Base score: 50 points
+    - Opportunity count factor: +5 points per opportunity (max 20 points)
+    - Opportunity value factor: Tiered based on total value (max 20 points)
+    - Recent activity factor: Based on days since last activity (max 10 points)
+    
+    Health Status Thresholds:
+    - Green: score >= 80
+    - Yellow: score 60-79
+    - Red: score < 60
+    
+    Args:
+        connection: Database connection object
+        account_id: Account ID to recalculate health for
+    
+    Raises:
+        Exception: If database operations fail
+    """
+    try:
+        logger.info(f"Recalculating health metrics for account: {account_id}")
+        
+        cursor = connection.cursor(cursor_factory=RealDictCursor)
+        
+        # Query opportunity metrics (exclude Closed Lost and soft-deleted opportunities)
+        cursor.execute("""
+            SELECT 
+                COUNT(*) as opp_count,
+                COALESCE(SUM(amount), 0) as total_value
+            FROM opportunities
+            WHERE account_id = %s 
+              AND deleted_at IS NULL
+              AND stage != 'Closed Lost'
+        """, (account_id,))
+        
+        metrics = cursor.fetchone()
+        opportunity_count = metrics['opp_count'] if metrics else 0
+        total_opportunity_value = float(metrics['total_value']) if metrics else 0.0
+        
+        # Get account's last activity date for recency scoring
+        cursor.execute("""
+            SELECT last_activity_date
+            FROM accounts
+            WHERE id = %s
+        """, (account_id,))
+        
+        account_data = cursor.fetchone()
+        last_activity_date = account_data['last_activity_date'] if account_data else None
+        
+        # Calculate health score (0-100 scale)
+        health_score = 50  # Base score
+        
+        # Factor 1: Opportunity count (max 20 points)
+        # +5 points per opportunity, capped at 4 opportunities
+        opp_score = min(opportunity_count * 5, 20)
+        health_score += opp_score
+        
+        # Factor 2: Opportunity value (max 20 points)
+        # Tiered scoring based on total opportunity value
+        if total_opportunity_value >= 1000000:  # $1M+
+            value_score = 20
+        elif total_opportunity_value >= 500000:  # $500K-$1M
+            value_score = 15
+        elif total_opportunity_value >= 250000:  # $250K-$500K
+            value_score = 10
+        elif total_opportunity_value >= 100000:  # $100K-$250K
+            value_score = 5
+        else:
+            value_score = 0
+        health_score += value_score
+        
+        # Factor 3: Recent activity (max 10 points)
+        # More points for more recent activity
+        if last_activity_date:
+            days_since_activity = (datetime.utcnow() - last_activity_date.replace(tzinfo=None)).days
+            if days_since_activity <= 7:  # Within last week
+                activity_score = 10
+            elif days_since_activity <= 30:  # Within last month
+                activity_score = 7
+            elif days_since_activity <= 60:  # Within last 2 months
+                activity_score = 4
+            else:  # Older than 2 months
+                activity_score = 0
+        else:
+            activity_score = 0
+        health_score += activity_score
+        
+        # Ensure score is within bounds
+        health_score = max(0, min(100, health_score))
+        
+        # Determine health status based on score thresholds
+        if health_score >= 80:
+            health_status = 'Green'
+        elif health_score >= 60:
+            health_status = 'Yellow'
+        else:
+            health_status = 'Red'
+        
+        # Update account with computed fields using parameterized query
+        cursor.execute("""
+            UPDATE accounts
+            SET opportunity_count = %s,
+                total_opportunity_value = %s,
+                health_score = %s,
+                health_status = %s
+            WHERE id = %s
+        """, (opportunity_count, total_opportunity_value, health_score, health_status, account_id))
+        
+        connection.commit()
+        cursor.close()
+        
+        logger.info(f"Health recalculated for account {account_id}: "
+                   f"score={health_score}, status={health_status}, "
+                   f"opportunities={opportunity_count}, value={total_opportunity_value}")
+        
+    except psycopg2.Error as e:
+        connection.rollback()
+        logger.error(f"Database error recalculating health for account {account_id}: {str(e)}")
+        raise Exception(f"Failed to recalculate health metrics: {str(e)}")
+    except Exception as e:
+        connection.rollback()
+        logger.error(f"Unexpected error recalculating health for account {account_id}: {str(e)}")
+        raise
+
+
 def get_account(connection, account_id: str) -> Optional[Dict[str, Any]]:
     """
     Query a single account by ID from the database.
