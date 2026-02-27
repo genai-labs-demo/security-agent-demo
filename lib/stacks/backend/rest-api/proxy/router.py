@@ -137,6 +137,12 @@ def _parse_path(path: str) -> Tuple[str, Optional[str]]:
     if len(parts) == 0 or not parts[0]:
         raise ValueError("Invalid path: empty or root path")
     
+    # Validate that path does not contain parent directory references (..)
+    # This prevents API route manipulation via path traversal sequences
+    for part in parts:
+        if part == '..':
+            raise ValueError("Invalid path: path traversal sequences (..) are not allowed")
+    
     # First part is the resource type
     resource_type = parts[0]
     
