@@ -12,6 +12,17 @@ HEALTH_STATUS_VALUES = ['Green', 'Yellow', 'Red']
 OPPORTUNITY_STAGE_VALUES = ['Launched', 'Qualified', 'Proof of Concept', 'Negotiation', 'Closed Won', 'Closed Lost']
 FORECAST_CATEGORY_VALUES = ['Pipeline', 'Best Case', 'Commit', 'Closed']
 
+# Stage-probability business rules based on standard sales methodology
+# Each stage has an expected probability range that must be enforced
+STAGE_PROBABILITY_RANGES = {
+    'Launched': (5, 15),
+    'Qualified': (20, 40),
+    'Proof of Concept': (50, 70),
+    'Negotiation': (70, 90),
+    'Closed Won': (100, 100),
+    'Closed Lost': (0, 0)
+}
+
 # Email validation regex pattern
 EMAIL_PATTERN = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
 
@@ -192,6 +203,22 @@ def validate_opportunity(data: Dict[str, Any], is_update: bool = False) -> None:
             raise ValidationError("Field 'probability' must be an integer", field='probability')
         if not (0 <= data['probability'] <= 100):
             raise ValidationError("Field 'probability' must be between 0 and 100", field='probability')
+    
+    # Cross-field validation: enforce stage-probability business rules
+    # This prevents sales forecast manipulation by ensuring probability values
+    # align with the inherent conversion likelihood of each sales stage
+    if 'stage' in data and 'probability' in data:
+        stage = data['stage']
+        probability = data['probability']
+        
+        if stage in STAGE_PROBABILITY_RANGES:
+            min_prob, max_prob = STAGE_PROBABILITY_RANGES[stage]
+            if not (min_prob <= probability <= max_prob):
+                raise ValidationError(
+                    f"Field 'probability' value {probability}% is inconsistent with stage '{stage}'. "
+                    f"Expected probability range for '{stage}': {min_prob}-{max_prob}%",
+                    field='probability'
+                )
     
     # Validate optional fields if present
     if 'accountName' in data and data['accountName'] is not None:
