@@ -118,22 +118,27 @@ def _recalculate_account_aggregates(connection, account_id: str) -> None:
         cursor.close()
 
 
-def search_opportunities(connection, search_query: str, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
+def search_opportunities(connection, search_query: str, account_id: Optional[str] = None, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
-    Perform full text search on opportunities using multiple keywords.
+    Perform full text search on opportunities using multiple keywords, filtered by owner.
     
     Args:
         connection: Database connection object
         search_query: Search string (e.g., "finance software platform")
         account_id: Optional account ID to filter opportunities
+        user_id: Authenticated user ID from Cognito (filters by owner_id)
     
     Returns:
-        List of opportunity dictionaries in API format, ordered by relevance
+        List of opportunity dictionaries in API format owned by user, ordered by relevance
     
     Raises:
         Exception: If database query fails
     """
     try:
+        if not user_id:
+            logger.warning("No user_id provided for search_opportunities - returning empty list")
+            return []
+        
         if not search_query or not search_query.strip():
             return []
         
@@ -145,7 +150,7 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
             logger.warning(f"Search query truncated from {len(keywords)} to {MAX_KEYWORDS} keywords")
             keywords = keywords[:MAX_KEYWORDS]
         
-        logger.info(f"Searching opportunities for keywords: {keywords}")
+        logger.info(f"Searching opportunities for user {user_id} with keywords: {keywords}")
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
@@ -215,13 +220,18 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
             JOIN accounts a ON o.account_id = a.id
             LEFT JOIN team_members tm ON o.owner_id = tm.id
             WHERE 
+                AND o.owner_id = %s
                 o.deleted_at IS NULL
                 AND {where_clause}
         """
+        # Prepare all parameters - start with owner_id filter
+        all_params = [user_id]
+        all_params.extend(keyword_params)
+        
         
         # Add account filter if specified
         if account_id:
-            query += " AND o.account_id = %s"
+            all_params.append(account_id)
             keyword_params.append(account_id)
         
         query += """
@@ -231,9 +241,6 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
                 o.amount DESC
             LIMIT 100
         """
-        
-        # Prepare all parameters
-        all_params = keyword_params.copy()  # WHERE clause parameters
         
         # Add parameters for relevance scoring (5 per keyword)
         for keyword in keywords:
@@ -299,22 +306,27 @@ def _validate_amount(amount) -> None:
         )
 
 
-def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
+def list_opportunities(connection, account_id: Optional[str] = None, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
-    Query opportunities from the database with optional account filter.
+    Query opportunities from the database filtered by owner with optional account filter.
     
     Args:
         connection: Database connection object
         account_id: Optional account ID to filter opportunities
+        user_id: Authenticated user ID from Cognito (filters by owner_id)
     
     Returns:
-        List of opportunity dictionaries in API format
+        List of opportunity dictionaries in API format owned by user
     
     Raises:
         Exception: If database query fails
     """
     try:
-        logger.info(f"Listing opportunities{f' for account {account_id}' if account_id else ''}")
+        if not user_id:
+            logger.warning("No user_id provided for list_opportunities - returning empty list")
+            return []
+        
+        logger.info(f"Listing opportunities for user {user_id}{f' and account {account_id}' if account_id else ''}")
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
@@ -324,10 +336,10 @@ def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dic
                 stage, next_step, recent_activity, recent_activity_date,
                 forecast_category, owner_id, owner_name, probability,
                 created_date, last_modified_date
-            FROM opportunities
+            WHERE deleted_at IS NULL AND owner_id = %s
             WHERE deleted_at IS NULL
         """
-        
+        params = [user_id]
         params = []
         if account_id:
             query += " AND account_id = %s"
@@ -353,21 +365,26 @@ def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dic
         raise
 
 
-def get_opportunity(connection, opportunity_id: str) -> Optional[Dict[str, Any]]:
+def get_opportunity(connection, opportunity_id: str, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
-    Query a single opportunity by ID from the database.
+    Query a single opportunity by ID from the database, filtered by owner.
     
     Args:
         connection: Database connection object
         opportunity_id: Opportunity ID to retrieve
+        user_id: Authenticated user ID from Cognito (validates ownership)
     
     Returns:
-        Opportunity dictionary in API format, or None if not found
+        Opportunity dictionary in API format, or None if not found or not owned by user
     
     Raises:
         Exception: If database query fails
     """
     try:
+        if not user_id:
+            logger.warning(f"No user_id provided for get_opportunity - access denied")
+            return None
+        
         logger.info(f"Getting opportunity with ID: {opportunity_id}")
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
@@ -379,10 +396,10 @@ def get_opportunity(connection, opportunity_id: str) -> Optional[Dict[str, Any]]
                 forecast_category, owner_id, owner_name, probability,
                 created_date, last_modified_date
             FROM opportunities
-            WHERE id = %s AND deleted_at IS NULL
+            WHERE id = %s AND deleted_at IS NULL AND owner_id = %s
         """
         
-        cursor.execute(query, (opportunity_id,))
+        cursor.execute(query, (opportunity_id, user_id))
         record = cursor.fetchone()
         cursor.close()
         
@@ -404,7 +421,7 @@ def get_opportunity(connection, opportunity_id: str) -> Optional[Dict[str, Any]]
         raise
 
 
-def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
+def create_opportunity(connection, data: Dict[str, Any], user_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Insert a new opportunity record into the database.
     Validates that account_id and owner_id reference existing records.
@@ -412,6 +429,7 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     Args:
         connection: Database connection object
         data: Opportunity data in API format (camelCase)
+        user_id: Authenticated user ID from Cognito (set as owner_id)
     
     Returns:
         Created opportunity dictionary in API format
@@ -420,6 +438,10 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         Exception: If database insert fails or validation fails
     """
     try:
+        if not user_id:
+            logger.error("No user_id provided for create_opportunity")
+            raise Exception("Authentication required: cannot create opportunity without user context")
+        
         logger.info(f"Creating new opportunity: {data.get('name')}")
         
         # Map API format to database format
@@ -437,6 +459,10 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         
         # Set created_date if not provided
         if 'created_date' not in db_data:
+        # Set owner_id to authenticated user (enforce ownership)
+        db_data['owner_id'] = user_id
+        logger.info(f"Setting opportunity owner_id to authenticated user: {user_id}")
+        
             db_data['created_date'] = datetime.utcnow()
         
         # Set last_modified_date if not provided
@@ -511,14 +537,15 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         raise
 
 
-def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any], user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
-    Update an existing opportunity record in the database.
+    Update an existing opportunity record in the database owned by the user.
     
     Args:
         connection: Database connection object
         opportunity_id: Opportunity ID to update
         data: Partial opportunity data in API format (camelCase)
+        user_id: Authenticated user ID from Cognito (validates ownership)
     
     Returns:
         Updated opportunity dictionary in API format, or None if not found
@@ -527,6 +554,10 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         Exception: If database update fails or validation fails
     """
     try:
+        if not user_id:
+            logger.warning(f"No user_id provided for update_opportunity - access denied")
+            return None
+        
         logger.info(f"Updating opportunity: {opportunity_id}")
         
         # Map API format to database format
@@ -545,7 +576,7 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         if not db_data or (len(db_data) == 1 and 'last_modified_date' in db_data):
             logger.warning("No fields to update")
             # Return current opportunity
-            return get_opportunity(connection, opportunity_id)
+            return get_opportunity(connection, opportunity_id, user_id)
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
@@ -567,11 +598,12 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         set_clauses = [f"{col} = %s" for col in db_data.keys()]
         values = list(db_data.values())
         values.append(opportunity_id)  # For WHERE clause
+        values.append(user_id)  # For owner_id check
         
         query = f"""
             UPDATE opportunities
             SET {', '.join(set_clauses)}
-            WHERE id = %s
+            WHERE id = %s AND owner_id = %s
             RETURNING 
                 id, name, account_id, account_name, amount, close_date,
                 stage, next_step, recent_activity, recent_activity_date,
@@ -623,15 +655,16 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         raise
 
 
-def delete_opportunity(connection, opportunity_id: str) -> bool:
+def delete_opportunity(connection, opportunity_id: str, user_id: Optional[str] = None) -> bool:
     """
-    Soft-delete an opportunity record by marking it as deleted.
+    Soft-delete an opportunity record by marking it as deleted (owned by user).
     The record is retained in the database for recovery purposes.
     Recalculates parent account aggregates after deletion.
 
     Args:
         connection: Database connection object
         opportunity_id: Opportunity ID to soft-delete
+        user_id: Authenticated user ID from Cognito (validates ownership)
 
     Returns:
         True if opportunity was soft-deleted, False if not found
@@ -639,14 +672,18 @@ def delete_opportunity(connection, opportunity_id: str) -> bool:
     Raises:
         Exception: If database update fails
     """
+        if not user_id:
+            logger.warning(f"No user_id provided for delete_opportunity - access denied")
+            return False
+        
     try:
         logger.info(f"Soft-deleting opportunity: {opportunity_id}")
 
         cursor = connection.cursor()
-
+        # Check if opportunity exists, is owned by user, and capture account_id for aggregate recalculation
         # Check if opportunity exists and capture account_id for aggregate recalculation
-        cursor.execute(
-            "SELECT id, account_id FROM opportunities WHERE id = %s AND (deleted_at IS NULL)",
+            "SELECT id, account_id FROM opportunities WHERE id = %s AND (deleted_at IS NULL) AND owner_id = %s",
+            (opportunity_id, user_id)
             (opportunity_id,)
         )
         row = cursor.fetchone()
@@ -659,8 +696,8 @@ def delete_opportunity(connection, opportunity_id: str) -> bool:
 
         # Soft-delete: set deleted_at timestamp instead of removing the row
         cursor.execute(
-            "UPDATE opportunities SET deleted_at = NOW() WHERE id = %s",
-            (opportunity_id,)
+            "UPDATE opportunities SET deleted_at = NOW() WHERE id = %s AND owner_id = %s",
+            (opportunity_id, user_id)
         )
         connection.commit()
         cursor.close()
