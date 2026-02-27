@@ -1,7 +1,8 @@
 """
 Security demo handler with INTENTIONAL vulnerabilities for educational purposes.
 WARNING: This module contains deliberately vulnerable code for AWS Security Agent testing.
-DO NOT use these patterns in production code.
+DO NOT use these patterns in production code. This module enforces runtime stage checks
+to prevent execution outside of development environments.
 
 Vulnerability inventory (matches pen-test target set):
   1. SQL Injection          — GET /security-profile/{id}  (string concatenation in SQL)
@@ -17,11 +18,38 @@ Vulnerability inventory (matches pen-test target set):
 
 import json
 import logging
+import os
 import subprocess
 from datetime import datetime
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+
+# ============================================================
+# Runtime Stage Validation (Production Deployment Guard)
+# ============================================================
+
+def _validate_dev_stage():
+    """
+    Validate that the current deployment stage is 'dev'.
+    
+    This is a defense-in-depth runtime guard to prevent execution of intentionally
+    vulnerable code in production environments. While the infrastructure layer (CDK)
+    should prevent endpoint registration in non-dev stages, this function provides
+    an additional safety check at the application layer.
+    
+    Raises:
+        RuntimeError: If STAGE environment variable is not set to 'dev'
+    """
+    stage = os.environ.get('STAGE', '').strip().lower()
+    if stage != 'dev':
+        error_msg = (
+            f"SECURITY: Attempted to execute vulnerable security handler in non-dev stage (STAGE={stage}). "
+            "These handlers contain intentional vulnerabilities and must ONLY run in development environments."
+        )
+        logger.error(error_msg)
+        raise RuntimeError(error_msg)
 
 
 # ============================================================
@@ -102,9 +130,11 @@ def _get_educational_content(vuln_type):
 def get_security_profile(connection, user_id):
     """
     GET /security-profile/{userId}
+    RUNTIME GUARD: Only executes in 'dev' stage.
     VULNERABILITY 1: SQL Injection via string concatenation.
     VULNERABILITY 2: IDOR — any sequential ID returns data, no auth check.
     """
+    _validate_dev_stage()
     cursor = connection.cursor()
     try:
         # VULNERABILITY: SQL Injection - string concatenation instead of parameterized query
@@ -151,6 +181,7 @@ def get_security_profile(connection, user_id):
 def list_security_profiles(connection):
     """GET /security-profile — list all demo users (IDOR: full enumeration)"""
     cursor = connection.cursor()
+    _validate_dev_stage()
     try:
         cursor.execute("SELECT id, username, email, role, bio, created_at FROM security_users ORDER BY id")
         columns = [desc[0] for desc in cursor.description]
@@ -174,9 +205,11 @@ def list_security_profiles(connection):
 def create_security_comment(connection, body):
     """
     POST /security-comments
+    RUNTIME GUARD: Only executes in 'dev' stage.
     VULNERABILITY 3: Stored XSS — stores unsanitized user input.
     VULNERABILITY 7: Mass Assignment — accepts author_name and role from body.
     """
+    _validate_dev_stage()
     user_id = body.get("user_id")
     content = body.get("content")
 
@@ -239,8 +272,10 @@ def create_security_comment(connection, body):
 def list_security_comments(connection):
     """
     GET /security-comments
+    RUNTIME GUARD: Only executes in 'dev' stage.
     VULNERABILITY: Stored XSS — returns unsanitized content.
     """
+    _validate_dev_stage()
     cursor = connection.cursor()
     try:
         logger.info("[VULNERABLE] Retrieving comments without sanitization")
@@ -281,8 +316,10 @@ def list_security_comments(connection):
 def search_security_comments(connection, query):
     """
     GET /security-search?q=...
+    RUNTIME GUARD: Only executes in 'dev' stage.
     VULNERABILITY: Reflected XSS — reflects search query without sanitization.
     """
+    _validate_dev_stage()
     cursor = connection.cursor()
     try:
         logger.info(f"[VULNERABLE] Reflecting unsanitized search query: {query}")
@@ -330,11 +367,13 @@ def search_security_comments(connection, query):
 def render_xss_page(query_params):
     """
     GET /security-xss-page?name=...
+    RUNTIME GUARD: Only executes in 'dev' stage.
     VULNERABILITY 4: Reflected / DOM-based XSS — user input rendered directly in HTML.
     The 'name' query parameter is injected into the HTML without any encoding.
     A pen-test scanner will detect this because the response is Content-Type: text/html
     and the payload is reflected verbatim.
     """
+    _validate_dev_stage()
     name = query_params.get("name", "Guest")
     search = query_params.get("q", "")
 
@@ -366,10 +405,12 @@ def render_xss_page(query_params):
 def render_xss_comments_page(connection):
     """
     GET /security-xss-comments
+    RUNTIME GUARD: Only executes in 'dev' stage.
     VULNERABILITY: Stored XSS — renders stored comments as HTML without encoding.
     Returns text/html so pen-test scanners can detect stored XSS payloads executing
     in a real HTML page context (unlike the JSON API which returns application/json).
     """
+    _validate_dev_stage()
     cursor = connection.cursor()
     try:
         cursor.execute("""
@@ -422,9 +463,11 @@ def render_xss_comments_page(connection):
 def render_xss_search_page(connection, query):
     """
     GET /security-xss-search?q=...
+    RUNTIME GUARD: Only executes in 'dev' stage.
     VULNERABILITY: Reflected XSS — search query reflected directly in HTML response.
     Returns text/html so pen-test scanners can detect reflected XSS in a real HTML context.
     """
+    _validate_dev_stage()
     results_html = ""
     if query:
         cursor = connection.cursor()
@@ -486,9 +529,11 @@ def render_xss_search_page(connection, query):
 def execute_ping(body):
     """
     POST /security-tools/ping
+    RUNTIME GUARD: Only executes in 'dev' stage.
     VULNERABILITY 5: Command Injection — passes user input directly to shell.
     VULNERABILITY 6: Second vector — also supports 'command' field for direct execution.
     """
+    _validate_dev_stage()
     host = body.get("host", "")
     # VULNERABILITY 6: Second command injection vector — direct command field
     custom_command = body.get("command", "")
@@ -533,8 +578,10 @@ def execute_ping(body):
 def execute_nslookup(body):
     """
     POST /security-tools/nslookup
+    RUNTIME GUARD: Only executes in 'dev' stage.
     VULNERABILITY: Command Injection — second distinct endpoint with shell=True.
     """
+    _validate_dev_stage()
     host = body.get("host", "")
     if not host:
         return {"success": False, "error": "Host parameter is required"}

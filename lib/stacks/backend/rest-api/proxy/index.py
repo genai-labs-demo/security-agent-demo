@@ -10,6 +10,7 @@ Requirements: 1.1, 1.2, 2.1, 3.1, 4.1, 5.1, 6.1, 7.1, 8.1, 9.1, 10.1
 
 import json
 import logging
+import os
 import time
 from typing import Dict, Any
 import boto3
@@ -36,6 +37,23 @@ cloudwatch = boto3.client('cloudwatch')
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+
+def is_security_endpoints_enabled():
+    """
+    Check if security demo endpoints should be enabled based on deployment stage.
+    
+    Security endpoints with intentional vulnerabilities are ONLY enabled in 'dev' stage.
+    This is a runtime guard to prevent accidental production deployment of vulnerable code.
+    
+    Returns:
+        bool: True if STAGE environment variable is set to 'dev', False otherwise
+    """
+    stage = os.environ.get('STAGE', '').strip().lower()
+    is_enabled = stage == 'dev'
+    if not is_enabled:
+        logger.warning(f"Security endpoints are DISABLED (STAGE={stage}). Vulnerable endpoints are only available in 'dev' stage.")
+    return is_enabled
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -272,59 +290,86 @@ def execute_operation(connection, route_info, operation: str) -> Any:
         else:
             raise ValueError(f"Industries resource only supports GET operations")
     
-    # Route to security profile handler (SQL Injection demo)
-    elif resource_type == 'security-profile':
-        # Support path parameter, query parameter, or POST body for user ID
-        user_id = resource_id or query_params.get('userId') or body.get('user_id')
-        if user_id:
-            return security_handler.get_security_profile(connection, str(user_id))
-        else:
-            return security_handler.list_security_profiles(connection)
+    # SECURITY ENDPOINTS: Only accessible in development stage
+    # These endpoints contain intentional vulnerabilities for security testing
+    # and should NEVER be accessible in production environments
     
-    # Route to security comments handler (XSS demo)
-    elif resource_type == 'security-comments':
-        if operation == 'create':
-            return security_handler.create_security_comment(connection, body)
-        elif operation == 'list':
-            return security_handler.list_security_comments(connection)
+    # Route to security profile handler (SQL Injection + IDOR demo)
+    elif resource_type == 'security-profile':
+        if not is_security_endpoints_enabled():
+            raise ValueError("Security profile endpoint not found")
         else:
-            raise ValueError(f"Security comments supports GET and POST operations")
+            user_id = resource_id or query_params.get('userId') or body.get('user_id')
+            if user_id:
+                return security_handler.get_security_profile(connection, str(user_id))
+            else:
+                return security_handler.list_security_profiles(connection)
+    
+    # Route to security comments handler (Stored XSS + Mass Assignment demo)
+    elif resource_type == 'security-comments':
+        if not is_security_endpoints_enabled():
+            raise ValueError("Security comments endpoint not found")
+        else:
+            if operation == 'create':
+                return security_handler.create_security_comment(connection, body)
+            elif operation == 'list':
+                return security_handler.list_security_comments(connection)
+            else:
+                raise ValueError(f"Security comments supports GET and POST operations")
     
     # Route to security search handler (Reflected XSS demo)
     elif resource_type == 'security-search':
-        search_query = query_params.get('q', '') or body.get('q', '')
-        return security_handler.search_security_comments(connection, search_query)
+        if not is_security_endpoints_enabled():
+            raise ValueError("Security search endpoint not found")
+        else:
+            search_query = query_params.get('q', '') or body.get('q', '')
+            return security_handler.search_security_comments(connection, search_query)
     
     # Route to security tools handler (Command Injection demo)
     elif resource_type == 'security-tools':
-        if route_info.path.endswith('/ping'):
-            return security_handler.execute_ping(body)
-        elif route_info.path.endswith('/nslookup'):
-            return security_handler.execute_nslookup(body)
+        if not is_security_endpoints_enabled():
+            raise ValueError("Security tools endpoint not found")
         else:
-            raise ValueError(f"Security tools only supports /ping and /nslookup endpoints")
+            if route_info.path.endswith('/ping'):
+                return security_handler.execute_ping(body)
+            elif route_info.path.endswith('/nslookup'):
+                return security_handler.execute_nslookup(body)
+            else:
+                raise ValueError(f"Security tools only supports /ping and /nslookup endpoints")
     
     # Route to security health endpoint (unauthenticated health check)
     elif resource_type == 'security-health':
-        return {"success": True, "status": "healthy", "version": "1.0.0", "endpoints": [
-            "/security-profile", "/security-profile/{id}", "/security-comments",
-            "/security-search", "/security-tools/ping", "/security-tools/nslookup",
-            "/security-health", "/security-xss-page", "/security-xss-comments",
-            "/security-xss-search"
-        ]}
+        if not is_security_endpoints_enabled():
+            raise ValueError("Security health endpoint not found")
+        else:
+            return {"success": True, "status": "healthy", "version": "1.0.0", "endpoints": [
+                "/security-profile", "/security-profile/{id}", "/security-comments",
+                "/security-search", "/security-tools/ping", "/security-tools/nslookup",
+                "/security-health", "/security-xss-page", "/security-xss-comments",
+                "/security-xss-search"
+            ]}
     
     # Route to security XSS page (returns HTML for reflected XSS detection)
     elif resource_type == 'security-xss-page':
-        return security_handler.render_xss_page(query_params)
+        if not is_security_endpoints_enabled():
+            raise ValueError("Security XSS page endpoint not found")
+        else:
+            return security_handler.render_xss_page(query_params)
 
     # Route to security XSS comments page (returns HTML with stored XSS for pen-test detection)
     elif resource_type == 'security-xss-comments':
-        return security_handler.render_xss_comments_page(connection)
+        if not is_security_endpoints_enabled():
+            raise ValueError("Security XSS comments endpoint not found")
+        else:
+            return security_handler.render_xss_comments_page(connection)
 
     # Route to security XSS search page (returns HTML with reflected XSS for pen-test detection)
     elif resource_type == 'security-xss-search':
-        search_query = query_params.get('q', '') or body.get('q', '')
-        return security_handler.render_xss_search_page(connection, search_query)
+        if not is_security_endpoints_enabled():
+            raise ValueError("Security XSS search endpoint not found")
+        else:
+            search_query = query_params.get('q', '') or body.get('q', '')
+            return security_handler.render_xss_search_page(connection, search_query)
     
     else:
         raise ValueError(f"Unsupported resource type: {resource_type}")
