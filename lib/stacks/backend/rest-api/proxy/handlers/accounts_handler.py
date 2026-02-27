@@ -132,6 +132,41 @@ COMPUTED_FIELDS = {'health_status', 'health_score', 'opportunity_count', 'total_
 
 def get_account(connection, account_id: str) -> Optional[Dict[str, Any]]:
     """
+
+
+def _recalculate_health(connection, account_id: str) -> None:
+    """
+    Recalculate and update the health_status and health_score fields for an account.
+    These are derived from business metrics and opportunity data.
+    
+    Args:
+        connection: Database connection object
+        account_id: Account ID whose health metrics need recalculation
+    """
+    if not account_id:
+        return
+    
+    cursor = connection.cursor()
+    try:
+        # Simple health score calculation based on opportunity metrics
+        # In production, this would be more sophisticated
+        cursor.execute("""
+            UPDATE accounts
+            SET health_score = CASE
+                WHEN total_opportunity_value > 1000000 THEN 90
+                WHEN total_opportunity_value > 500000 THEN 75
+                WHEN total_opportunity_value > 100000 THEN 60
+                ELSE 50
+            END,
+            health_status = 'healthy'
+            WHERE id = %s
+        """, (account_id,))
+        connection.commit()
+        logger.info(f"Recalculated health metrics for account {account_id}")
+    except Exception as e:
+        logger.error(f"Failed to recalculate health for account {account_id}: {str(e)}")
+    finally:
+        cursor.close()
     Query a single account by ID from the database.
     
     Args:
