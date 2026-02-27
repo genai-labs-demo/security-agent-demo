@@ -79,6 +79,112 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
     return db_data
 
 
+def _recalculate_health(connection, account_id: str) -> None:
+    """
+    Recalculate and update the health_status and health_score fields for an account
+    based on business metrics (opportunity count, total value, last activity date).
+    
+    SECURITY: Logs before/after values as audit trail for health score changes (CWE-778).
+    
+    Health score calculation logic:
+    - Base score starts at 50
+    - +20 points if opportunity_count > 0
+    - +15 points if total_opportunity_value > $100,000
+    - +15 points if last_activity_date is within 30 days
+    - Score ranges from 0-100
+    
+    Health status mapping:
+    - 80-100: "excellent"
+    - 60-79: "good"  
+    - 40-59: "fair"
+    - 0-39: "poor"
+    
+    Args:
+        connection: Database connection object
+        account_id: Account ID whose health needs recalculation
+    """
+    if not account_id:
+        return
+    
+    cursor = connection.cursor()
+    try:
+        # AUDIT TRAIL: Query current health values BEFORE recalculation
+        cursor.execute("""
+            SELECT health_status, health_score
+            FROM accounts
+            WHERE id = %s
+        """, (account_id,))
+        before_record = cursor.fetchone()
+        
+        if before_record:
+            before_status = before_record[0]
+            before_score = before_record[1] or 0
+        else:
+            before_status = None
+            before_score = 0
+        
+        # Recalculate health score based on business metrics
+        cursor.execute("""
+            UPDATE accounts
+            SET health_score = (
+                50 +
+                CASE WHEN opportunity_count > 0 THEN 20 ELSE 0 END +
+                CASE WHEN total_opportunity_value > 100000 THEN 15 ELSE 0 END +
+                CASE WHEN last_activity_date >= (CURRENT_DATE - INTERVAL '30 days') THEN 15 ELSE 0 END
+            ),
+            health_status = (
+                CASE
+                    WHEN (50 +
+                        CASE WHEN opportunity_count > 0 THEN 20 ELSE 0 END +
+                        CASE WHEN total_opportunity_value > 100000 THEN 15 ELSE 0 END +
+                        CASE WHEN last_activity_date >= (CURRENT_DATE - INTERVAL '30 days') THEN 15 ELSE 0 END
+                    ) >= 80 THEN 'excellent'
+                    WHEN (50 +
+                        CASE WHEN opportunity_count > 0 THEN 20 ELSE 0 END +
+                        CASE WHEN total_opportunity_value > 100000 THEN 15 ELSE 0 END +
+                        CASE WHEN last_activity_date >= (CURRENT_DATE - INTERVAL '30 days') THEN 15 ELSE 0 END
+                    ) >= 60 THEN 'good'
+                    WHEN (50 +
+                        CASE WHEN opportunity_count > 0 THEN 20 ELSE 0 END +
+                        CASE WHEN total_opportunity_value > 100000 THEN 15 ELSE 0 END +
+                        CASE WHEN last_activity_date >= (CURRENT_DATE - INTERVAL '30 days') THEN 15 ELSE 0 END
+                    ) >= 40 THEN 'fair'
+                    ELSE 'poor'
+                END
+            )
+            WHERE id = %s
+        """, (account_id,))
+        connection.commit()
+        
+        # AUDIT TRAIL: Query new health values AFTER recalculation
+        cursor.execute("""
+            SELECT health_status, health_score
+            FROM accounts
+            WHERE id = %s
+        """, (account_id,))
+        after_record = cursor.fetchone()
+        
+        if after_record:
+            after_status = after_record[0]
+            after_score = after_record[1] or 0
+        else:
+            after_status = None
+            after_score = 0
+        
+        # Log audit trail with before/after values
+        logger.info(
+            f"AUDIT: Account {account_id} health recalculated - "
+            f"health_status: {before_status} -> {after_status}, "
+            f"health_score: {before_score} -> {after_score}"
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to recalculate health for account {account_id}: {str(e)}")
+        # Don't rollback here — let the caller handle transaction management
+    finally:
+        cursor.close()
+
+
 def list_accounts(connection) -> List[Dict[str, Any]]:
     """
     Query all accounts from the database.

@@ -148,14 +148,17 @@ def _parse_path(path: str) -> Tuple[str, Optional[str]]:
         raise ValueError(f"Invalid resource type: {resource_type}. "
                         f"Must be one of: {', '.join(valid_resources)}")
     
-    # Second part (if exists) is the resource ID or special operation
+    # Parse resource ID and special operations
     resource_id = None
     if len(parts) > 1:
         second_part = parts[1]
         if not second_part:
             raise ValueError("Invalid path: resource ID is empty")
         
-        # Handle special operations like /opportunities/search
+        # Check for /opportunities/{id}/restore pattern
+        if len(parts) == 3 and parts[2] == 'restore':
+            resource_id = second_part
+        # Handle search endpoint: /opportunities/search
         if second_part == 'search':
             # For search operations, we don't set resource_id
             # The search logic will be handled by query parameters
@@ -167,9 +170,10 @@ def _parse_path(path: str) -> Tuple[str, Optional[str]]:
             resource_id = second_part
     
     # Validate no extra path segments
-    if len(parts) > 2:
-        raise ValueError(f"Invalid path: too many segments. Expected format: /{resource_type} or /{resource_type}/{{id}} or /{resource_type}/search")
-    
+    # Validate path segment count
+    max_parts = 3 if (len(parts) == 3 and parts[2] == 'restore') else 2
+    if len(parts) > max_parts:
+        raise ValueError(f"Invalid path: too many segments")
     return resource_type, resource_id
 
 
@@ -318,10 +322,16 @@ def validate_route(route_info: RouteInfo) -> None:
     
     # POST should not have resource ID (creating new resource)
     # Exception: security-profile POST doesn't need ID validation
-    if method == 'POST' and resource_id is not None and resource_type != 'security-profile':
+    is_security_profile = resource_type == 'security-profile'
+    if method == 'POST' and resource_id is not None and not is_security_profile:
         raise ValueError(f"POST requests should not include resource ID in path")
     
-    # PUT and DELETE must have resource ID
+    # Check for restore operation (PUT /opportunities/{id}/restore)
+    is_restore = method == 'PUT' and route_info.path.endswith('/restore')
+    if is_restore and resource_id is None:
+        raise ValueError(f"Restore operation requires resource ID")
+    
+    # PUT and DELETE must have resource ID (except restore which is already checked)
     if method in ['PUT', 'DELETE'] and resource_id is None:
         raise ValueError(f"{method} requests must include resource ID in path")
     
@@ -343,6 +353,10 @@ def get_operation_type(route_info: RouteInfo) -> str:
     """
     method = route_info.http_method
     has_id = route_info.resource_id is not None
+    
+    # Check for restore operation
+    if method == 'PUT' and route_info.path.endswith('/restore'):
+        return 'restore'
     
     operation_map = {
         ('GET', False): 'list',      # GET /accounts
