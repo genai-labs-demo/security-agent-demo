@@ -33,6 +33,7 @@ This threat model covers the AnyCompany CRM application including its frontend, 
 | SQL Injection on security demo endpoints | High | **Intentionally vulnerable** - educational purpose | Accepted (Demo) |
 | Request body manipulation | Medium | API Gateway request validation enabled | Partially Mitigated |
 | XSS payload injection | High | **Intentionally vulnerable** on security endpoints | Accepted (Demo) |
+| DOM-based XSS via HTML endpoints | High | **Intentionally vulnerable** - HTML responses for pen-test scanner detection (`/security-xss-page`, `/security-xss-comments`, `/security-xss-search`) | Accepted (Demo) |
 
 ### Repudiation
 
@@ -47,6 +48,7 @@ This threat model covers the AnyCompany CRM application including its frontend, 
 |--------|------|------------|--------|
 | Database credential exposure | Low | Secrets Manager, no hardcoded credentials | Mitigated |
 | Error message leakage | Medium | Error handler formats responses, but stack traces may leak in logs | Partially Mitigated |
+| Demo credential exposure on login page | Low | Password masked with bullet characters, autofill styling overridden | Mitigated |
 | S3 bucket data exposure | Low | CORS restrictions, authenticated access only | Mitigated |
 | VPC traffic inspection | Low | VPC Flow Logs enabled for rejected traffic | Mitigated |
 
@@ -63,6 +65,9 @@ This threat model covers the AnyCompany CRM application including its frontend, 
 | Threat | Risk | Mitigation | Status |
 |--------|------|------------|--------|
 | Command injection via ping endpoint | High | **Intentionally vulnerable** - educational purpose | Accepted (Demo) |
+| Command injection via nslookup endpoint | High | **Intentionally vulnerable** - second vector for pen-test coverage | Accepted (Demo) |
+| IDOR via security profile endpoint | Medium | **Intentionally vulnerable** - sequential IDs, no auth check | Accepted (Demo) |
+| Mass assignment via comments endpoint | Medium | **Intentionally vulnerable** - accepts author_name/role from body | Accepted (Demo) |
 | Cross-account access | Low | IAM policies scoped to specific resources | Mitigated |
 | Lambda role over-privilege | Medium | CloudWatch PutMetricData uses wildcard resource | Gap |
 

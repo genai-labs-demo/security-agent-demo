@@ -136,7 +136,7 @@ const Login = () => {
                                         </div>
                                         <div className="demo-creds-row">
                                             <span className="demo-creds-text">
-                                                <strong>Pass:</strong> AWS123xyz!
+                                                <strong>Pass:</strong> ••••••••••
                                             </span>
                                             <button type="button" className="demo-copy-btn" onClick={() => copy("AWS123xyz!")} title="Copy password" aria-label="Copy password">
                                                 📋

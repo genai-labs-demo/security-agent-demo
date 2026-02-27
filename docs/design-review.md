@@ -110,11 +110,16 @@ AnyCompany CRM is a full-stack web application built on AWS using CDK (TypeScrip
 | GET | /team-members/{id} | team_members_handler | Get team member by ID |
 | GET | /industries | industries_handler | List industries |
 | GET | /security/profiles | security_handler | List security profiles |
-| GET | /security/profiles/{id} | security_handler | Get profile (SQL injection demo) |
+| GET | /security/profiles/{id} | security_handler | Get profile (SQL injection + IDOR demo) |
 | GET | /security/comments | security_handler | List comments |
-| GET | /security/comments/search | security_handler | Search comments (XSS demo) |
-| POST | /security/comments | security_handler | Create comment (stored XSS demo) |
+| GET | /security/comments/search | security_handler | Search comments (reflected XSS demo) |
+| POST | /security/comments | security_handler | Create comment (stored XSS + mass assignment demo) |
 | POST | /security/tools/ping | security_handler | Execute ping (command injection demo) |
+| POST | /security/tools/nslookup | security_handler | DNS lookup (command injection demo) |
+| GET | /security/xss-page | security_handler | DOM-based/reflected XSS (HTML response) |
+| GET | /security/xss-comments | security_handler | Stored XSS rendered as HTML page |
+| GET | /security/xss-search | security_handler | Reflected XSS rendered as HTML page |
+| GET | /security/health | security_handler | Security module health check |
 
 ## 5. Data Flow
 
@@ -150,9 +155,29 @@ These are deliberately introduced for AWS Security Agent demonstration:
    - Stored XSS (`/security/comments` POST): Comment content is stored and rendered without escaping.
    - DOM-based and attribute-based XSS in frontend components.
 
-3. **Command Injection** (`/security/tools/ping` POST): User-supplied hostname is passed directly to `os.system()` or subprocess without sanitization, allowing arbitrary command execution.
+3. **Command Injection** (`/security/tools/ping` POST): User-supplied hostname is passed directly to `subprocess.run()` with `shell=True` without sanitization, allowing arbitrary command execution. A second endpoint (`/security/tools/nslookup`) provides an additional command injection vector.
 
-### 6.3 WAF Rule Exceptions
+### 6.3 Additional Security Demo Endpoints
+These HTML-rendering endpoints exist specifically for pen-test scanner detection (scanners need `text/html` responses to detect XSS):
+
+- **DOM-based XSS** (`/security/xss-page`): User input injected directly into HTML response; URL fragment also parsed client-side for DOM-based XSS
+- **Stored XSS (HTML)** (`/security/xss-comments`): Stored comments rendered as an HTML page without encoding
+- **Reflected XSS (HTML)** (`/security/xss-search`): Search query reflected in HTML page without encoding
+- **IDOR** (`/security/profiles/{id}`): Sequential numeric IDs return any user's data without authorization checks
+- **Mass Assignment** (`/security/comments` POST): API accepts `author_name` and `role` fields from request body, allowing authorship spoofing and privilege escalation
+
+### 6.4 Credential Display Security
+- Login page demo credentials section masks the password with bullet characters (`••••••••••`) rather than displaying in plain text
+- Copy-to-clipboard functionality still provides the actual password value when the copy button is clicked
+- Browser autofill styling is overridden via CSS (`:-webkit-autofill`) to prevent credential exposure through autofill background color changes
+- Password input fields enforce `-webkit-text-security: disc` for consistent masking across browsers
+
+### 6.5 Security Dashboard Architecture Diagram
+- A visual architecture diagram (`docs/SecurityAgentDiagram.png`) is displayed on the Security Dashboard page above the Core Capabilities section
+- The diagram is interactive — clicking it opens a full-screen lightbox overlay for detailed viewing
+- The lightbox includes a dark backdrop with blur, close button, and click-outside-to-dismiss behavior
+
+### 6.6 WAF Rule Exceptions
 - SQLi body rule set to COUNT mode to allow SQL injection demonstrations
 - Unix shell body rule set to COUNT mode to allow command injection demonstrations
 - Common rule set in COUNT mode to avoid blocking demo traffic

@@ -10,6 +10,11 @@
 - **User Groups**: Admin and Users groups defined
 - **Self Sign-Up**: Disabled (admin-created accounts only)
 
+### Login Page Security
+- Demo credentials password is masked (displayed as `••••••••••`) — copy-to-clipboard still provides the actual value
+- Password input field enforces `-webkit-text-security: disc` to prevent browser autofill from revealing the password in plain text
+- Browser autofill styling overrides prevent credential leakage through CSS background color changes
+
 ### API Gateway Authorization
 - All API methods require `COGNITO` authorization type
 - JWT token validated via `CognitoUserPoolsAuthorizer`
@@ -236,11 +241,26 @@ The `/security-*` API endpoints contain intentional vulnerabilities for educatio
 1. **SQL Injection** (`/security-profile`): User input directly concatenated into SQL queries
 2. **Stored XSS** (`/security-comments`): Comment content stored and returned without sanitization
 3. **Reflected XSS** (`/security-search`): Search query reflected in response without encoding
-4. **Command Injection** (`/security-tools/ping`): User input passed to `os.popen()` without sanitization
-5. **Stored XSS (HTML)** (`/security-xss-comments`): Stored comments rendered as HTML page for pen-test scanner detection
-6. **Reflected XSS (HTML)** (`/security-xss-search`): Search query reflected in HTML page for pen-test scanner detection
+4. **Command Injection** (`/security-tools/ping`): User input passed to `subprocess.run()` with `shell=True` without sanitization
+5. **Command Injection #2** (`/security-tools/nslookup`): Second distinct endpoint with `shell=True` for pen-test coverage
+6. **Stored XSS (HTML)** (`/security-xss-comments`): Stored comments rendered as HTML page for pen-test scanner detection
+7. **Reflected XSS (HTML)** (`/security-xss-search`): Search query reflected in HTML page for pen-test scanner detection
+8. **DOM-based XSS (HTML)** (`/security-xss-page`): User input injected directly into HTML response with DOM-based XSS via URL fragment
+9. **IDOR** (`/security-profile/{id}`): Sequential IDs return any user's data without authorization checks
+10. **Mass Assignment** (`/security-comments`): API accepts `author_name` and `role` fields from request body, allowing authorship spoofing
 
 These endpoints are protected by Cognito authentication but intentionally bypass input validation for demonstration purposes.
+
+### Credential Display Security
+- Login page demo credentials section masks the password with bullet characters (`••••••••••`) rather than displaying in plain text
+- Copy-to-clipboard functionality still provides the actual password value when the copy button is clicked
+- Browser autofill styling is overridden via CSS (`:-webkit-autofill`) to prevent credential exposure through autofill background color changes
+- Password input fields enforce `-webkit-text-security: disc` to ensure masking regardless of browser behavior
+
+### Security Dashboard Architecture Diagram
+- A visual architecture diagram (`SecurityAgentDiagram.png`) is displayed on the Security Dashboard page above the Core Capabilities section
+- The diagram is interactive — clicking it opens a full-screen lightbox overlay for detailed viewing
+- The lightbox includes a dark backdrop with blur, close button, and click-outside-to-dismiss behavior
 
 ### WAF Rule Overrides
 - `SQLi_BODY` rule set to count mode to allow SQL injection demonstrations

@@ -18,6 +18,14 @@ export class ApplicationStage extends Stage {
             urls: frontend.urls,
         });
 
+        // Proxy API requests through CloudFront so the pen test scanner
+        // can reach backend endpoints via the verified frontend domain.
+        // e.g. https://secagentdemo.jossai.people.aws.dev/api/security-profile/1
+        //   -> https://isznznfp27.execute-api.us-east-1.amazonaws.com/prod/security-profile/1
+        // Note: domain is hardcoded to avoid a circular stack dependency
+        // (frontend needs backend.restApi, backend needs frontend.urls)
+        frontend.addApiProxy("isznznfp27.execute-api.us-east-1.amazonaws.com");
+
         // this stack must be named frontendDeployment
         new FrontendDeployment(this, "frontendDeployment", {
             websiteBucket: frontend.websiteBucket,

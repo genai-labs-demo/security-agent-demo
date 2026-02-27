@@ -39,7 +39,7 @@ const LandingPage = () => {
                     </div>
                     <span style={{ color: "#f1f5f9", fontWeight: 600, fontSize: "16px" }}>AWS Security Agent</span>
                 </div>
-                <button onClick={() => signOut()}
+                <button onClick={async () => { await signOut({ global: false }); window.location.href = "/"; }}
                     style={{ background: "rgba(255,255,255,0.06)", color: "#94a3b8", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "8px", padding: "8px 20px", fontSize: "14px", cursor: "pointer" }}>
                     Sign Out
                 </button>

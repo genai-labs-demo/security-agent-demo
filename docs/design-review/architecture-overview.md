@@ -14,6 +14,8 @@ AnyCompany CRM is a full-stack web application built on AWS, providing customer 
 
 ## Architecture Diagram
 
+A visual architecture diagram is available at `docs/SecurityAgentDiagram.png` and is displayed interactively on the Security Dashboard page (click to expand in a full-screen lightbox).
+
 ```
 ┌─────────────┐     ┌──────────────┐     ┌─────────────────┐
 │  CloudFront  │────▶│  S3 Bucket   │     │  Cognito User   │
@@ -73,7 +75,17 @@ AnyCompany CRM is a full-stack web application built on AWS, providing customer 
 | /opportunities | GET, POST, PUT, DELETE | Sales opportunity tracking |
 | /team-members | GET, POST, PUT, DELETE | Team member management |
 | /industries | GET | Industry reference data (read-only) |
-| /security-profile | GET, POST | User profile lookup (SQL injection demo) |
-| /security-comments | GET, POST | Comment system (stored XSS demo) |
+| /security-profile | GET, POST | User profile lookup (SQL injection + IDOR demo) |
+| /security-comments | GET, POST | Comment system (stored XSS + mass assignment demo) |
 | /security-search | GET, POST | Search functionality (reflected XSS demo) |
 | /security-tools/ping | POST | Network ping tool (command injection demo) |
+| /security-tools/nslookup | POST | DNS lookup tool (command injection demo) |
+| /security-xss-page | GET | DOM-based/reflected XSS (HTML response) |
+| /security-xss-comments | GET | Stored XSS rendered as HTML page |
+| /security-xss-search | GET | Reflected XSS rendered as HTML page |
+| /security-health | GET | Security module health check |
+| /security-tools/nslookup | POST | DNS lookup tool (command injection demo) |
+| /security-xss-page | GET | DOM-based/reflected XSS demo (HTML response) |
+| /security-xss-comments | GET | Stored XSS rendered as HTML page (pen-test detection) |
+| /security-xss-search | GET | Reflected XSS rendered as HTML page (pen-test detection) |
+| /security-health | GET | Security module health check |

@@ -143,7 +143,7 @@ def _parse_path(path: str) -> Tuple[str, Optional[str]]:
     # Validate resource type
     valid_resources = ['accounts', 'opportunities', 'team-members', 'industries',
                        'security-profile', 'security-comments', 'security-search', 'security-tools',
-                       'security-health', 'security-xss-page']
+                       'security-health', 'security-xss-page', 'security-xss-comments', 'security-xss-search']
     if resource_type not in valid_resources:
         raise ValueError(f"Invalid resource type: {resource_type}. "
                         f"Must be one of: {', '.join(valid_resources)}")

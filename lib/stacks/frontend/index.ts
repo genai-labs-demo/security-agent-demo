@@ -1,24 +1,27 @@
-import { CloudfrontWebAcl } from "@aws/pdk/static-website";
-import { Aspects, CfnOutput, StackProps } from "aws-cdk-lib";
+import { CfnOutput, StackProps } from "aws-cdk-lib";
 import { Certificate, CertificateValidation } from "aws-cdk-lib/aws-certificatemanager";
 import {
     AllowedMethods,
+    CachePolicy,
     Distribution,
+    Function as CloudFrontFunction,
+    FunctionCode,
+    FunctionEventType,
     OriginRequestPolicy,
     SecurityPolicyProtocol,
     SSLMethod,
     ViewerProtocolPolicy,
 } from "aws-cdk-lib/aws-cloudfront";
-import { S3BucketOrigin } from "aws-cdk-lib/aws-cloudfront-origins";
+import { HttpOrigin, S3BucketOrigin } from "aws-cdk-lib/aws-cloudfront-origins";
 import { ComputeType, LinuxArmBuildImage } from "aws-cdk-lib/aws-codebuild";
 import { Bucket, ObjectOwnership } from "aws-cdk-lib/aws-s3";
 import { Effect, PolicyStatement, ServicePrincipal } from "aws-cdk-lib/aws-iam";
+import { CfnWebACL } from "aws-cdk-lib/aws-wafv2";
 import { ARecord, HostedZone, RecordTarget } from "aws-cdk-lib/aws-route53";
 import { CloudFrontTarget } from "aws-cdk-lib/aws-route53-targets";
 import { NagSuppressions } from "cdk-nag";
 import { Construct } from "constructs";
 import * as path from "path";
-import { FunctionRuntimeAspect } from "../../common/aspects";
 import { CommonBucket } from "../../common/constructs/s3";
 import { CommonStack } from "../../common/constructs/stack";
 import { StaticWebsiteBuild } from "../../common/constructs/static-website";
@@ -58,23 +61,78 @@ export class Frontend extends CommonStack {
             serverAccessLogsBucket: loggingBucket,
         });
 
-        const cloudfrontWebAcl = new CloudfrontWebAcl(this, "cloudfrontWebAcl", {
-            managedRules: [
+        // CloudFront WAF — must be CLOUDFRONT scope (us-east-1 only).
+        // Priority 0: allow AWS Security Agent traffic before Bot Control can block it.
+        // The Security Agent sends User-Agent: securityagent per AWS docs.
+        const cloudfrontWebAcl = new CfnWebACL(this, "cloudfrontWebAcl", {
+            defaultAction: { allow: {} },
+            scope: "CLOUDFRONT",
+            visibilityConfig: {
+                metricName: "cloudfrontWebAcl",
+                sampledRequestsEnabled: true,
+                cloudWatchMetricsEnabled: true,
+            },
+            rules: [
+                // Priority 0: allowlist AWS Security Agent before any managed rules run
                 {
-                    vendor: "AWS",
+                    name: "AllowSecurityAgentPentest",
+                    priority: 0,
+                    action: { allow: {} },
+                    statement: {
+                        byteMatchStatement: {
+                            fieldToMatch: { singleHeader: { name: "user-agent" } },
+                            positionalConstraint: "CONTAINS",
+                            searchString: "securityagent",
+                            textTransformations: [{ priority: 0, type: "LOWERCASE" }],
+                        },
+                    },
+                    visibilityConfig: {
+                        metricName: "AllowSecurityAgentPentest",
+                        sampledRequestsEnabled: true,
+                        cloudWatchMetricsEnabled: true,
+                    },
+                },
+                {
                     name: "AWSManagedRulesCommonRuleSet",
+                    priority: 1,
+                    overrideAction: { none: {} },
+                    statement: {
+                        managedRuleGroupStatement: { vendorName: "AWS", name: "AWSManagedRulesCommonRuleSet" },
+                    },
+                    visibilityConfig: {
+                        metricName: "AWSManagedRulesCommonRuleSet",
+                        sampledRequestsEnabled: true,
+                        cloudWatchMetricsEnabled: true,
+                    },
                 },
                 {
-                    vendor: "AWS",
                     name: "AWSManagedRulesAmazonIpReputationList",
+                    priority: 2,
+                    overrideAction: { none: {} },
+                    statement: {
+                        managedRuleGroupStatement: { vendorName: "AWS", name: "AWSManagedRulesAmazonIpReputationList" },
+                    },
+                    visibilityConfig: {
+                        metricName: "AWSManagedRulesAmazonIpReputationList",
+                        sampledRequestsEnabled: true,
+                        cloudWatchMetricsEnabled: true,
+                    },
                 },
                 {
-                    vendor: "AWS",
                     name: "AWSManagedRulesBotControlRuleSet",
+                    priority: 3,
+                    overrideAction: { none: {} },
+                    statement: {
+                        managedRuleGroupStatement: { vendorName: "AWS", name: "AWSManagedRulesBotControlRuleSet" },
+                    },
+                    visibilityConfig: {
+                        metricName: "AWSManagedRulesBotControlRuleSet",
+                        sampledRequestsEnabled: true,
+                        cloudWatchMetricsEnabled: true,
+                    },
                 },
             ],
         });
-        Aspects.of(cloudfrontWebAcl).add(new FunctionRuntimeAspect());
 
         const s3Origin = S3BucketOrigin.withOriginAccessControl(websiteBucket);
 
@@ -121,7 +179,7 @@ export class Frontend extends CommonStack {
             ],
             minimumProtocolVersion: SecurityPolicyProtocol.TLS_V1_2_2021,
             sslSupportMethod: SSLMethod.SNI,
-            webAclId: cloudfrontWebAcl.webAclArn,
+            webAclId: cloudfrontWebAcl.attrArn,
             logBucket: loggingBucket,
             logIncludesCookies: true,
             logFilePrefix: "distribution",
@@ -161,6 +219,43 @@ export class Frontend extends CommonStack {
             `https://${distribution.distributionDomainName}`,
             "http://localhost:3000",
         ];
+    }
+
+    /**
+     * Add an API Gateway proxy behavior to the CloudFront distribution.
+     * Routes /api/* requests to the API Gateway, stripping the /api prefix.
+     * This allows the pen test scanner to reach backend endpoints through the
+     * same verified domain as the frontend.
+     */
+    public addApiProxy(apiGatewayDomain: string) {
+        // CloudFront Function to rewrite /api/* -> /prod/*
+        const rewriteFunction = new CloudFrontFunction(this, "apiRewriteFunction", {
+            code: FunctionCode.fromInline(`
+function handler(event) {
+  var request = event.request;
+  request.uri = request.uri.replace(/^\\/api/, '/prod');
+  return request;
+}
+            `),
+        });
+
+        this.distribution.addBehavior("/api/*", new HttpOrigin(apiGatewayDomain), {
+            viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+            allowedMethods: AllowedMethods.ALLOW_ALL,
+            cachePolicy: CachePolicy.CACHING_DISABLED,
+            originRequestPolicy: OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+            functionAssociations: [{
+                function: rewriteFunction,
+                eventType: FunctionEventType.VIEWER_REQUEST,
+            }],
+        });
+
+        NagSuppressions.addResourceSuppressions(rewriteFunction, [
+            {
+                id: "AwsSolutions-CFR3",
+                reason: "CloudFront Function for API path rewriting does not require logging.",
+            },
+        ], true);
     }
 }
 
