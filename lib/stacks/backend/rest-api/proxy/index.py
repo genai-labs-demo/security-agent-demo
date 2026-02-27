@@ -210,6 +210,7 @@ def execute_operation(connection, route_info, operation: str) -> Any:
     elif resource_type == 'opportunities':
         account_id = query_params.get('accountId')
         search_query = query_params.get('search') or query_params.get('q')  # Support both 'search' and 'q' parameters
+        user_id = route_info.user_id  # Extract authenticated user ID for authorization
         
         # Check if this is a search endpoint (/opportunities/search)
         is_search_endpoint = route_info.path.endswith('/search')
@@ -217,7 +218,7 @@ def execute_operation(connection, route_info, operation: str) -> Any:
         if operation == 'list' or is_search_endpoint:
             # If search query is provided, perform search instead of list
             if search_query:
-                return opportunities_handler.search_opportunities(connection, search_query, account_id)
+                return opportunities_handler.search_opportunities(connection, search_query, account_id, user_id)
             else:
                 return opportunities_handler.list_opportunities(connection, account_id)
         elif operation == 'get':
