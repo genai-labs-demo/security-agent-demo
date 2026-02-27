@@ -549,6 +549,17 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
+        # Capture the current account_id BEFORE update to handle account transfers
+        # This ensures we can recalculate aggregates for the source account
+        old_account_id = None
+        cursor.execute(
+            "SELECT account_id FROM opportunities WHERE id = %s AND deleted_at IS NULL",
+            (opportunity_id,)
+        )
+        old_record = cursor.fetchone()
+        if old_record:
+            old_account_id = old_record.get('account_id')
+        
         # Validate account_id exists if being updated
         if 'account_id' in db_data and db_data['account_id']:
             cursor.execute("SELECT id FROM accounts WHERE id = %s", (db_data['account_id'],))
@@ -594,8 +605,21 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         # Map to API format
         opportunity = _map_opportunity_to_api_format(dict(record))
         
-        # Recalculate parent account aggregates (handles amount or account changes)
-        _recalculate_account_aggregates(connection, record.get('account_id'))
+        # Recalculate account aggregates for affected accounts
+        new_account_id = record.get('account_id')
+        
+        # Check if this was an account transfer (accountId changed)
+        if old_account_id and new_account_id and old_account_id != new_account_id:
+            # Account transfer occurred - recalculate both source and target accounts
+            logger.info(f"Account transfer detected: {old_account_id} -> {new_account_id}")
+            _recalculate_account_aggregates(connection, old_account_id)
+            _recalculate_account_aggregates(connection, new_account_id)
+        else:
+            # No account transfer - just recalculate current account
+            # (handles amount updates, stage changes, etc.)
+            _recalculate_account_aggregates(connection, new_account_id)
+        
+        logger.info(f"Aggregate recalculation complete for opportunity update: {opportunity_id}")
         
         logger.info(f"Updated opportunity: {opportunity_id}")
         return opportunity
