@@ -14,6 +14,8 @@ import time
 from typing import Dict, Any
 import boto3
 
+# Import rate limiter
+from rate_limiter import TokenBucketRateLimiter, RateLimitExceeded
 # Import handler modules
 from router import parse_api_gateway_event, validate_route, get_operation_type
 from db_connection import get_database_connection, return_database_connection
@@ -36,6 +38,9 @@ cloudwatch = boto3.client('cloudwatch')
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+# Initialize rate limiter
+rate_limiter = TokenBucketRateLimiter()
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -73,6 +78,52 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         
         # Validate route
         validate_route(route_info)
+        
+        # Apply rate limiting to search operations
+        is_search_operation = (
+            route_info.resource_type == 'opportunities' and 
+            (route_info.query_params.get('search') or 
+             route_info.query_params.get('q') or 
+             route_info.path.endswith('/search'))
+        )
+        
+        rate_limit_info = {'limit': 0, 'remaining': 0, 'reset': 0, 'retry_after': 0}
+        
+        if is_search_operation:
+            # Extract user identity from request context
+            user_id = _extract_user_identity(event)
+            
+            try:
+                # Check rate limit for search operations
+                allowed, rate_limit_info = rate_limiter.check_rate_limit(
+                    user_id=user_id,
+                    endpoint='/api/opportunities?search',
+                    policy_name='search'
+                )
+                
+                if not allowed:
+                    logger.warning(f"Rate limit exceeded for user {user_id} on search endpoint")
+                    response = format_rate_limit_response(rate_limit_info)
+                    return process_cors(event, response)
+                    
+            except RateLimitExceeded as e:
+                logger.warning(f"Rate limit exceeded for user {user_id}: {str(e)}")
+                response = {
+                    'statusCode': 429,
+                    'headers': {
+                        'Content-Type': 'application/json',
+                        'X-RateLimit-Limit': str(e.limit),
+                        'X-RateLimit-Remaining': str(e.remaining),
+                        'X-RateLimit-Reset': str(e.reset_time),
+                        'Retry-After': str(e.retry_after)
+                    },
+                    'body': json.dumps({
+                        'error': 'Rate limit exceeded',
+                        'message': str(e),
+                        'retryAfter': e.retry_after
+                    })
+                }
+                return process_cors(event, response)
         
         # Get operation type
         operation = get_operation_type(route_info)
@@ -119,6 +170,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             
             # Format successful response
             response = format_success_response(result, route_info, operation)
+            
+            # Add rate limit headers to successful responses for search operations
+            if is_search_operation and rate_limit_info.get('limit', 0) > 0:
+                response = add_rate_limit_headers(response, rate_limit_info)
         finally:
             # Return database connection to pool
             return_database_connection(connection)
@@ -160,6 +215,89 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         logger.error(f"Unexpected error in request {request_id}: {str(e)}", exc_info=True)
         response = handle_server_error(e, request_id)
         return process_cors(event, response)
+
+
+def _extract_user_identity(event: Dict[str, Any]) -> str:
+    """
+    Extract user identity from API Gateway event for rate limiting.
+    
+    Priority order:
+    1. Authenticated user ID from authorizer context (sub, username)
+    2. Source IP address as fallback
+    
+    Args:
+        event: API Gateway event dictionary
+    
+    Returns:
+        User identifier string
+    """
+    # Try to get authenticated user from authorizer context
+    request_context = event.get('requestContext', {})
+    authorizer = request_context.get('authorizer', {})
+    
+    # Check for Cognito user ID
+    user_id = authorizer.get('claims', {}).get('sub')
+    if user_id:
+        return f"user:{user_id}"
+    
+    # Check for custom authorizer user ID
+    user_id = authorizer.get('principalId')
+    if user_id and user_id != 'user':
+        return f"user:{user_id}"
+    
+    # Fallback to IP address
+    source_ip = request_context.get('identity', {}).get('sourceIp', 'unknown')
+    return f"ip:{source_ip}"
+
+
+def format_rate_limit_response(rate_limit_info: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Format rate limit exceeded response.
+    
+    Args:
+        rate_limit_info: Rate limit information dictionary
+    
+    Returns:
+        API Gateway response dictionary with 429 status
+    """
+    return {
+        'statusCode': 429,
+        'headers': {
+            'Content-Type': 'application/json',
+            'X-RateLimit-Limit': str(rate_limit_info.get('limit', 0)),
+            'X-RateLimit-Remaining': str(rate_limit_info.get('remaining', 0)),
+            'X-RateLimit-Reset': str(rate_limit_info.get('reset', 0)),
+            'Retry-After': str(rate_limit_info.get('retry_after', 60))
+        },
+        'body': json.dumps({
+            'error': 'Rate limit exceeded',
+            'message': f"Too many requests. Limit: {rate_limit_info.get('limit', 0)} requests per {rate_limit_info.get('window', 'minute')}.",
+            'retryAfter': rate_limit_info.get('retry_after', 60),
+            'limit': rate_limit_info.get('limit', 0),
+            'reset': rate_limit_info.get('reset', 0)
+        })
+    }
+
+
+def add_rate_limit_headers(response: Dict[str, Any], rate_limit_info: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Add rate limit headers to successful response.
+    
+    Args:
+        response: API Gateway response dictionary
+        rate_limit_info: Rate limit information dictionary
+    
+    Returns:
+        Response with rate limit headers added
+    """
+    if 'headers' not in response:
+        response['headers'] = {}
+    
+    response['headers']['X-RateLimit-Limit'] = str(rate_limit_info.get('limit', 0))
+    response['headers']['X-RateLimit-Remaining'] = str(rate_limit_info.get('remaining', 0))
+    response['headers']['X-RateLimit-Reset'] = str(rate_limit_info.get('reset', 0))
+    
+    return response
 
 
 def execute_operation(connection, route_info, operation: str) -> Any:
