@@ -73,12 +73,14 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def list_team_members(connection) -> List[Dict[str, Any]]:
-    """
+def list_team_members(connection, user_email: Optional[str] = None) -> List[Dict[str, Any]]:
     Query all team members from the database ordered by name.
-    
+    Query team member profile for the authenticated user.
+    Only returns the authenticated user's own profile for security.
     Args:
         connection: Database connection object
     
+        user_email: Email of authenticated user for authorization
     Returns:
         List of team member dictionaries in API format
     
@@ -86,7 +88,11 @@ def list_team_members(connection) -> List[Dict[str, Any]]:
         Exception: If database query fails
     """
     try:
-        logger.info("Listing all team members")
+        # Authorization check: Only return the authenticated user's own profile
+        if not user_email:
+            raise Exception("Access denied: User email not provided in authentication context")
+        
+        logger.info(f"Listing team member profile for user {user_email}")
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
@@ -95,12 +101,16 @@ def list_team_members(connection) -> List[Dict[str, Any]]:
                 id, name, email, role, quota, pipeline_value, closed_won_value,
                 quota_attainment, win_rate, opportunity_count, avatar_url
             FROM team_members
+            WHERE email = %s
             ORDER BY name ASC
         """
         
-        cursor.execute(query)
+        cursor.execute(query, (user_email,))
         records = cursor.fetchall()
         cursor.close()
+        
+        if not records:
+            logger.warning(f"User {user_email} is not a team member")
         
         # Map to API format
         team_members = [_map_team_member_to_api_format(dict(record)) for record in records]

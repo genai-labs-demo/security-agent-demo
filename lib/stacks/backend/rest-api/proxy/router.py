@@ -24,7 +24,9 @@ class RouteInfo:
         resource_id: Optional[str] = None,
         query_params: Optional[Dict[str, str]] = None,
         body: Optional[Dict[str, Any]] = None,
-        path: Optional[str] = None
+        path: Optional[str] = None,
+        user_email: Optional[str] = None,
+        user_id: Optional[str] = None
     ):
         self.resource_type = resource_type
         self.http_method = http_method
@@ -32,6 +34,8 @@ class RouteInfo:
         self.query_params = query_params or {}
         self.body = body or {}
         self.path = path or ""
+        self.user_email = user_email
+        self.user_id = user_id
     
     def __repr__(self):
         return (f"RouteInfo(resource_type={self.resource_type}, "
@@ -90,6 +94,9 @@ def parse_api_gateway_event(event: Dict[str, Any]) -> RouteInfo:
         # Extract and parse request body
         body = _parse_request_body(event)
         
+        
+        # Extract user context from JWT claims
+        user_email, user_id = _extract_user_context(event)
         route_info = RouteInfo(
             resource_type=resource_type,
             http_method=http_method,
@@ -97,7 +104,9 @@ def parse_api_gateway_event(event: Dict[str, Any]) -> RouteInfo:
             query_params=query_params,
             body=body,
             path=path
-        )
+            path=path,
+            user_email=user_email,
+            user_id=user_id
         
         logger.info(f"Parsed route: {route_info}")
         return route_info
@@ -230,6 +239,42 @@ def _parse_request_body(event: Dict[str, Any]) -> Dict[str, Any]:
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse JSON body: {str(e)}")
         raise ValueError(f"Invalid JSON in request body: {str(e)}")
+
+
+def _extract_user_context(event: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Extract authenticated user context from API Gateway event.
+    
+    When using AWS Cognito authorizer, the JWT claims are available in:
+    event['requestContext']['authorizer']['claims']
+    
+    Args:
+        event: API Gateway event dictionary
+    
+    Returns:
+        Tuple of (user_email, user_id) extracted from JWT claims
+        Returns (None, None) if claims are not available
+    
+    Note:
+        This requires API Gateway to be configured with a Cognito authorizer.
+        The 'email' claim contains the user's email address.
+        The 'sub' claim contains the Cognito user ID (UUID).
+    """
+    try:
+        request_context = event.get('requestContext', {})
+        authorizer = request_context.get('authorizer', {})
+        claims = authorizer.get('claims', {})
+        
+        user_email = claims.get('email')
+        user_id = claims.get('sub')
+        
+        if user_email:
+            logger.info(f"Extracted user context: email={user_email}, user_id={user_id}")
+        
+        return user_email, user_id
+    except Exception as e:
+        logger.warning(f"Failed to extract user context: {str(e)}")
+        return None, None
 
 
 def route_request(route_info: RouteInfo) -> str:

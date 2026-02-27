@@ -118,7 +118,45 @@ def _recalculate_account_aggregates(connection, account_id: str) -> None:
         cursor.close()
 
 
-def search_opportunities(connection, search_query: str, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
+def _get_team_member_id_by_email(connection, user_email: str) -> Optional[str]:
+    """
+    Lookup team member ID by email address.
+    
+    Args:
+        connection: Database connection object
+        user_email: Email address of the authenticated user
+    
+    Returns:
+        Team member ID if found, None otherwise
+    
+    Raises:
+        Exception: If database query fails
+    """
+    try:
+        cursor = connection.cursor()
+        cursor.execute(
+            "SELECT id FROM team_members WHERE email = %s",
+            (user_email,)
+        )
+        result = cursor.fetchone()
+        cursor.close()
+        
+        if result:
+            team_member_id = result[0]
+            logger.info(f"Found team member ID {team_member_id} for email {user_email}")
+            return team_member_id
+        else:
+            logger.warning(f"No team member found for email {user_email}")
+            return None
+    except psycopg2.Error as e:
+        logger.error(f"Database error looking up team member: {str(e)}")
+        raise Exception(f"Failed to lookup team member: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error looking up team member: {str(e)}")
+        raise
+
+
+def search_opportunities(connection, search_query: str, account_id: Optional[str] = None, user_email: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Perform full text search on opportunities using multiple keywords.
     
@@ -126,6 +164,7 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
         connection: Database connection object
         search_query: Search string (e.g., "finance software platform")
         account_id: Optional account ID to filter opportunities
+        user_email: Email of authenticated user for authorization filtering
     
     Returns:
         List of opportunity dictionaries in API format, ordered by relevance
@@ -136,6 +175,17 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
     try:
         if not search_query or not search_query.strip():
             return []
+        
+        # Authorization check: Get team member ID for the authenticated user
+        owner_id = None
+        if user_email:
+            owner_id = _get_team_member_id_by_email(connection, user_email)
+            if not owner_id:
+                # User is not a team member, return empty results (no access)
+                logger.warning(f"User {user_email} is not a team member, denying access to opportunities")
+                raise Exception("Access denied: User is not a member of the sales team")
+        else:
+            raise Exception("Access denied: User email not provided in authentication context")
         
         keywords = search_query.strip().split()
         
@@ -222,6 +272,10 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
         # Add account filter if specified
         if account_id:
             query += " AND o.account_id = %s"
+        
+        # Add authorization filter: only return opportunities owned by the authenticated user
+        query += " AND o.owner_id = %s"
+        keyword_params.append(owner_id)
             keyword_params.append(account_id)
         
         query += """
@@ -299,13 +353,14 @@ def _validate_amount(amount) -> None:
         )
 
 
-def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
+def list_opportunities(connection, account_id: Optional[str] = None, user_email: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Query opportunities from the database with optional account filter.
     
     Args:
         connection: Database connection object
         account_id: Optional account ID to filter opportunities
+        user_email: Email of authenticated user for authorization filtering
     
     Returns:
         List of opportunity dictionaries in API format
@@ -315,6 +370,17 @@ def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dic
     """
     try:
         logger.info(f"Listing opportunities{f' for account {account_id}' if account_id else ''}")
+        # Authorization check: Get team member ID for the authenticated user
+        owner_id = None
+        if user_email:
+            owner_id = _get_team_member_id_by_email(connection, user_email)
+            if not owner_id:
+                # User is not a team member, deny access
+                logger.warning(f"User {user_email} is not a team member, denying access to opportunities")
+                raise Exception("Access denied: User is not a member of the sales team")
+        else:
+            raise Exception("Access denied: User email not provided in authentication context")
+        
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
@@ -332,6 +398,10 @@ def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dic
         if account_id:
             query += " AND account_id = %s"
             params.append(account_id)
+        
+        # Add authorization filter: only return opportunities owned by the authenticated user
+        query += " AND owner_id = %s"
+        params.append(owner_id)
         
         query += " ORDER BY close_date DESC LIMIT 1000"
         
