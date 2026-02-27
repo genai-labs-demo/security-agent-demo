@@ -571,7 +571,7 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         query = f"""
             UPDATE opportunities
             SET {', '.join(set_clauses)}
-            WHERE id = %s
+            WHERE id = %s AND deleted_at IS NULL
             RETURNING 
                 id, name, account_id, account_name, amount, close_date,
                 stage, next_step, recent_activity, recent_activity_date,
