@@ -25,6 +25,24 @@ class ValidationError(Exception):
         super().__init__(self.message)
 
 
+def validate_no_null_bytes(value: str, field_name: str) -> None:
+    """
+    Validate that a string does not contain NULL bytes.
+    
+    NULL bytes (\\x00) are not supported by PostgreSQL in text fields,
+    but we catch them here to avoid exposing database implementation details.
+    
+    Args:
+        value: String value to validate
+        field_name: Name of the field for error message
+        
+    Raises:
+        ValidationError: If NULL bytes are found
+    """
+    if '\x00' in value:
+        raise ValidationError(f"Field '{field_name}' contains invalid characters", field=field_name)
+
+
 def validate_account(data: Dict[str, Any], is_update: bool = False) -> None:
     """
     Validate account data against schema requirements.
@@ -53,6 +71,7 @@ def validate_account(data: Dict[str, Any], is_update: bool = False) -> None:
         if len(data['name']) > 255:
             raise ValidationError("Field 'name' must not exceed 255 characters", field='name')
     
+        validate_no_null_bytes(data['name'], 'name')
     # Validate domain
     if 'domain' in data:
         if not isinstance(data['domain'], str) or not data['domain'].strip():
@@ -60,11 +79,13 @@ def validate_account(data: Dict[str, Any], is_update: bool = False) -> None:
         if len(data['domain']) > 255:
             raise ValidationError("Field 'domain' must not exceed 255 characters", field='domain')
     
+        validate_no_null_bytes(data['domain'], 'domain')
     # Validate industry (industry_id)
     if 'industry' in data:
         if not isinstance(data['industry'], str) or not data['industry'].strip():
             raise ValidationError("Field 'industry' must be a non-empty string", field='industry')
     
+        validate_no_null_bytes(data['industry'], 'industry')
     # Validate annualRevenue
     if 'annualRevenue' in data:
         if not isinstance(data['annualRevenue'], (int, float)):
@@ -84,6 +105,7 @@ def validate_account(data: Dict[str, Any], is_update: bool = False) -> None:
         if not isinstance(data['ownerId'], str) or not data['ownerId'].strip():
             raise ValidationError("Field 'ownerId' must be a non-empty string", field='ownerId')
     
+        validate_no_null_bytes(data['ownerId'], 'ownerId')
     # NOTE: healthStatus and healthScore are computed from business metrics
     # and are not accepted from user input. They are ignored if provided.
     
@@ -94,6 +116,7 @@ def validate_account(data: Dict[str, Any], is_update: bool = False) -> None:
         if len(data['ownerName']) > 255:
             raise ValidationError("Field 'ownerName' must not exceed 255 characters", field='ownerName')
     
+        validate_no_null_bytes(data['ownerName'], 'ownerName')
     if 'opportunityCount' in data and data['opportunityCount'] is not None:
         if not isinstance(data['opportunityCount'], int):
             raise ValidationError("Field 'opportunityCount' must be an integer", field='opportunityCount')
@@ -110,6 +133,7 @@ def validate_account(data: Dict[str, Any], is_update: bool = False) -> None:
         if not isinstance(data['logoUrl'], str):
             raise ValidationError("Field 'logoUrl' must be a string", field='logoUrl')
 
+        validate_no_null_bytes(data['logoUrl'], 'logoUrl')
 
 def validate_opportunity(data: Dict[str, Any], is_update: bool = False) -> None:
     """
@@ -138,11 +162,13 @@ def validate_opportunity(data: Dict[str, Any], is_update: bool = False) -> None:
         if len(data['name']) > 255:
             raise ValidationError("Field 'name' must not exceed 255 characters", field='name')
     
+        validate_no_null_bytes(data['name'], 'name')
     # Validate accountId (foreign key)
     if 'accountId' in data:
         if not isinstance(data['accountId'], str) or not data['accountId'].strip():
             raise ValidationError("Field 'accountId' must be a non-empty string", field='accountId')
     
+        validate_no_null_bytes(data['accountId'], 'accountId')
     # Validate amount (with upper bound to prevent pipeline inflation)
     MAX_OPPORTUNITY_AMOUNT = 100_000_000  # $100M reasonable upper bound
     if 'amount' in data:
@@ -163,6 +189,7 @@ def validate_opportunity(data: Dict[str, Any], is_update: bool = False) -> None:
             raise ValidationError("Field 'closeDate' must be a non-empty string in ISO 8601 format", field='closeDate')
         # Basic ISO date format validation (YYYY-MM-DD)
         if not re.match(r'^\d{4}-\d{2}-\d{2}', data['closeDate']):
+        validate_no_null_bytes(data['closeDate'], 'closeDate')
             raise ValidationError("Field 'closeDate' must be in ISO 8601 date format (YYYY-MM-DD)", field='closeDate')
     
     # Validate stage enum
@@ -185,6 +212,7 @@ def validate_opportunity(data: Dict[str, Any], is_update: bool = False) -> None:
     if 'ownerId' in data:
         if not isinstance(data['ownerId'], str) or not data['ownerId'].strip():
             raise ValidationError("Field 'ownerId' must be a non-empty string", field='ownerId')
+        validate_no_null_bytes(data['ownerId'], 'ownerId')
     
     # Validate probability
     if 'probability' in data:
@@ -198,20 +226,24 @@ def validate_opportunity(data: Dict[str, Any], is_update: bool = False) -> None:
         if not isinstance(data['accountName'], str):
             raise ValidationError("Field 'accountName' must be a string", field='accountName')
         if len(data['accountName']) > 255:
+        validate_no_null_bytes(data['accountName'], 'accountName')
             raise ValidationError("Field 'accountName' must not exceed 255 characters", field='accountName')
     
     if 'nextStep' in data and data['nextStep'] is not None:
         if not isinstance(data['nextStep'], str):
+        validate_no_null_bytes(data['nextStep'], 'nextStep')
             raise ValidationError("Field 'nextStep' must be a string", field='nextStep')
     
     if 'recentActivity' in data and data['recentActivity'] is not None:
         if not isinstance(data['recentActivity'], str):
+        validate_no_null_bytes(data['recentActivity'], 'recentActivity')
             raise ValidationError("Field 'recentActivity' must be a string", field='recentActivity')
     
     if 'ownerName' in data and data['ownerName'] is not None:
         if not isinstance(data['ownerName'], str):
             raise ValidationError("Field 'ownerName' must be a string", field='ownerName')
         if len(data['ownerName']) > 255:
+        validate_no_null_bytes(data['ownerName'], 'ownerName')
             raise ValidationError("Field 'ownerName' must not exceed 255 characters", field='ownerName')
 
 
@@ -239,6 +271,7 @@ def validate_team_member(data: Dict[str, Any], is_update: bool = False) -> None:
         if not isinstance(data['name'], str) or not data['name'].strip():
             raise ValidationError("Field 'name' must be a non-empty string", field='name')
         if len(data['name']) > 255:
+        validate_no_null_bytes(data['name'], 'name')
             raise ValidationError("Field 'name' must not exceed 255 characters", field='name')
     
     # Validate email format
@@ -248,6 +281,7 @@ def validate_team_member(data: Dict[str, Any], is_update: bool = False) -> None:
         if len(data['email']) > 255:
             raise ValidationError("Field 'email' must not exceed 255 characters", field='email')
         if not EMAIL_PATTERN.match(data['email']):
+        validate_no_null_bytes(data['email'], 'email')
             raise ValidationError("Field 'email' must be a valid email address", field='email')
     
     # Validate role
@@ -255,6 +289,7 @@ def validate_team_member(data: Dict[str, Any], is_update: bool = False) -> None:
         if not isinstance(data['role'], str) or not data['role'].strip():
             raise ValidationError("Field 'role' must be a non-empty string", field='role')
         if len(data['role']) > 100:
+        validate_no_null_bytes(data['role'], 'role')
             raise ValidationError("Field 'role' must not exceed 100 characters", field='role')
     
     # Validate quota
@@ -297,4 +332,5 @@ def validate_team_member(data: Dict[str, Any], is_update: bool = False) -> None:
     
     if 'avatarUrl' in data and data['avatarUrl'] is not None:
         if not isinstance(data['avatarUrl'], str):
+        validate_no_null_bytes(data['avatarUrl'], 'avatarUrl')
             raise ValidationError("Field 'avatarUrl' must be a string", field='avatarUrl')

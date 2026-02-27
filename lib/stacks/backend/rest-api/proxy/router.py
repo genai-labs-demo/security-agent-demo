@@ -103,8 +103,8 @@ def parse_api_gateway_event(event: Dict[str, Any]) -> RouteInfo:
         return route_info
         
     except Exception as e:
-        logger.error(f"Failed to parse API Gateway event: {str(e)}")
-        raise ValueError(f"Failed to parse API Gateway event: {str(e)}")
+        logger.error(f"Failed to parse request: {str(e)}")
+        raise ValueError("Invalid request format")
 
 
 def _parse_path(path: str) -> Tuple[str, Optional[str]]:
@@ -229,7 +229,7 @@ def _parse_request_body(event: Dict[str, Any]) -> Dict[str, Any]:
         return body
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse JSON body: {str(e)}")
-        raise ValueError(f"Invalid JSON in request body: {str(e)}")
+        raise ValueError("Invalid JSON format in request body")
 
 
 def route_request(route_info: RouteInfo) -> str:
