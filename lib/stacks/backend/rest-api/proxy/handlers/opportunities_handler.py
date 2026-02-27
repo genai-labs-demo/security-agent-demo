@@ -128,7 +128,8 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
         account_id: Optional account ID to filter opportunities
     
     Returns:
-        List of opportunity dictionaries in API format, ordered by relevance
+        Dictionary containing opportunities list and search metadata including
+        truncation information if query exceeded maximum keyword limit
     
     Raises:
         Exception: If database query fails
@@ -138,12 +139,15 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
             return []
         
         keywords = search_query.strip().split()
+        original_keyword_count = len(keywords)
         
         # Limit keyword count to prevent resource exhaustion via query explosion
         MAX_KEYWORDS = 10
+        query_truncated = False
         if len(keywords) > MAX_KEYWORDS:
             logger.warning(f"Search query truncated from {len(keywords)} to {MAX_KEYWORDS} keywords")
             keywords = keywords[:MAX_KEYWORDS]
+            query_truncated = True
         
         logger.info(f"Searching opportunities for keywords: {keywords}")
         
@@ -259,7 +263,19 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
             opportunities.append(opportunity)
         
         logger.info(f"Found {len(opportunities)} opportunities matching search query")
-        return opportunities
+        
+        # Return structured response with metadata about query processing
+        return {
+            'opportunities': opportunities,
+            'metadata': {
+                'queryTruncated': query_truncated,
+                'originalKeywordCount': original_keyword_count,
+                'usedKeywordCount': len(keywords),
+                'usedKeywords': keywords,
+                'maxKeywords': MAX_KEYWORDS,
+                'totalResults': len(opportunities)
+            }
+        }
         
     except psycopg2.Error as e:
         logger.error(f"Database error searching opportunities: {str(e)}")

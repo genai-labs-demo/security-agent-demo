@@ -384,7 +384,25 @@ def format_success_response(result: Any, route_info, operation: str) -> Dict[str
                 'body': result.get('content', ''),
             }
     else:
-        enhanced_result = enhance_with_images(result, entity_type)
+        # Handle search response with metadata structure
+        # Search operations return: {'opportunities': [...], 'metadata': {...}}
+        # Other operations return: [...] or {...}
+        if isinstance(result, dict) and 'opportunities' in result and 'metadata' in result:
+            # This is a search response with metadata - enhance only the opportunities list
+            opportunities_list = result.get('opportunities', [])
+            enhanced_opportunities = enhance_with_images(opportunities_list, entity_type)
+            enhanced_result = {
+                'opportunities': enhanced_opportunities,
+                'metadata': result.get('metadata', {})
+            }
+            # Log truncation warning if query was truncated
+            if result.get('metadata', {}).get('queryTruncated'):
+                logger.warning(
+                    f"Search query truncated: {result['metadata']['originalKeywordCount']} "
+                    f"keywords reduced to {result['metadata']['usedKeywordCount']}")
+        else:
+            # Standard response - enhance as usual
+            enhanced_result = enhance_with_images(result, entity_type)
     
     # Format response body
     response = {
