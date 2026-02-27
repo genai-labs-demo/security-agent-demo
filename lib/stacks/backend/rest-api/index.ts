@@ -74,6 +74,8 @@ export class RestApi extends Construct {
                 loggingLevel: MethodLoggingLevel.ERROR,
                 metricsEnabled: true,
                 dataTraceEnabled: false,
+                throttlingRateLimit: 100,
+                throttlingBurstLimit: 200,
             },
             cloudWatchRole: true,
             cloudWatchRoleRemovalPolicy: RemovalPolicy.DESTROY,

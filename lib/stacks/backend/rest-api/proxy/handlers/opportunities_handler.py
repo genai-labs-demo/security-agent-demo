@@ -122,6 +122,11 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
     """
     Perform full text search on opportunities using multiple keywords.
     
+    Security: Protected against resource exhaustion attacks (CWE-400, CWE-770) through:
+    - Maximum keyword limit (5 keywords)
+    - Database statement timeout (30 seconds, configured in db_connection.py)
+    - API Gateway throttling (configured in CDK)
+    
     Args:
         connection: Database connection object
         search_query: Search string (e.g., "finance software platform")
@@ -139,8 +144,12 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
         
         keywords = search_query.strip().split()
         
-        # Limit keyword count to prevent resource exhaustion via query explosion
-        MAX_KEYWORDS = 10
+        # Limit keyword count to prevent resource exhaustion via query explosion (CWE-400)
+        # Reduced from 10 to 5 to limit computational complexity
+        # Each keyword generates: 6 ILIKE comparisons in WHERE + 5 in relevance + 6 in match count = 17 operations
+        # 5 keywords = 85 ILIKE operations total (previously 170 with 10 keywords)
+        # Database indexes on searchable columns (name, next_step, recent_activity) are recommended
+        MAX_KEYWORDS = 5
         if len(keywords) > MAX_KEYWORDS:
             logger.warning(f"Search query truncated from {len(keywords)} to {MAX_KEYWORDS} keywords")
             keywords = keywords[:MAX_KEYWORDS]
