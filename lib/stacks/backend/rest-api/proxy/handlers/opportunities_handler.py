@@ -269,8 +269,14 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
         raise
 
 # Maximum allowed opportunity amount ($10M) to prevent pipeline inflation
-MAX_OPPORTUNITY_AMOUNT = 10_000_000
+# Maximum allowed opportunity amount ($10M) to prevent individual opportunity inflation
 
+
+# Business logic constraints to prevent aggregate pipeline inflation
+MAX_OPPORTUNITIES_PER_ACCOUNT = 100  # Maximum total opportunities per account
+MAX_TOTAL_PIPELINE_PER_ACCOUNT = 100_000_000  # $100M maximum total pipeline per account
+MAX_HIGH_VALUE_OPPS_PER_ACCOUNT = 10  # Maximum high-value opportunities (>$5M) per account
+HIGH_VALUE_THRESHOLD = 5_000_000  # $5M threshold for high-value opportunity classification
 
 def _validate_amount(amount) -> None:
     """
@@ -297,6 +303,160 @@ def _validate_amount(amount) -> None:
             f"amount of ${MAX_OPPORTUNITY_AMOUNT:,.2f}. Contact an administrator "
             f"for opportunities above this threshold."
         )
+
+
+# Rate limiting constraints to prevent rapid-fire creation abuse
+MAX_OPPORTUNITIES_PER_MINUTE = 5  # Maximum opportunities per account per minute
+
+
+def _validate_account_aggregates(connection, account_id: str, new_amount: float) -> None:
+    """
+    Validate aggregate business logic constraints for an account.
+    Prevents pipeline inflation through unrestricted high-volume creation.
+    
+    Checks:
+    1. Total opportunity count does not exceed maximum per account
+    2. Total pipeline value does not exceed maximum per account
+    3. High-value opportunity count does not exceed maximum per account
+    
+    Args:
+        connection: Database connection object
+        account_id: Account ID to validate aggregates for
+        new_amount: Amount of the new opportunity being created
+    
+    Raises:
+        ValueError: If any aggregate constraint would be violated
+    """
+    if not account_id or new_amount is None:
+        return
+    
+    try:
+        cursor = connection.cursor()
+        
+        # Query current aggregate metrics for the account
+        cursor.execute("""
+            SELECT 
+                COUNT(*) as opportunity_count,
+                COALESCE(SUM(amount), 0) as total_pipeline,
+                COUNT(CASE WHEN amount >= %s THEN 1 END) as high_value_count
+            FROM opportunities
+            WHERE account_id = %s AND deleted_at IS NULL
+        """, (HIGH_VALUE_THRESHOLD, account_id))
+        
+        result = cursor.fetchone()
+        cursor.close()
+        
+        if not result:
+            return
+        
+        current_count, current_pipeline, current_high_value = result
+        
+        # Check 1: Total opportunity count limit
+        if current_count >= MAX_OPPORTUNITIES_PER_ACCOUNT:
+            logger.warning(
+                f"Aggregate validation failed: Account {account_id} has {current_count} opportunities "
+                f"(limit: {MAX_OPPORTUNITIES_PER_ACCOUNT})"
+            )
+            raise ValueError(
+                f"Account has reached the maximum allowed number of opportunities "
+                f"({MAX_OPPORTUNITIES_PER_ACCOUNT}). Please close or remove existing opportunities "
+                f"before creating new ones, or contact an administrator for assistance."
+            )
+        
+        # Check 2: Total pipeline value limit
+        new_total_pipeline = float(current_pipeline) + new_amount
+        if new_total_pipeline > MAX_TOTAL_PIPELINE_PER_ACCOUNT:
+            logger.warning(
+                f"Aggregate validation failed: Account {account_id} pipeline would reach "
+                f"${new_total_pipeline:,.2f} (limit: ${MAX_TOTAL_PIPELINE_PER_ACCOUNT:,.2f})"
+            )
+            raise ValueError(
+                f"Adding this opportunity would exceed the maximum total pipeline value "
+                f"of ${MAX_TOTAL_PIPELINE_PER_ACCOUNT:,.2f} for this account. "
+                f"Current pipeline: ${current_pipeline:,.2f}. "
+                f"Please contact an administrator to review pipeline limits."
+            )
+        
+        # Check 3: High-value opportunity count limit
+        if new_amount >= HIGH_VALUE_THRESHOLD:
+            if current_high_value >= MAX_HIGH_VALUE_OPPS_PER_ACCOUNT:
+                logger.warning(
+                    f"Aggregate validation failed: Account {account_id} has {current_high_value} "
+                    f"high-value opportunities (limit: {MAX_HIGH_VALUE_OPPS_PER_ACCOUNT})"
+                )
+                raise ValueError(
+                    f"Account has reached the maximum allowed number of high-value opportunities "
+                    f"(${HIGH_VALUE_THRESHOLD:,.2f}+). Current count: {current_high_value}. "
+                    f"Maximum allowed: {MAX_HIGH_VALUE_OPPS_PER_ACCOUNT}. "
+                    f"Please contact an administrator for opportunities of this size."
+                )
+        
+        logger.info(
+            f"Aggregate validation passed for account {account_id}: "
+            f"{current_count} opps, ${current_pipeline:,.2f} pipeline, "
+            f"{current_high_value} high-value"
+        )
+        
+    except psycopg2.Error as e:
+        logger.error(f"Database error validating aggregates for account {account_id}: {str(e)}")
+        raise Exception(f"Failed to validate account aggregates: {str(e)}")
+
+
+def _check_rate_limit(connection, account_id: str, owner_id: str) -> None:
+    """
+    Check if opportunity creation rate exceeds acceptable thresholds.
+    Detects and blocks rapid-fire creation patterns that may indicate abuse.
+    
+    Args:
+        connection: Database connection object
+        account_id: Account ID to check rate limit for
+        owner_id: Owner ID to check rate limit for
+    
+    Raises:
+        ValueError: If rate limit is exceeded
+    """
+    if not account_id or not owner_id:
+        return
+    
+    try:
+        cursor = connection.cursor()
+        
+        # Check opportunities created in the last minute for this account and owner
+        cursor.execute("""
+            SELECT COUNT(*) as recent_count
+            FROM opportunities
+            WHERE account_id = %s 
+                AND owner_id = %s 
+                AND created_date >= NOW() - INTERVAL '1 minute'
+                AND deleted_at IS NULL
+        """, (account_id, owner_id))
+        
+        result = cursor.fetchone()
+        cursor.close()
+        
+        if not result:
+            return
+        
+        recent_count = result[0]
+        
+        if recent_count >= MAX_OPPORTUNITIES_PER_MINUTE:
+            logger.warning(
+                f"Rate limit exceeded: {recent_count} opportunities created in last minute "
+                f"for account {account_id} by owner {owner_id} (limit: {MAX_OPPORTUNITIES_PER_MINUTE})"
+            )
+            raise ValueError(
+                f"Too many opportunities created recently. Please wait before creating more opportunities. "
+                f"Rate limit: {MAX_OPPORTUNITIES_PER_MINUTE} opportunities per minute."
+            )
+        
+        logger.info(
+            f"Rate limit check passed: {recent_count}/{MAX_OPPORTUNITIES_PER_MINUTE} "
+            f"opportunities in last minute"
+        )
+        
+    except psycopg2.Error as e:
+        logger.error(f"Database error checking rate limit: {str(e)}")
+        raise Exception(f"Failed to check rate limit: {str(e)}")
 
 
 def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -427,6 +587,18 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         
         # Validate amount bounds
         _validate_amount(db_data.get('amount'))
+        
+        # Validate aggregate constraints to prevent pipeline inflation
+        if db_data.get('account_id') and db_data.get('amount') is not None:
+            _validate_account_aggregates(
+                connection,
+                db_data['account_id'],
+                float(db_data['amount'])
+            )
+        
+        # Check rate limiting to prevent rapid-fire creation abuse
+        if db_data.get('account_id') and db_data.get('owner_id'):
+            _check_rate_limit(connection, db_data['account_id'], db_data['owner_id'])
         
         # Generate ID if not provided
         if 'id' not in data:
