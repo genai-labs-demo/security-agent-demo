@@ -118,6 +118,30 @@ def _recalculate_account_aggregates(connection, account_id: str) -> None:
         cursor.close()
 
 
+def _sanitize_search_keyword(keyword: str) -> str:
+    """
+    Sanitize search keywords by escaping SQL wildcard characters to prevent
+    resource exhaustion attacks through wildcard abuse in ILIKE operations.
+    
+    Escapes the following characters:
+    - % (percent) - matches any sequence of characters
+    - _ (underscore) - matches any single character
+    - \\ (backslash) - escape character itself
+    
+    Args:
+        keyword: Raw search keyword from user input
+    
+    Returns:
+        Sanitized keyword with SQL wildcards escaped
+    """
+    # Escape backslash first to prevent bypass attempts
+    keyword = keyword.replace('\\', '\\\\')
+    # Escape SQL wildcard characters
+    keyword = keyword.replace('%', '\\%')
+    keyword = keyword.replace('_', '\\_')
+    return keyword
+
+
 def search_opportunities(connection, search_query: str, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Perform full text search on opportunities using multiple keywords.
@@ -166,7 +190,7 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
             keyword_conditions.append(keyword_condition)
             # Add the same keyword 6 times for each field
             for _ in range(6):
-                keyword_params.append(f'%{keyword}%')
+                keyword_params.append(f'%{_sanitize_search_keyword(keyword)}%')
         
         # Join all keyword conditions with AND (all keywords must match)
         where_clause = " AND ".join(keyword_conditions)
@@ -238,12 +262,12 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
         # Add parameters for relevance scoring (5 per keyword)
         for keyword in keywords:
             for _ in range(5):
-                all_params.append(f'%{keyword}%')
+                all_params.append(f'%{_sanitize_search_keyword(keyword)}%')
         
         # Add parameters for match counting (6 per keyword)
         for keyword in keywords:
             for _ in range(6):
-                all_params.append(f'%{keyword}%')
+                all_params.append(f'%{_sanitize_search_keyword(keyword)}%')
         
         cursor.execute(query, all_params)
         records = cursor.fetchall()
