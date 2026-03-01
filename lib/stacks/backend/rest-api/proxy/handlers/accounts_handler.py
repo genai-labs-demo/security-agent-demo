@@ -129,6 +129,66 @@ def list_accounts(connection) -> List[Dict[str, Any]]:
 COMPUTED_FIELDS = {'health_status', 'health_score', 'opportunity_count', 'total_opportunity_value'}
 
 
+def _recalculate_health(connection, account_id: str) -> None:
+    """
+    Calculate and persist health metrics for an account.
+    Health is determined by opportunity pipeline data.
+    
+    Args:
+        connection: Database connection object
+        account_id: The account identifier
+    """
+    if not account_id:
+        return
+    
+    cursor = connection.cursor()
+    try:
+        # Fetch opportunity aggregates
+        cursor.execute("""
+            SELECT 
+                COALESCE(opportunity_count, 0),
+                COALESCE(total_opportunity_value, 0)
+            FROM accounts
+            WHERE id = %s
+        """, (account_id,))
+        
+        result = cursor.fetchone()
+        if not result:
+            logger.warning(f"Cannot calculate health - account {account_id} does not exist")
+            return
+        
+        opp_count = result[0]
+        opp_total = float(result[1])
+        
+        # Calculate score from opportunities (range: 0-100)
+        # Formula: 70% weight on value, 30% weight on count
+        score_from_value = min(100.0, (opp_total / 1000000.0) * 10.0)
+        score_from_count = min(100.0, float(opp_count) * 10.0)
+        final_score = int(score_from_value * 0.7 + score_from_count * 0.3)
+        
+        # Determine status category from score
+        if final_score >= 70:
+            status = 'Green'
+        elif final_score >= 40:
+            status = 'Yellow'
+        else:
+            status = 'Red'
+        
+        # Save to database
+        cursor.execute("""
+            UPDATE accounts
+            SET health_status = %s::health_status_enum,
+                health_score = %s
+            WHERE id = %s
+        """, (status, final_score, account_id))
+        
+        connection.commit()
+        logger.info(f"Health recalculated for {account_id}: {status} (score: {final_score})")
+    except Exception as e:
+        logger.error(f"Health recalculation failed for {account_id}: {str(e)}")
+    finally:
+        cursor.close()
+
 
 def get_account(connection, account_id: str) -> Optional[Dict[str, Any]]:
     """
