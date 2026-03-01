@@ -15,7 +15,7 @@ from typing import Dict, Any
 import boto3
 
 # Import handler modules
-from router import parse_api_gateway_event, validate_route, get_operation_type
+from router import parse_api_gateway_event, validate_route, get_operation_type, get_authenticated_user_id
 from db_connection import get_database_connection, return_database_connection
 from handlers import accounts_handler, opportunities_handler, team_members_handler, industries_handler
 from handlers import security_handler
@@ -84,7 +84,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             # Start timing for search operations
             start_time = time.time()
             
-            # Route to appropriate handler and execute operation
+            result = execute_operation(connection, route_info, operation, event)
             result = execute_operation(connection, route_info, operation)
             
             # Calculate and publish search latency metrics
@@ -163,7 +163,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
 
 def execute_operation(connection, route_info, operation: str) -> Any:
-    """
+def execute_operation(connection, route_info, operation: str, event: Dict[str, Any]) -> Any:
     Execute the appropriate CRUD operation based on route information.
     
     Args:
@@ -171,6 +171,7 @@ def execute_operation(connection, route_info, operation: str) -> Any:
         route_info: Parsed route information
         operation: Operation type ('list', 'get', 'create', 'update', 'delete')
         
+        event: Original API Gateway event (for authentication context)
     Returns:
         Operation result (record, list of records, or boolean)
         
@@ -284,8 +285,20 @@ def execute_operation(connection, route_info, operation: str) -> Any:
     # Route to security comments handler (XSS demo)
     elif resource_type == 'security-comments':
         if operation == 'create':
+        # SECURITY FIX: Require authentication for comment creation to prevent user impersonation
             return security_handler.create_security_comment(connection, body)
-        elif operation == 'list':
+            # Extract authenticated user ID from Cognito authorizer context
+            authenticated_user_id = get_authenticated_user_id(event)
+            
+            # Enforce authentication requirement
+            if not authenticated_user_id:
+                # Return error response that matches the application's error format
+                return {
+                    "success": False,
+                    "error": "Authentication required",
+                    "message": "You must be authenticated to create comments"
+                }
+            return security_handler.create_security_comment(connection, body, authenticated_user_id)
             return security_handler.list_security_comments(connection)
         else:
             raise ValueError(f"Security comments supports GET and POST operations")
