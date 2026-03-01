@@ -1,6 +1,7 @@
 """
 Database connection module for RDS Postgres integration.
-Handles connection pooling, credential retrieval, and connection reuse across Lambda invocations.
+Handles credential retrieval and database connections.
+Relies on RDS Proxy for connection pooling and management.
 """
 
 import os
@@ -9,22 +10,18 @@ import logging
 from typing import Optional
 import boto3
 import psycopg2
-from psycopg2 import pool
 from botocore.exceptions import ClientError
 
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# Global connection pool (persists across Lambda invocations)
-_connection_pool: Optional[psycopg2.pool.SimpleConnectionPool] = None
-_db_credentials: Optional[dict] = None
-
 
 def _get_database_credentials() -> dict:
     """
     Retrieve database credentials from AWS Secrets Manager.
-    Caches credentials in memory for reuse across invocations.
+    Credentials are fetched on each call to ensure freshness and support rotation.
+    Boto3 client implements its own caching for performance.
     
     Returns:
         dict: Database credentials containing username, password, host, port, dbname
@@ -33,13 +30,6 @@ def _get_database_credentials() -> dict:
         Exception: If credentials cannot be retrieved from Secrets Manager
     """
     global _db_credentials
-    
-    # Return cached credentials if available
-    if _db_credentials is not None:
-        logger.info("Using cached database credentials")
-        return _db_credentials
-    
-    secret_arn = os.environ.get('DATABASE_SECRET_ARN')
     if not secret_arn:
         raise ValueError("DATABASE_SECRET_ARN environment variable not set")
     
@@ -65,7 +55,7 @@ def _get_database_credentials() -> dict:
             raise ValueError("DATABASE_PROXY_ENDPOINT or DATABASE_NAME environment variable not set")
         
         _db_credentials = {
-            'username': secret_dict.get('username'),
+        credentials = {
             'password': secret_dict.get('password'),
             'host': database_proxy_endpoint,
             'port': secret_dict.get('port', 5432),
@@ -74,7 +64,7 @@ def _get_database_credentials() -> dict:
         
         logger.info(f"Successfully retrieved credentials for database: {database_name}")
         return _db_credentials
-        
+        return credentials
     except ClientError as e:
         logger.error(f"Failed to retrieve database credentials: {str(e)}")
         raise Exception(f"Failed to retrieve database credentials: {str(e)}")
@@ -88,60 +78,21 @@ def _get_database_credentials() -> dict:
 
 def _initialize_connection_pool() -> psycopg2.pool.SimpleConnectionPool:
     """
-    Initialize the database connection pool.
-    Creates a pool with min 1 and max 5 connections.
-    
-    Returns:
-        SimpleConnectionPool: Initialized connection pool
-    
-    Raises:
-        Exception: If connection pool cannot be created
-    """
-    global _connection_pool
-    
-    # Return existing pool if available
-    if _connection_pool is not None:
-        logger.info("Using existing connection pool")
-        return _connection_pool
-    
-    logger.info("Initializing new connection pool")
-    
-    try:
-        # Get database credentials
-        credentials = _get_database_credentials()
-        
-        # Create connection pool
-        _connection_pool = psycopg2.pool.SimpleConnectionPool(
-            minconn=1,
-            maxconn=5,
-            user=credentials['username'],
-            password=credentials['password'],
-            host=credentials['host'],
-            port=credentials['port'],
-            database=credentials['dbname'],
-            connect_timeout=10
-        )
-        
-        logger.info("Connection pool initialized successfully")
-        return _connection_pool
-        
-    except psycopg2.Error as e:
-        logger.error(f"Failed to create connection pool: {str(e)}")
-        raise Exception(f"Failed to create connection pool: {str(e)}")
-    except Exception as e:
-        logger.error(f"Unexpected error initializing connection pool: {str(e)}")
-        raise
-
-
-def get_database_connection():
-    """
     Get a database connection from the connection pool.
-    Implements connection pooling and reuse across Lambda invocations.
+    Create a new database connection.
     
+    This function creates a direct connection to the database through RDS Proxy.
+    RDS Proxy handles connection pooling, multiplexing, and failover at the
+    infrastructure level, eliminating the need for application-level pooling.
+    
+    Each Lambda invocation creates its own connection which is closed after use.
+    This approach:
+    - Eliminates global state and race conditions
+    - Supports credential rotation (fresh credentials on each call)
+    - Prevents connection pool exhaustion in high-concurrency scenarios
+    - Simplifies code while maintaining performance through RDS Proxy
     This function should be called to obtain a connection for database operations.
     The connection is retrieved from a pool that persists across Lambda invocations,
-    providing better performance and resource utilization.
-    
     Returns:
         psycopg2.connection: Database connection object
     
@@ -155,66 +106,46 @@ def get_database_connection():
             cursor.execute("SELECT * FROM accounts")
             results = cursor.fetchall()
         finally:
-            return_database_connection(conn)
+            return_database_connection(conn)  # This will close the connection
     """
     try:
-        # Initialize pool if needed
-        pool = _initialize_connection_pool()
+        # Get fresh database credentials
+        credentials = _get_database_credentials()
         
-        # Get connection from pool
-        connection = pool.getconn()
+        logger.info("Creating new database connection")
         
-        if connection is None:
-            raise Exception("Failed to get connection from pool")
+        # Create direct connection (RDS Proxy handles pooling)
+        connection = psycopg2.connect(
+            user=credentials['username'],
+            password=credentials['password'],
+            host=credentials['host'],
+            port=credentials['port'],
+            database=credentials['dbname'],
+            connect_timeout=10
+        )
         
-        # Test connection is alive
-        try:
-            cursor = connection.cursor()
-            cursor.execute("SELECT 1")
-            cursor.close()
-        except psycopg2.Error:
-            # Connection is dead, close it and get a new one
-            logger.warning("Connection test failed, getting new connection")
-            pool.putconn(connection, close=True)
-            connection = pool.getconn()
-        
-        logger.info("Database connection obtained successfully")
+        logger.info("Database connection created successfully")
         return connection
         
+    except psycopg2.Error as e:
+        logger.error(f"Failed to create database connection: {str(e)}")
+        raise Exception(f"Failed to create database connection: {str(e)}")
     except Exception as e:
-        logger.error(f"Failed to get database connection: {str(e)}")
-        raise Exception(f"Failed to get database connection: {str(e)}")
+        logger.error(f"Unexpected error creating database connection: {str(e)}")
+        raise
 
 
 def return_database_connection(connection) -> None:
     """
-    Return a database connection to the pool.
+    Close a database connection.
     Should be called after database operations are complete.
     
     Args:
-        connection: Database connection to return to the pool
+        connection: Database connection to close
     """
-    global _connection_pool
-    
-    if _connection_pool is not None and connection is not None:
+    if connection is not None:
         try:
-            _connection_pool.putconn(connection)
-            logger.info("Database connection returned to pool")
+            connection.close()
+            logger.info("Database connection closed")
         except Exception as e:
-            logger.error(f"Failed to return connection to pool: {str(e)}")
-
-
-def close_all_connections() -> None:
-    """
-    Close all connections in the pool.
-    Should be called during Lambda shutdown or for cleanup.
-    """
-    global _connection_pool
-    
-    if _connection_pool is not None:
-        try:
-            _connection_pool.closeall()
-            _connection_pool = None
-            logger.info("All database connections closed")
-        except Exception as e:
-            logger.error(f"Failed to close connections: {str(e)}")
+            logger.error(f"Failed to close database connection: {str(e)}")
