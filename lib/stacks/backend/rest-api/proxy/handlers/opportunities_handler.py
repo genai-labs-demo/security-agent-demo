@@ -118,17 +118,21 @@ def _recalculate_account_aggregates(connection, account_id: str) -> None:
         cursor.close()
 
 
-def search_opportunities(connection, search_query: str, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
+def search_opportunities(connection, search_query: str, account_id: Optional[str] = None, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
-    Perform full text search on opportunities using multiple keywords.
+    Perform full text search on opportunities owned by the authenticated user.
+    
+    Implements resource-level authorization by filtering opportunities
+    to only those owned by the requesting user (CWE-639 mitigation).
     
     Args:
         connection: Database connection object
         search_query: Search string (e.g., "finance software platform")
         account_id: Optional account ID to filter opportunities
+        user_id: Authenticated user ID from JWT claims
     
     Returns:
-        List of opportunity dictionaries in API format, ordered by relevance
+        List of opportunity dictionaries owned by user in API format, ordered by relevance
     
     Raises:
         Exception: If database query fails
@@ -219,6 +223,13 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
                 AND {where_clause}
         """
         
+        # Add user ownership filter for authorization
+        if user_id:
+            query += " AND o.owner_id = %s"
+            keyword_params.append(user_id)
+        
+        """
+        
         # Add account filter if specified
         if account_id:
             query += " AND o.account_id = %s"
@@ -299,22 +310,26 @@ def _validate_amount(amount) -> None:
         )
 
 
-def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
+def list_opportunities(connection, account_id: Optional[str] = None, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
-    Query opportunities from the database with optional account filter.
+    Query opportunities owned by the authenticated user with optional account filter.
+    
+    Implements resource-level authorization by filtering opportunities
+    to only those owned by the requesting user (CWE-639 mitigation).
     
     Args:
         connection: Database connection object
         account_id: Optional account ID to filter opportunities
+        user_id: Authenticated user ID from JWT claims
     
     Returns:
-        List of opportunity dictionaries in API format
+        List of opportunity dictionaries owned by user in API format
     
     Raises:
         Exception: If database query fails
     """
     try:
-        logger.info(f"Listing opportunities{f' for account {account_id}' if account_id else ''}")
+        logger.info(f"Listing opportunities for user {user_id}{f' and account {account_id}' if account_id else ''}")
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
@@ -332,6 +347,10 @@ def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dic
         if account_id:
             query += " AND account_id = %s"
             params.append(account_id)
+        
+        if user_id:
+            query += " AND owner_id = %s"
+            params.append(user_id)
         
         query += " ORDER BY close_date DESC LIMIT 1000"
         
@@ -353,22 +372,28 @@ def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dic
         raise
 
 
-def get_opportunity(connection, opportunity_id: str) -> Optional[Dict[str, Any]]:
+def get_opportunity(connection, opportunity_id: str, user_id: str) -> Optional[Dict[str, Any]]:
     """
-    Query a single opportunity by ID from the database.
+    Query a single opportunity by ID owned by the authenticated user.
+    
+    Implements resource-level authorization by validating that the
+    requested opportunity belongs to the authenticated user (CWE-639 mitigation).
+    Returns None (resulting in 404) if opportunity doesn't exist or user doesn't own it,
+    preventing resource enumeration attacks.
     
     Args:
         connection: Database connection object
         opportunity_id: Opportunity ID to retrieve
+        user_id: Authenticated user ID from JWT claims
     
     Returns:
-        Opportunity dictionary in API format, or None if not found
+        Opportunity dictionary in API format, or None if not found or unauthorized
     
     Raises:
         Exception: If database query fails
     """
     try:
-        logger.info(f"Getting opportunity with ID: {opportunity_id}")
+        logger.info(f"Getting opportunity {opportunity_id} for user {user_id}")
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
@@ -379,21 +404,23 @@ def get_opportunity(connection, opportunity_id: str) -> Optional[Dict[str, Any]]
                 forecast_category, owner_id, owner_name, probability,
                 created_date, last_modified_date
             FROM opportunities
-            WHERE id = %s AND deleted_at IS NULL
+            WHERE id = %s 
+              AND owner_id = %s 
+              AND deleted_at IS NULL
         """
         
-        cursor.execute(query, (opportunity_id,))
+        cursor.execute(query, (opportunity_id, user_id))
         record = cursor.fetchone()
         cursor.close()
         
         if not record:
-            logger.info(f"Opportunity not found: {opportunity_id}")
+            logger.info(f"Opportunity {opportunity_id} not found or unauthorized for user {user_id}")
             return None
         
         # Map to API format
         opportunity = _map_opportunity_to_api_format(dict(record))
         
-        logger.info(f"Retrieved opportunity: {opportunity_id}")
+        logger.info(f"Retrieved opportunity {opportunity_id} for user {user_id}")
         return opportunity
         
     except psycopg2.Error as e:
@@ -403,14 +430,20 @@ def get_opportunity(connection, opportunity_id: str) -> Optional[Dict[str, Any]]
         logger.error(f"Unexpected error getting opportunity {opportunity_id}: {str(e)}")
         raise
 
-
+def create_opportunity(connection, data: Dict[str, Any], user_id: str) -> Dict[str, Any]:
 def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
-    """
+    Insert a new opportunity record owned by the authenticated user.
+    
+    Implements resource-level authorization by automatically setting
+    owner_id to the authenticated user, preventing privilege escalation
+    where users could create opportunities owned by others (CWE-639 mitigation).
+    
     Insert a new opportunity record into the database.
     Validates that account_id and owner_id reference existing records.
     
     Args:
         connection: Database connection object
+        user_id: Authenticated user ID from JWT claims
         data: Opportunity data in API format (camelCase)
     
     Returns:
@@ -419,11 +452,15 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     Raises:
         Exception: If database insert fails or validation fails
     """
-    try:
+        logger.info(f"Creating new opportunity for user {user_id}: {data.get('name')}")
         logger.info(f"Creating new opportunity: {data.get('name')}")
         
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
+        # Force owner_id to authenticated user - prevent privilege escalation
+        # Users cannot create opportunities owned by other users
+        db_data['owner_id'] = user_id
+        
         
         # Validate amount bounds
         _validate_amount(db_data.get('amount'))
@@ -511,26 +548,34 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         raise
 
 
-def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any], user_id: str) -> Optional[Dict[str, Any]]:
     """
-    Update an existing opportunity record in the database.
+    Update an existing opportunity owned by the authenticated user.
+    
+    Implements resource-level authorization by validating ownership
+    before allowing updates. Returns None (resulting in 404) if opportunity
+    doesn't exist or user doesn't own it (CWE-639 mitigation).
     
     Args:
         connection: Database connection object
         opportunity_id: Opportunity ID to update
         data: Partial opportunity data in API format (camelCase)
+        user_id: Authenticated user ID from JWT claims
     
     Returns:
-        Updated opportunity dictionary in API format, or None if not found
+        Updated opportunity dictionary in API format, or None if not found or unauthorized
     
     Raises:
         Exception: If database update fails or validation fails
     """
     try:
-        logger.info(f"Updating opportunity: {opportunity_id}")
+        logger.info(f"Updating opportunity {opportunity_id} for user {user_id}")
         
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
+        
+        # Prevent owner_id manipulation - users cannot transfer ownership
+        db_data.pop('owner_id', None)
         
         # Validate amount bounds if being updated
         if 'amount' in db_data:
@@ -545,7 +590,7 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         if not db_data or (len(db_data) == 1 and 'last_modified_date' in db_data):
             logger.warning("No fields to update")
             # Return current opportunity
-            return get_opportunity(connection, opportunity_id)
+            return get_opportunity(connection, opportunity_id, user_id)
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
@@ -566,12 +611,15 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         # Build UPDATE query dynamically based on provided fields
         set_clauses = [f"{col} = %s" for col in db_data.keys()]
         values = list(db_data.values())
-        values.append(opportunity_id)  # For WHERE clause
+        values.append(opportunity_id)
+        values.append(user_id)  # For owner_id check
         
         query = f"""
             UPDATE opportunities
             SET {', '.join(set_clauses)}
-            WHERE id = %s
+            WHERE id = %s 
+              AND owner_id = %s
+              AND deleted_at IS NULL
             RETURNING 
                 id, name, account_id, account_name, amount, close_date,
                 stage, next_step, recent_activity, recent_activity_date,
@@ -585,7 +633,7 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         if not record:
             connection.rollback()
             cursor.close()
-            logger.info(f"Opportunity not found for update: {opportunity_id}")
+            logger.info(f"Opportunity {opportunity_id} not found or unauthorized for user {user_id}")
             return None
         
         connection.commit()
@@ -623,36 +671,41 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         raise
 
 
-def delete_opportunity(connection, opportunity_id: str) -> bool:
+def delete_opportunity(connection, opportunity_id: str, user_id: str) -> bool:
     """
-    Soft-delete an opportunity record by marking it as deleted.
+    Soft-delete an opportunity owned by the authenticated user.
+    
     The record is retained in the database for recovery purposes.
     Recalculates parent account aggregates after deletion.
-
+    
+    Implements resource-level authorization by validating ownership
+    before allowing deletion (CWE-639 mitigation).
+    
     Args:
         connection: Database connection object
         opportunity_id: Opportunity ID to soft-delete
+        user_id: Authenticated user ID from JWT claims
 
     Returns:
-        True if opportunity was soft-deleted, False if not found
+        True if opportunity was soft-deleted, False if not found or unauthorized
 
     Raises:
         Exception: If database update fails
     """
     try:
-        logger.info(f"Soft-deleting opportunity: {opportunity_id}")
+        logger.info(f"Soft-deleting opportunity {opportunity_id} for user {user_id}")
 
         cursor = connection.cursor()
 
-        # Check if opportunity exists and capture account_id for aggregate recalculation
+        # Check if opportunity exists, is owned by user, and capture account_id for aggregate recalculation
         cursor.execute(
-            "SELECT id, account_id FROM opportunities WHERE id = %s AND (deleted_at IS NULL)",
-            (opportunity_id,)
+            "SELECT id, account_id FROM opportunities WHERE id = %s AND owner_id = %s AND (deleted_at IS NULL)",
+            (opportunity_id, user_id)
         )
         row = cursor.fetchone()
         if not row:
             cursor.close()
-            logger.info(f"Opportunity not found for deletion: {opportunity_id}")
+            logger.info(f"Opportunity {opportunity_id} not found or unauthorized for user {user_id}")
             return False
 
         account_id = row[1]
@@ -668,7 +721,7 @@ def delete_opportunity(connection, opportunity_id: str) -> bool:
         # Recalculate parent account aggregates
         _recalculate_account_aggregates(connection, account_id)
 
-        logger.info(f"Soft-deleted opportunity: {opportunity_id}")
+        logger.info(f"Soft-deleted opportunity {opportunity_id} for user {user_id}")
         return True
 
     except psycopg2.Error as e:

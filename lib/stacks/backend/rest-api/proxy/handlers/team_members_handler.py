@@ -73,21 +73,24 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def list_team_members(connection) -> List[Dict[str, Any]]:
-    """
+def list_team_members(connection, user_id: str) -> List[Dict[str, Any]]:
     Query all team members from the database ordered by name.
+    Return the authenticated user's team member profile.
     
+    Authorization: Users can only access their own profile (CWE-639 mitigation).
     Args:
         connection: Database connection object
     
+        user_id: Authenticated user's ID from JWT
     Returns:
         List of team member dictionaries in API format
-    
+        List with user's own profile
     Raises:
         Exception: If database query fails
     """
     try:
         logger.info("Listing all team members")
-        
+        logger.info(f"Fetching profile for user: {user_id}")
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
         query = """
@@ -95,17 +98,18 @@ def list_team_members(connection) -> List[Dict[str, Any]]:
                 id, name, email, role, quota, pipeline_value, closed_won_value,
                 quota_attainment, win_rate, opportunity_count, avatar_url
             FROM team_members
+            WHERE id = %s
             ORDER BY name ASC
         """
         
-        cursor.execute(query)
+        cursor.execute(query, (user_id,))
         records = cursor.fetchall()
         cursor.close()
         
         # Map to API format
         team_members = [_map_team_member_to_api_format(dict(record)) for record in records]
         
-        logger.info(f"Retrieved {len(team_members)} team members")
+        logger.info(f"Retrieved profile for user {user_id}")
         return team_members
         
     except psycopg2.Error as e:
@@ -116,22 +120,30 @@ def list_team_members(connection) -> List[Dict[str, Any]]:
         raise
 
 
-def get_team_member(connection, member_id: str) -> Optional[Dict[str, Any]]:
+def get_team_member(connection, member_id: str, user_id: str) -> Optional[Dict[str, Any]]:
     """
-    Query a single team member by ID from the database.
+    Get a team member profile - user can only access their own.
+    
+    Authorization: Validates member_id matches user_id (CWE-639 mitigation).
     
     Args:
         connection: Database connection object
         member_id: Team member ID to retrieve
+        user_id: Authenticated user's ID from JWT
     
     Returns:
-        Team member dictionary in API format, or None if not found
+        Team member profile or None if unauthorized
     
     Raises:
         Exception: If database query fails
     """
     try:
-        logger.info(f"Getting team member with ID: {member_id}")
+        logger.info(f"Fetching member {member_id} for user {user_id}")
+        
+        # Only allow access to own profile
+        if member_id != user_id:
+            logger.info(f"Access denied: user {user_id} tried accessing {member_id}")
+            return None
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
@@ -148,13 +160,13 @@ def get_team_member(connection, member_id: str) -> Optional[Dict[str, Any]]:
         cursor.close()
         
         if not record:
-            logger.info(f"Team member not found: {member_id}")
+            logger.info(f"Member not found: {member_id}")
             return None
         
         # Map to API format
         team_member = _map_team_member_to_api_format(dict(record))
         
-        logger.info(f"Retrieved team member: {member_id}")
+        logger.info(f"Retrieved member {member_id}")
         return team_member
         
     except psycopg2.Error as e:
@@ -165,14 +177,17 @@ def get_team_member(connection, member_id: str) -> Optional[Dict[str, Any]]:
         raise
 
 
-def create_team_member(connection, data: Dict[str, Any]) -> Dict[str, Any]:
+def create_team_member(connection, data: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     """
-    Insert a new team member record into the database.
-    Validates email uniqueness before insertion.
+    Create team member profile for authenticated user.
+    
+    Authorization: Forces ID to user_id to prevent creating profiles
+    for other users (CWE-639 mitigation).
     
     Args:
         connection: Database connection object
         data: Team member data in API format (camelCase)
+        user_id: Authenticated user's ID from JWT
     
     Returns:
         Created team member dictionary in API format
@@ -181,17 +196,13 @@ def create_team_member(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         Exception: If database insert fails or validation fails
     """
     try:
-        logger.info(f"Creating new team member: {data.get('name')}")
+        logger.info(f"Creating profile for user {user_id}: {data.get('name')}")
         
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
         
-        # Generate ID if not provided
-        if 'id' not in data:
-            import uuid
-            db_data['id'] = str(uuid.uuid4())
-        else:
-            db_data['id'] = data['id']
+        # Set ID to authenticated user
+        db_data['id'] = user_id
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
@@ -250,24 +261,31 @@ def create_team_member(connection, data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def update_team_member(connection, member_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """
+def update_team_member(connection, member_id: str, data: Dict[str, Any], user_id: str) -> Optional[Dict[str, Any]]:
     Update an existing team member record in the database.
-    Validates email uniqueness if email is being updated.
+    Update team member profile - user can only update their own.
     
+    Authorization: Validates member_id matches user_id (CWE-639 mitigation).
     Args:
         connection: Database connection object
         member_id: Team member ID to update
         data: Partial team member data in API format (camelCase)
     
+        user_id: Authenticated user's ID from JWT
     Returns:
         Updated team member dictionary in API format, or None if not found
-    
+        Updated profile or None if unauthorized
     Raises:
         Exception: If database update fails or validation fails
     """
     try:
         logger.info(f"Updating team member: {member_id}")
+        logger.info(f"Updating member {member_id} for user {user_id}")
         
+        # Only allow updating own profile
+        if member_id != user_id:
+            logger.info(f"Update denied: user {user_id} tried updating {member_id}")
+            return None
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
         
@@ -278,7 +296,7 @@ def update_team_member(connection, member_id: str, data: Dict[str, Any]) -> Opti
             logger.warning("No fields to update")
             # Return current team member
             return get_team_member(connection, member_id)
-        
+            return get_team_member(connection, member_id, user_id)
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
         # Validate email uniqueness if being updated
@@ -343,23 +361,30 @@ def update_team_member(connection, member_id: str, data: Dict[str, Any]) -> Opti
         raise
 
 
-def delete_team_member(connection, member_id: str) -> bool:
+def delete_team_member(connection, member_id: str, user_id: str) -> bool:
     """
-    Delete a team member record from the database.
-    Checks for foreign key constraints (owned accounts/opportunities) before deletion.
+    Delete team member profile - user can only delete their own.
+    
+    Authorization: Validates member_id matches user_id (CWE-639 mitigation).
     
     Args:
         connection: Database connection object
         member_id: Team member ID to delete
+        user_id: Authenticated user's ID from JWT
     
     Returns:
-        True if team member was deleted, False if not found
+        True if deleted, False if not found or unauthorized
     
     Raises:
         Exception: If team member owns accounts or opportunities, or database delete fails
     """
     try:
-        logger.info(f"Deleting team member: {member_id}")
+        logger.info(f"Deleting member {member_id} for user {user_id}")
+        
+        # Only allow deleting own profile
+        if member_id != user_id:
+            logger.info(f"Delete denied: user {user_id} tried deleting {member_id}")
+            return False
         
         cursor = connection.cursor()
         
@@ -367,7 +392,7 @@ def delete_team_member(connection, member_id: str) -> bool:
         cursor.execute("SELECT id FROM team_members WHERE id = %s", (member_id,))
         if not cursor.fetchone():
             cursor.close()
-            logger.info(f"Team member not found for deletion: {member_id}")
+            logger.info(f"Member not found: {member_id}")
             return False
         
         # Check for owned accounts (foreign key constraint)
@@ -408,7 +433,7 @@ def delete_team_member(connection, member_id: str) -> bool:
         cursor.close()
         
         logger.info(f"Deleted team member: {member_id}")
-        return True
+        logger.info(f"Deleted member {member_id}")
         
     except psycopg2.IntegrityError as e:
         connection.rollback()

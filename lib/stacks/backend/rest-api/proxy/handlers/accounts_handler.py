@@ -79,21 +79,41 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
     return db_data
 
 
-def list_accounts(connection) -> List[Dict[str, Any]]:
+def _recalculate_health(connection, account_id: str) -> None:
     """
-    Query all accounts from the database.
+    Stub function for health score recalculation.
+    
+    In a production system, this would recalculate health_status and health_score
+    based on business metrics like opportunity value, activity, and engagement.
+    For now, this is a no-op placeholder.
     
     Args:
         connection: Database connection object
+        account_id: Account ID to recalculate health for
+    """
+    # Placeholder - health recalculation logic would go here
+    pass
+
+
+def list_accounts(connection, user_id: str) -> List[Dict[str, Any]]:
+    """
+    Query all accounts owned by the authenticated user.
+    
+    Implements resource-level authorization by filtering accounts
+    to only those owned by the requesting user (CWE-639 mitigation).
+    
+    Args:
+        connection: Database connection object
+        user_id: Authenticated user ID from JWT claims
     
     Returns:
-        List of account dictionaries in API format
+        List of account dictionaries owned by user in API format
     
     Raises:
         Exception: If database query fails
     """
     try:
-        logger.info("Listing all accounts")
+        logger.info(f"Listing accounts for user: {user_id}")
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
@@ -104,17 +124,18 @@ def list_accounts(connection) -> List[Dict[str, Any]]:
                 opportunity_count, total_opportunity_value,
                 last_activity_date, created_date, logo_url
             FROM accounts
+              AND owner_id = %s
             WHERE deleted_at IS NULL
             ORDER BY name ASC
         """
-        
+        cursor.execute(query, (user_id,))
         cursor.execute(query)
         records = cursor.fetchall()
         cursor.close()
         
         # Map to API format
         accounts = [_map_account_to_api_format(dict(record)) for record in records]
-        
+        logger.info(f"Retrieved {len(accounts)} accounts for user {user_id}")
         logger.info(f"Retrieved {len(accounts)} accounts")
         return accounts
         
@@ -130,22 +151,28 @@ COMPUTED_FIELDS = {'health_status', 'health_score', 'opportunity_count', 'total_
 
 
 
-def get_account(connection, account_id: str) -> Optional[Dict[str, Any]]:
+def get_account(connection, account_id: str, user_id: str) -> Optional[Dict[str, Any]]:
     """
-    Query a single account by ID from the database.
+    Query a single account by ID owned by the authenticated user.
+    
+    Implements resource-level authorization by validating that the
+    requested account belongs to the authenticated user (CWE-639 mitigation).
+    Returns None (resulting in 404) if account doesn't exist or user doesn't own it,
+    preventing resource enumeration attacks.
     
     Args:
         connection: Database connection object
         account_id: Account ID to retrieve
+        user_id: Authenticated user ID from JWT claims
     
     Returns:
-        Account dictionary in API format, or None if not found
+        Account dictionary in API format, or None if not found or unauthorized
     
     Raises:
         Exception: If database query fails
     """
     try:
-        logger.info(f"Getting account with ID: {account_id}")
+        logger.info(f"Getting account {account_id} for user {user_id}")
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
@@ -156,21 +183,23 @@ def get_account(connection, account_id: str) -> Optional[Dict[str, Any]]:
                 opportunity_count, total_opportunity_value,
                 last_activity_date, created_date, logo_url
             FROM accounts
-            WHERE id = %s AND deleted_at IS NULL
+            WHERE id = %s 
+              AND owner_id = %s 
+              AND deleted_at IS NULL
         """
         
-        cursor.execute(query, (account_id,))
+        cursor.execute(query, (account_id, user_id))
         record = cursor.fetchone()
         cursor.close()
         
         if not record:
-            logger.info(f"Account not found: {account_id}")
+            logger.info(f"Account {account_id} not found or unauthorized for user {user_id}")
             return None
         
         # Map to API format
         account = _map_account_to_api_format(dict(record))
         
-        logger.info(f"Retrieved account: {account_id}")
+        logger.info(f"Retrieved account {account_id} for user {user_id}")
         return account
         
     except psycopg2.Error as e:
@@ -181,13 +210,18 @@ def get_account(connection, account_id: str) -> Optional[Dict[str, Any]]:
         raise
 
 
-def create_account(connection, data: Dict[str, Any]) -> Dict[str, Any]:
+def create_account(connection, data: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     """
-    Insert a new account record into the database.
+    Insert a new account record owned by the authenticated user.
+    
+    Implements resource-level authorization by automatically setting
+    owner_id to the authenticated user, preventing privilege escalation
+    where users could create accounts owned by others (CWE-639 mitigation).
     
     Args:
         connection: Database connection object
         data: Account data in API format (camelCase)
+        user_id: Authenticated user ID from JWT claims
     
     Returns:
         Created account dictionary in API format
@@ -196,10 +230,14 @@ def create_account(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         Exception: If database insert fails or validation fails
     """
     try:
-        logger.info(f"Creating new account: {data.get('name')}")
+        logger.info(f"Creating new account for user {user_id}: {data.get('name')}")
         
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
+        
+        # Force owner_id to authenticated user - prevent privilege escalation
+        # Users cannot create accounts owned by other users
+        db_data['owner_id'] = user_id
         
         # Strip computed fields — these are derived from business metrics, not user input
         for field in COMPUTED_FIELDS:
@@ -245,9 +283,9 @@ def create_account(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         # Calculate health score from business metrics
         _recalculate_health(connection, db_data['id'])
         
-        # Re-fetch to include computed fields
+        account = get_account(connection, db_data['id'], user_id)
         account = get_account(connection, db_data['id'])
-        
+        logger.info(f"Created account {db_data['id']} for user {user_id}")
         logger.info(f"Created account with ID: {db_data['id']}")
         return account
         
@@ -271,26 +309,34 @@ def create_account(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         raise
 
 
-def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def update_account(connection, account_id: str, data: Dict[str, Any], user_id: str) -> Optional[Dict[str, Any]]:
     """
-    Update an existing account record in the database.
+    Update an existing account owned by the authenticated user.
+    
+    Implements resource-level authorization by validating ownership
+    before allowing updates. Returns None (resulting in 404) if account
+    doesn't exist or user doesn't own it (CWE-639 mitigation).
     
     Args:
         connection: Database connection object
         account_id: Account ID to update
         data: Partial account data in API format (camelCase)
+        user_id: Authenticated user ID from JWT claims
     
     Returns:
-        Updated account dictionary in API format, or None if not found
+        Updated account dictionary in API format, or None if not found or unauthorized
     
     Raises:
         Exception: If database update fails or validation fails
     """
     try:
-        logger.info(f"Updating account: {account_id}")
+        logger.info(f"Updating account {account_id} for user {user_id}")
         
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
+        
+        # Prevent owner_id manipulation - users cannot transfer ownership
+        db_data.pop('owner_id', None)
         
         # Remove id if present (shouldn't be updated)
         db_data.pop('id', None)
@@ -298,19 +344,22 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
         # Strip computed fields — these are derived from business metrics, not user input
         for field in COMPUTED_FIELDS:
             db_data.pop(field, None)
-        
+            return get_account(connection, account_id, user_id)
         if not db_data:
             logger.warning("No fields to update")
             # Return current account
             return get_account(connection, account_id)
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
-        
+        values.append(account_id)
+        values.append(user_id)  # For owner_id check
         # Build UPDATE query dynamically based on provided fields
         set_clauses = [f"{col} = %s" for col in db_data.keys()]
         values = list(db_data.values())
         values.append(account_id)  # For WHERE clause
-        
+            WHERE id = %s 
+              AND owner_id = %s
+              AND deleted_at IS NULL
         query = f"""
             UPDATE accounts
             SET {', '.join(set_clauses)}
@@ -328,7 +377,7 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
         if not record:
             connection.rollback()
             cursor.close()
-            logger.info(f"Account not found for update: {account_id}")
+            logger.info(f"Account {account_id} not found or unauthorized for user {user_id}")
             return None
         
         connection.commit()
@@ -338,9 +387,9 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
         _recalculate_health(connection, account_id)
         
         # Re-fetch to include recomputed fields
-        account = get_account(connection, account_id)
+        account = get_account(connection, account_id, user_id)
         
-        logger.info(f"Updated account: {account_id}")
+        logger.info(f"Updated account {account_id} for user {user_id}")
         return account
         
     except psycopg2.IntegrityError as e:
@@ -363,35 +412,40 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
         raise
 
 
-def delete_account(connection, account_id: str) -> bool:
+def delete_account(connection, account_id: str, user_id: str) -> bool:
     """
-    Soft-delete an account record by marking it as deleted.
+    Soft-delete an account owned by the authenticated user.
+    
     The record is retained in the database for recovery purposes.
     Checks for active (non-deleted) opportunities before allowing deletion.
-
+    
+    Implements resource-level authorization by validating ownership
+    before allowing deletion (CWE-639 mitigation).
+    
     Args:
         connection: Database connection object
         account_id: Account ID to soft-delete
+        user_id: Authenticated user ID from JWT claims
 
     Returns:
-        True if account was soft-deleted, False if not found
+        True if account was soft-deleted, False if not found or unauthorized
 
     Raises:
         Exception: If account has active opportunities or database update fails
     """
     try:
-        logger.info(f"Soft-deleting account: {account_id}")
+        logger.info(f"Soft-deleting account {account_id} for user {user_id}")
 
         cursor = connection.cursor()
 
-        # Check if account exists and is not already deleted
+        # Check if account exists, is owned by user, and is not already deleted
         cursor.execute(
-            "SELECT id FROM accounts WHERE id = %s AND (deleted_at IS NULL)",
-            (account_id,)
+            "SELECT id FROM accounts WHERE id = %s AND owner_id = %s AND (deleted_at IS NULL)",
+            (account_id, user_id)
         )
         if not cursor.fetchone():
             cursor.close()
-            logger.info(f"Account not found for deletion: {account_id}")
+            logger.info(f"Account {account_id} not found or unauthorized for user {user_id}")
             return False
 
         # Check for active (non-deleted) associated opportunities
@@ -418,7 +472,7 @@ def delete_account(connection, account_id: str) -> bool:
         connection.commit()
         cursor.close()
 
-        logger.info(f"Soft-deleted account: {account_id}")
+        logger.info(f"Soft-deleted account {account_id} for user {user_id}")
         return True
 
     except psycopg2.IntegrityError as e:
