@@ -9,6 +9,9 @@ from datetime import datetime
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
+# Import validation functions
+from validation import validate_opportunity, ValidationError
+
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -422,6 +425,10 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     try:
         logger.info(f"Creating new opportunity: {data.get('name')}")
         
+        # Validate opportunity data including stage transition rules
+        # New opportunities must start at 'Launched' stage
+        validate_opportunity(data, is_update=False)
+        
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
         
@@ -489,6 +496,11 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         return opportunity
         
     except psycopg2.IntegrityError as e:
+    except ValidationError as e:
+        # Re-raise validation errors with proper formatting
+        connection.rollback()
+        logger.warning(f"Validation error creating opportunity: {e.message}")
+        raise
         connection.rollback()
         logger.error(f"Integrity error creating opportunity: {str(e)}")
         # Check for specific constraint violations
@@ -528,6 +540,21 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
     """
     try:
         logger.info(f"Updating opportunity: {opportunity_id}")
+        
+        # Fetch current opportunity to validate stage transitions
+        cursor = connection.cursor(cursor_factory=RealDictCursor)
+        cursor.execute("SELECT stage FROM opportunities WHERE id = %s AND deleted_at IS NULL", (opportunity_id,))
+        current_record = cursor.fetchone()
+        cursor.close()
+        
+        if not current_record:
+            logger.info(f"Opportunity not found for update: {opportunity_id}")
+            return None
+        
+        current_stage = current_record.get('stage')
+        
+        # Validate opportunity data including stage transition rules
+        validate_opportunity(data, is_update=True, current_stage=current_stage)
         
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
@@ -602,6 +629,11 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         
     except psycopg2.IntegrityError as e:
         connection.rollback()
+    except ValidationError as e:
+        # Re-raise validation errors with proper formatting
+        connection.rollback()
+        logger.warning(f"Validation error updating opportunity {opportunity_id}: {e.message}")
+        raise
         logger.error(f"Integrity error updating opportunity {opportunity_id}: {str(e)}")
         # Check for specific constraint violations
         if 'foreign key' in str(e).lower():
