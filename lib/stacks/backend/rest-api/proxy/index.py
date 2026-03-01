@@ -20,7 +20,6 @@ from db_connection import get_database_connection, return_database_connection
 from handlers import accounts_handler, opportunities_handler, team_members_handler, industries_handler
 from handlers import security_handler
 from s3_integration import enhance_with_images
-from cors_handler import process_cors
 from error_handler import (
     handle_validation_error,
     handle_not_found_error,
@@ -48,7 +47,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     3. Establishes database connection
     4. Invokes the appropriate entity handler
     5. Enhances response with S3 image URLs
-    6. Applies CORS headers
+    6. Returns response (CORS headers applied by API Gateway)
     7. Handles exceptions and formats error responses
     
     Args:
@@ -64,10 +63,6 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     logger.info(f"Processing request {request_id}: {event.get('httpMethod')} {event.get('path')}")
     
     try:
-        # Handle CORS preflight requests
-        if event.get('httpMethod') == 'OPTIONS':
-            return process_cors(event)
-        
         # Parse API Gateway event to extract route information
         route_info = parse_api_gateway_event(event)
         
@@ -123,9 +118,6 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             # Return database connection to pool
             return_database_connection(connection)
         
-        # Apply CORS headers
-        response = process_cors(event, response)
-        
         logger.info(f"Request {request_id} completed successfully with status {response['statusCode']}")
         return response
         
@@ -133,7 +125,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Validation errors (400)
         logger.warning(f"Validation error in request {request_id}: {str(e)}")
         response = handle_validation_error(str(e))
-        return process_cors(event, response)
+        return response
         
     except Exception as e:
         # Check if it's a custom error message from handlers
@@ -144,22 +136,22 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             resource_type = route_info.resource_type if 'route_info' in locals() else "Resource"
             resource_id = route_info.resource_id if 'route_info' in locals() else "unknown"
             response = handle_not_found_error(resource_type.capitalize(), resource_id)
-            return process_cors(event, response)
+            return response
         
         # Conflict errors (409)
         if "cannot delete" in error_str.lower() or "already exists" in error_str.lower():
             response = handle_conflict_error(error_str)
-            return process_cors(event, response)
+            return response
         
         # Database errors (500)
         if "database" in error_str.lower() or "failed to" in error_str.lower():
             response = parse_database_error(e)
-            return process_cors(event, response)
+            return response
         
         # Generic server error (500)
         logger.error(f"Unexpected error in request {request_id}: {str(e)}", exc_info=True)
         response = handle_server_error(e, request_id)
-        return process_cors(event, response)
+        return response
 
 
 def execute_operation(connection, route_info, operation: str) -> Any:
