@@ -40,7 +40,7 @@ const CRMNavigation = ({ activeHref: propActiveHref }: CRMNavigationProps) => {
                     items: [
                         {
                             type: "link" as const,
-                            text: "Security Agent",
+                            text: "Security Demo",
                             href: "/crm",
                         }
                     ]

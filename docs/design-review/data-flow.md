@@ -72,17 +72,64 @@
                                        └────────────┘
 ```
 
-## Security Demo Endpoints Data Flow
+## CloudFront API Proxy Flow (Pen-Test Scanner Path)
+
+```
+┌──────────────┐    /api/security-profile/1    ┌──────────────┐
+│  Pen-Test    │──────────────────────────────▶│  CloudFront  │
+│  Scanner     │  (User-Agent: securityagent)  │  Distribution│
+└──────────────┘                               └──────┬───────┘
+                                                      │
+                                               ┌──────▼───────┐
+                                               │  CloudFront  │
+                                               │  WAF (Global)│
+                                               │  Priority 0: │
+                                               │  Allow if UA │
+                                               │  contains    │
+                                               │ "securityagent"│
+                                               └──────┬───────┘
+                                                      │
+                                               ┌──────▼───────┐
+                                               │  CloudFront  │
+                                               │  Function    │
+                                               │ /api/* →     │
+                                               │ /prod/*      │
+                                               └──────┬───────┘
+                                                      │
+                                               ┌──────▼───────┐
+                                               │ API Gateway  │
+                                               │ (No JWT —    │
+                                               │  security    │
+                                               │  endpoints   │
+                                               │  are unauth) │
+                                               └──────┬───────┘
+                                                      │
+                                               ┌──────▼───────┐
+                                               │  WAF v2      │
+                                               │  (Regional)  │
+                                               │  Count mode  │
+                                               └──────┬───────┘
+                                                      │
+                                               ┌──────▼───────┐
+                                               │   Lambda     │
+                                               │  security_   │
+                                               │  handler.py  │
+                                               └──────────────┘
+```
+
+## Security Demo Endpoints Data Flow (Unauthenticated)
 
 ```
 ┌──────────┐    POST /security-profile     ┌──────────────┐
 │  Browser  │─────────────────────────────▶│  API Gateway  │
-│           │  Body: {"user_id": "1 OR 1=1"}│              │
-└──────────┘                               └──────┬───────┘
-                                                   │
+│  or Pen-  │  Body: {"user_id": "1 OR 1=1"}│ (NO Cognito  │
+│  Test     │                               │  authorizer) │
+│  Scanner  │                               └──────┬───────┘
+└──────────┘                                       │
                                             ┌──────▼───────┐
                                             │    WAF v2    │
-                                            │ SQLi_BODY:   │
+                                            │ All managed  │
+                                            │ rules in     │
                                             │ COUNT mode   │◀── Intentionally permissive
                                             └──────┬───────┘
                                                    │
@@ -145,4 +192,22 @@
 │   Browser    │─────────────────────┘
 │   (React)    │
 └──────────────┘
+```
+
+## Static XSS Demo Page Flow
+
+```
+┌──────────────┐    GET /xss-advanced.html   ┌──────────────┐
+│  Browser /   │────────────────────────────▶│  CloudFront  │
+│  Pen-Test    │                             └──────┬───────┘
+│  Scanner     │                                    │
+└──────────────┘                             ┌──────▼───────┐
+       ▲                                     │  S3 Bucket   │
+       │         HTML with inline JS         │  (Static)    │
+       └─────────────────────────────────────└──────────────┘
+                 DOM-based XSS via:
+                 - innerHTML injection
+                 - href attribute injection
+                 - img onerror injection
+                 - URL parameter reflection
 ```

@@ -45,7 +45,7 @@ const CRM = () => {
                     breadcrumbs.push({ text: "Team Performance", href: "/crm/team" });
                     break;
                 case 'security':
-                    breadcrumbs.push({ text: "Security Agent", href: "/crm/security" });
+                    breadcrumbs.push({ text: "Security Demo", href: "/crm/security" });
                     if (pathSegments.length > 2) {
                         const subPage = pathSegments[2];
                         const subPageNames: Record<string, string> = {

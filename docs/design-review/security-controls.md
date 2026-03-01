@@ -4,6 +4,7 @@
 
 ### Amazon Cognito
 - **User Pool**: Email-based sign-in with enforced password policy (8+ chars, upper/lower/digit/symbol)
+- **Feature Plan**: Essentials (replaces deprecated AdvancedSecurityMode)
 - **Identity Pool**: Federated identity with authenticated-only access (unauthenticated denied via explicit DENY policy)
 - **Token Validity**: 8-hour access, ID, and refresh tokens
 - **Account Recovery**: Email-only recovery
@@ -16,9 +17,9 @@
 - Browser autofill styling overrides prevent credential leakage through CSS background color changes
 
 ### API Gateway Authorization
-- All API methods require `COGNITO` authorization type
-- JWT token validated via `CognitoUserPoolsAuthorizer`
-- Authorization header: `method.request.header.Authorization`
+- Authenticated CRM endpoints (`/accounts`, `/opportunities`, `/team-members`, `/industries`) require `COGNITO` authorization type with `CognitoUserPoolsAuthorizer`
+- Security demo endpoints (`/security-*`) are explicitly configured with `AuthorizationType.NONE` — no JWT required — to allow pen-test scanners to reach them without authentication
+- Authorization header: `method.request.header.Authorization` (CRM endpoints only)
 
 ## Network Security
 
@@ -33,15 +34,28 @@
 
 ## Web Application Firewall (WAF v2)
 
+### CloudFront WAF (Global scope)
+- **AllowSecurityAgentPentest** (Priority 0): Allow action — matches requests where `User-Agent` header contains `securityagent` (case-insensitive). This ensures AWS Security Agent pen-test traffic bypasses all subsequent managed rules.
+- **AWSManagedRulesCommonRuleSet** (Priority 1): Block mode (default action)
+- **AWSManagedRulesAmazonIpReputationList** (Priority 2): Block mode (default action)
+- **AWSManagedRulesBotControlRuleSet** (Priority 3): Block mode (default action)
+
 ### Regional WAF (API Gateway + Cognito)
 - **IP Rate Limiting**: 3000 requests per IP (block action)
 - **AWSManagedRulesCommonRuleSet**: Count mode (monitoring)
 - **AWSManagedRulesBotControlRuleSet**: Count mode (monitoring)
-- **AWSManagedRulesKnownBadInputsRuleSet**: Block mode
-- **AWSManagedRulesUnixRuleSet**: Block mode (UNIXShellCommandsVariables_BODY in count mode)
-- **AWSManagedRulesSQLiRuleSet**: Block mode (SQLi_BODY in count mode)
+- **AWSManagedRulesKnownBadInputsRuleSet**: Count mode (monitoring)
+- **AWSManagedRulesUnixRuleSet**: Count mode (monitoring)
+- **AWSManagedRulesSQLiRuleSet**: Count mode (monitoring)
 
-> **Note**: Several WAF rules are in count mode rather than block mode. The SQLi_BODY and UNIXShellCommandsVariables_BODY rules are intentionally set to count mode to allow the security demonstration endpoints to function. In a production environment, these should be set to block mode.
+> **Note**: All regional WAF managed rules are in count mode rather than block mode. This is intentional to allow the security demonstration endpoints to function for pen-test scanning. In a production environment, these should be set to block mode.
+
+## CloudFront API Proxy
+
+- CloudFront distribution includes an `/api/*` behavior that proxies requests to the API Gateway origin
+- A CloudFront Function rewrites `/api/*` paths to `/prod/*` (the API Gateway stage prefix)
+- Caching is disabled for API proxy requests; all viewer headers are forwarded (except `Host`)
+- This allows the pen-test scanner to reach backend security demo endpoints through the same verified custom domain as the frontend (e.g., `https://secagentdemo.jossai.people.aws.dev/api/security-profile/1`)
 
 ## Data Protection
 
@@ -50,6 +64,7 @@
 - **RDS**: Performance Insights enabled
 - **S3**: Server-side encryption on storage buckets
 - **Secrets Manager**: Database credentials stored in Secrets Manager
+- **CloudFront**: TLS 1.2 minimum (2021 policy), SNI
 
 ### Database Security
 - **RDS Proxy**: Connection pooling and credential management
@@ -78,7 +93,8 @@
 
 ### Current Implementation
 - Cognito User Pool with Admin and Users groups defined
-- API Gateway `COGNITO` authorizer validates JWT on all endpoints
+- API Gateway `COGNITO` authorizer validates JWT on authenticated CRM endpoints
+- Security demo endpoints are explicitly unauthenticated (`AuthorizationType.NONE`) for pen-test scanner access
 - Identity Pool denies unauthenticated identities via explicit DENY policy
 - Self sign-up disabled (admin-created accounts only)
 
@@ -137,7 +153,7 @@
 | Enable database audit logging | Gap | PostgreSQL `pgaudit` extension not enabled. Enable `pgaudit` to capture DDL, DML, and role-based operations, and ship audit logs to CloudWatch. |
 | Protect logging bucket from deletion | Gap | S3 logging bucket has no deletion protection. Enable versioning, MFA Delete, and a bucket policy denying `s3:DeleteBucket` and `s3:DeleteObject` for non-admin principals. |
 
-## Authorization Best Practices
+## Authorization Best Practices (IAM Detail)
 
 ### Principle of Least Privilege (IAM)
 - Lambda execution roles are scoped using CDK grant helpers (`grantRead`, `grantReadWrite`) rather than wildcard policies, ensuring each function only accesses the specific resources it needs
@@ -151,16 +167,18 @@
 - Identity Pool explicitly denies all actions for unauthenticated identities via an `Effect.DENY` policy on `["*"]` actions and resources
 
 ### API Gateway Authorization Enforcement
-- All API methods default to `AuthorizationType.COGNITO` with a `CognitoUserPoolsAuthorizer`
-- JWT tokens are validated from the `Authorization` header before any Lambda invocation occurs
+- Authenticated CRM endpoints default to `AuthorizationType.COGNITO` with a `CognitoUserPoolsAuthorizer`
+- Security demo endpoints are explicitly set to `AuthorizationType.NONE` to allow unauthenticated pen-test scanner access
+- JWT tokens are validated from the `Authorization` header before any Lambda invocation occurs (CRM endpoints only)
 - Request validation is enabled via `RequestValidator` with both body and parameter validation
+- CDK Nag suppressions (`AwsSolutions-APIG4`, `AwsSolutions-COG4`) are applied to security demo resources with documented justification
 
 ### Cross-Account Access Controls
 - The DNS role stack creates a cross-account IAM role for NovaDomainService (account `791674550530`) with permissions scoped exclusively to Route 53 actions (`route53:CreateHostedZone`, `route53:ChangeResourceRecordSets`, etc.)
 - No broad `sts:AssumeRole` permissions are granted to application roles
 
 ### CDK Nag Compliance
-- `cdk-nag` suppressions are documented with explicit reasons for each deviation (e.g., `AwsSolutions-IAM4` for managed VPC policies, `AwsSolutions-IAM5` for Route 53 wildcard)
+- `cdk-nag` suppressions are documented with explicit reasons for each deviation (e.g., `AwsSolutions-IAM4` for managed VPC policies, `AwsSolutions-IAM5` for Route 53 wildcard, `AwsSolutions-APIG4`/`AwsSolutions-COG4` for unauthenticated security demo endpoints)
 - Suppressions serve as an audit trail for accepted risks
 
 ### Gaps & Recommendations
@@ -170,7 +188,7 @@
 
 ---
 
-## Privileged Access Best Practices
+## Privileged Access Best Practices (Infrastructure Detail)
 
 ### Credential Management
 - Database credentials are auto-generated via `Credentials.fromGeneratedSecret("postgres")` and stored in AWS Secrets Manager — no hardcoded credentials exist in the codebase
@@ -197,7 +215,7 @@
 
 ---
 
-## Log Protection Best Practices
+## Log Protection Best Practices (Infrastructure Detail)
 
 ### Centralized Log Retention Enforcement
 - A `LogGroupInjector` property injector is registered at the CDK App level (`bin/app.ts` → `getPropertyInjectors()`), automatically setting `RetentionDays.THREE_MONTHS` and `RemovalPolicy.DESTROY` on all CloudWatch Log Groups across the application
@@ -236,20 +254,21 @@
 ## Known Security Considerations
 
 ### Intentional Vulnerabilities (Educational)
-The `/security-*` API endpoints contain intentional vulnerabilities for educational demonstration purposes:
+The `/security-*` API endpoints contain intentional vulnerabilities for educational demonstration purposes. These endpoints are **unauthenticated** (`AuthorizationType.NONE`) to allow pen-test scanners to discover and exploit them without requiring Cognito JWT tokens.
 
-1. **SQL Injection** (`/security-profile`): User input directly concatenated into SQL queries
-2. **Stored XSS** (`/security-comments`): Comment content stored and returned without sanitization
-3. **Reflected XSS** (`/security-search`): Search query reflected in response without encoding
-4. **Command Injection** (`/security-tools/ping`): User input passed to `subprocess.run()` with `shell=True` without sanitization
-5. **Command Injection #2** (`/security-tools/nslookup`): Second distinct endpoint with `shell=True` for pen-test coverage
-6. **Stored XSS (HTML)** (`/security-xss-comments`): Stored comments rendered as HTML page for pen-test scanner detection
-7. **Reflected XSS (HTML)** (`/security-xss-search`): Search query reflected in HTML page for pen-test scanner detection
-8. **DOM-based XSS (HTML)** (`/security-xss-page`): User input injected directly into HTML response with DOM-based XSS via URL fragment
-9. **IDOR** (`/security-profile/{id}`): Sequential IDs return any user's data without authorization checks
-10. **Mass Assignment** (`/security-comments`): API accepts `author_name` and `role` fields from request body, allowing authorship spoofing
-
-These endpoints are protected by Cognito authentication but intentionally bypass input validation for demonstration purposes.
+1. **SQL Injection** (`/security-profile`, `/security-profile/{id}`): User input directly concatenated into SQL queries
+2. **IDOR** (`/security-profile/{id}`): Sequential numeric IDs accessible with no authorization check — any caller can enumerate all user records
+3. **Stored XSS** (`/security-comments`): Comment content stored and returned without sanitization
+4. **Reflected XSS** (`/security-search`): Search query reflected in response without encoding
+5. **Command Injection #1** (`/security-tools/ping`): User input passed to `subprocess.run()` with `shell=True` without sanitization, including pipe/semicolon chaining
+6. **Command Injection #2** (`/security-tools/nslookup`): Second distinct endpoint with `shell=True` for pen-test coverage
+7. **Mass Assignment** (`/security-comments`): API accepts `author_name` and `role` fields from request body, allowing authorship spoofing
+8. **Stored XSS (HTML)** (`/security-xss-comments`): Stored comments rendered as HTML page for pen-test scanner detection
+9. **Reflected XSS (HTML)** (`/security-xss-search`): Search query reflected in HTML page for pen-test scanner detection
+10. **DOM-based XSS (HTML)** (`/security-xss-page`): User input injected directly into HTML response with DOM-based XSS via URL fragment
+11. **Advanced XSS (Static HTML)** (`/xss-advanced.html`): Client-side DOM-based XSS demo page served from S3 via CloudFront, featuring innerHTML injection, href attribute injection (`javascript:` protocol), img onerror event handler injection, and URL parameter/fragment reflection into the DOM
+12. **Stored XSS (Opportunity Notes)**: The My Opportunities page includes an Opportunity Notes section where notes are rendered with `dangerouslySetInnerHTML`, allowing stored XSS via note content
+13. **Command Injection (CSV Export)**: The CRM's Team Performance page includes an Export CSV feature whose filename parameter is vulnerable to injection
 
 ### Credential Display Security
 - Login page demo credentials section masks the password with bullet characters (`••••••••••`) rather than displaying in plain text
@@ -263,8 +282,8 @@ These endpoints are protected by Cognito authentication but intentionally bypass
 - The lightbox includes a dark backdrop with blur, close button, and click-outside-to-dismiss behavior
 
 ### WAF Rule Overrides
-- `SQLi_BODY` rule set to count mode to allow SQL injection demonstrations
-- `UNIXShellCommandsVariables_BODY` rule set to count mode to allow command injection demonstrations
+- All regional WAF managed rules (CommonRuleSet, BotControl, KnownBadInputs, UnixRuleSet, SQLiRuleSet) are set to count mode to allow security demonstration endpoints to function for pen-test scanning
+- CloudFront WAF includes a priority-0 allowlist rule for the AWS Security Agent `User-Agent` header, ensuring pen-test traffic bypasses CloudFront-level managed rules
 
 ### Database Configuration
 - Deletion protection disabled (demo environment)

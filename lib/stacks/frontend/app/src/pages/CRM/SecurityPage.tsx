@@ -161,7 +161,7 @@ const SecurityPage = () => {
             <motion.button whileHover={{ scale:1.02, borderColor:"rgba(255,255,255,0.35)" }} whileTap={{ scale:0.98 }}
               onClick={() => document.getElementById("vuln-demos")?.scrollIntoView({ behavior:"smooth" })}
               style={{ display:"inline-flex", alignItems:"center", gap:"8px", background:"rgba(255,255,255,0.05)", color:"#e2e8f0", border:"1px solid rgba(255,255,255,0.18)", borderRadius:"8px", padding:"11px 22px", fontSize:"14px", fontWeight:500, cursor:"pointer", transition:"all 0.2s" }}>
-              Try Vulnerability Demos {"\u2192"}
+              Test Vulnerabilities {"\u2192"}
             </motion.button>
           </div>
 
