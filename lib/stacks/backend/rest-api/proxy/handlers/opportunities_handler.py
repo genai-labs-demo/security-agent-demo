@@ -9,6 +9,7 @@ from datetime import datetime
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
+from validation import validate_opportunity, ValidationError
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -422,6 +423,10 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     try:
         logger.info(f"Creating new opportunity: {data.get('name')}")
         
+        # Validate opportunity data including stage-probability alignment
+        validate_opportunity(data, is_update=False)
+        logger.info(f"Validation passed for opportunity: {data.get('name')}")
+        
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
         
@@ -498,6 +503,19 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
             elif 'owner_id' in str(e).lower():
                 raise Exception("Invalid owner ID: team member does not exist")
         raise Exception(f"Failed to create opportunity: constraint violation")
+    except ValidationError as e:
+        connection.rollback()
+        logger.error(f"Integrity error creating opportunity: {str(e)}")
+        # Check for specific constraint violations
+        if 'foreign key' in str(e).lower():
+            if 'account_id' in str(e).lower():
+                raise Exception("Invalid account ID: account does not exist")
+            elif 'owner_id' in str(e).lower():
+                raise Exception("Invalid owner ID: team member does not exist")
+        raise Exception(f"Failed to create opportunity: constraint violation")
+        logger.error(f"Validation error creating opportunity: {e.message}")
+        # Re-raise as Exception so it's caught by the error handler
+        raise Exception(e.message)
     except psycopg2.Error as e:
         connection.rollback()
         logger.error(f"Database error creating opportunity: {str(e)}")
@@ -505,7 +523,10 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         connection.rollback()
         # Re-raise if it's already our custom exception
-        if "Invalid account ID" in str(e) or "Invalid owner ID" in str(e):
+        if ("Invalid account ID" in str(e) or 
+            "Invalid owner ID" in str(e) or 
+            "Field 'probability'" in str(e) or 
+            "Field 'stage'" in str(e)):
             raise
         logger.error(f"Unexpected error creating opportunity: {str(e)}")
         raise
@@ -528,6 +549,40 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
     """
     try:
         logger.info(f"Updating opportunity: {opportunity_id}")
+        
+        # For partial updates with stage or probability, we need to validate against existing values
+        # to enforce stage-probability alignment business logic
+        has_stage = 'stage' in data and data['stage'] is not None
+        has_probability = 'probability' in data and data['probability'] is not None
+        
+        # If only one field is provided, retrieve the other from database for validation
+        if (has_stage or has_probability) and not (has_stage and has_probability):
+            cursor = connection.cursor(cursor_factory=RealDictCursor)
+            cursor.execute(
+                "SELECT stage, probability FROM opportunities WHERE id = %s AND deleted_at IS NULL",
+                (opportunity_id,)
+            )
+            existing = cursor.fetchone()
+            cursor.close()
+            
+            if not existing:
+                logger.info(f"Opportunity not found for update: {opportunity_id}")
+                return None
+            
+            # Merge with existing values for complete validation
+            validation_data = data.copy()
+            if not has_stage:
+                validation_data['stage'] = existing['stage']
+            if not has_probability:
+                validation_data['probability'] = existing['probability']
+            
+            # Validate with complete data to enforce stage-probability alignment
+            validate_opportunity(validation_data, is_update=True)
+            logger.info(f"Complete validation passed for partial update: {opportunity_id}")
+        else:
+            # Validate the provided data (both fields present or neither is stage/probability)
+            validate_opportunity(data, is_update=True)
+            logger.info(f"Validation passed for opportunity update: {opportunity_id}")
         
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
@@ -603,6 +658,91 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
     except psycopg2.IntegrityError as e:
         connection.rollback()
         logger.error(f"Integrity error updating opportunity {opportunity_id}: {str(e)}")
+        # Check for specific constraint violations
+        if 'foreign key' in str(e).lower():
+            if 'account_id' in str(e).lower():
+                raise Exception("Invalid account ID: account does not exist")
+            elif 'owner_id' in str(e).lower():
+                raise Exception("Invalid owner ID: team member does not exist")
+        raise Exception(f"Failed to update opportunity: constraint violation")
+    except ValidationError as e:
+        connection.rollback()
+        logger.error(f"Validation error updating opportunity {opportunity_id}: {e.message}")
+        # Re-raise as Exception so it's caught by the error handler
+        raise Exception(e.message)
+    except psycopg2.Error as e:
+        connection.rollback()
+        logger.error(f"Database error updating opportunity {opportunity_id}: {str(e)}")
+        raise Exception(f"Failed to update opportunity: {str(e)}")
+    except Exception as e:
+        connection.rollback()
+        # Re-raise if it's already our custom exception
+        if ("Invalid account ID" in str(e) or 
+            "Invalid owner ID" in str(e) or 
+            "Invalid amount" in str(e) or 
+            "Field 'probability'" in str(e) or 
+            "Field 'stage'" in str(e)):
+            raise
+        logger.error(f"Unexpected error updating opportunity {opportunity_id}: {str(e)}")
+        raise
+
+
+def delete_opportunity(connection, opportunity_id: str) -> bool:
+    """
+    Soft-delete an opportunity record by marking it as deleted.
+    The record is retained in the database for recovery purposes.
+    Recalculates parent account aggregates after deletion.
+
+    Args:
+        connection: Database connection object
+        opportunity_id: Opportunity ID to soft-delete
+
+    Returns:
+        True if opportunity was soft-deleted, False if not found
+
+    Raises:
+        Exception: If database update fails
+    """
+    try:
+        logger.info(f"Soft-deleting opportunity: {opportunity_id}")
+
+        cursor = connection.cursor()
+
+        # Check if opportunity exists and capture account_id for aggregate recalculation
+        cursor.execute(
+            "SELECT id, account_id FROM opportunities WHERE id = %s AND (deleted_at IS NULL)",
+            (opportunity_id,)
+        )
+        row = cursor.fetchone()
+        if not row:
+            cursor.close()
+            logger.info(f"Opportunity not found for deletion: {opportunity_id}")
+            return False
+
+        account_id = row[1]
+
+        # Soft-delete: set deleted_at timestamp instead of removing the row
+        cursor.execute(
+            "UPDATE opportunities SET deleted_at = NOW() WHERE id = %s",
+            (opportunity_id,)
+        )
+        connection.commit()
+        cursor.close()
+
+        # Recalculate parent account aggregates
+        _recalculate_account_aggregates(connection, account_id)
+
+        logger.info(f"Soft-deleting opportunity: {opportunity_id}")
+        return True
+
+    except psycopg2.Error as e:
+        connection.rollback()
+        logger.error(f"Database error soft-deleting opportunity {opportunity_id}: {str(e)}")
+        raise Exception(f"Failed to delete opportunity: {str(e)}")
+    except Exception as e:
+        connection.rollback()
+        logger.error(f"Unexpected error soft-deleting opportunity {opportunity_id}: {str(e)}")
+        raise
         # Check for specific constraint violations
         if 'foreign key' in str(e).lower():
             if 'account_id' in str(e).lower():
