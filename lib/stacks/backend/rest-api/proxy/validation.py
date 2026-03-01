@@ -12,6 +12,17 @@ HEALTH_STATUS_VALUES = ['Green', 'Yellow', 'Red']
 OPPORTUNITY_STAGE_VALUES = ['Launched', 'Qualified', 'Proof of Concept', 'Negotiation', 'Closed Won', 'Closed Lost']
 FORECAST_CATEGORY_VALUES = ['Pipeline', 'Best Case', 'Commit', 'Closed']
 
+# Stage-probability correlation ranges based on standard CRM sales methodologies
+# Each stage has an expected probability range reflecting the likelihood of deal closure
+STAGE_PROBABILITY_RANGES = {
+    'Launched': (10, 20),           # Early exploration phase
+    'Qualified': (20, 40),          # Budget/need confirmed
+    'Proof of Concept': (40, 60),  # Solution validation
+    'Negotiation': (60, 80),        # Terms discussion
+    'Closed Won': (100, 100),       # Deal completed - exact value required
+    'Closed Lost': (0, 0)           # Deal abandoned - exact value required
+}
+
 # Email validation regex pattern
 EMAIL_PATTERN = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
 
@@ -111,6 +122,35 @@ def validate_account(data: Dict[str, Any], is_update: bool = False) -> None:
             raise ValidationError("Field 'logoUrl' must be a string", field='logoUrl')
 
 
+def _validate_stage_probability_correlation(stage: str, probability: int) -> None:
+    """
+    Validate that the probability value aligns with the expected range for the given stage.
+    
+    This enforces business logic correlation between interdependent fields to ensure
+    data integrity for sales forecasting calculations.
+    
+    Args:
+        stage: Opportunity stage value
+        probability: Probability value (0-100)
+    
+    Raises:
+        ValidationError: If probability is outside the expected range for the stage
+    """
+    if stage not in STAGE_PROBABILITY_RANGES:
+        # Stage validation should have already caught this, but be defensive
+        return
+    
+    min_prob, max_prob = STAGE_PROBABILITY_RANGES[stage]
+    
+    if not (min_prob <= probability <= max_prob):
+        raise ValidationError(
+            f"Invalid stage-probability correlation: Stage '{stage}' requires "
+            f"probability between {min_prob}% and {max_prob}%, but got {probability}%. "
+            f"This ensures accurate sales forecasting and pipeline projections.",
+            field='probability'
+        )
+
+
 def validate_opportunity(data: Dict[str, Any], is_update: bool = False) -> None:
     """
     Validate opportunity data against schema requirements.
@@ -192,6 +232,12 @@ def validate_opportunity(data: Dict[str, Any], is_update: bool = False) -> None:
             raise ValidationError("Field 'probability' must be an integer", field='probability')
         if not (0 <= data['probability'] <= 100):
             raise ValidationError("Field 'probability' must be between 0 and 100", field='probability')
+    
+    # Cross-field validation: Enforce stage-probability correlation
+    # This prevents unrealistic combinations that undermine forecast accuracy
+    if 'stage' in data and 'probability' in data:
+        if data['stage'] is not None and data['probability'] is not None:
+            _validate_stage_probability_correlation(data['stage'], data['probability'])
     
     # Validate optional fields if present
     if 'accountName' in data and data['accountName'] is not None:

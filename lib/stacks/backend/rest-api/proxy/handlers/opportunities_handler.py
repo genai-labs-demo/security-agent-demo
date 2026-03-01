@@ -9,6 +9,7 @@ from datetime import datetime
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
+
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -422,6 +423,13 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     try:
         logger.info(f"Creating new opportunity: {data.get('name')}")
         
+        # Validate opportunity data including stage-probability correlation
+        try:
+            validate_opportunity(data, is_update=False)
+        except ValidationError as e:
+            # Convert ValidationError to ValueError for consistent error handling
+            raise ValueError(str(e))
+        
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
         
@@ -528,6 +536,31 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
     """
     try:
         logger.info(f"Updating opportunity: {opportunity_id}")
+        
+        # For updates, we need to validate the final state (existing + updates)
+        # to prevent bypassing stage-probability correlation by updating fields separately
+        cursor = connection.cursor(cursor_factory=RealDictCursor)
+        cursor.execute("""
+            SELECT stage, probability
+            FROM opportunities
+            WHERE id = %s AND deleted_at IS NULL
+        """, (opportunity_id,))
+        existing_record = cursor.fetchone()
+        cursor.close()
+        
+        if existing_record:
+            # Merge existing data with update data to get final state
+            merged_data = {
+                'stage': data.get('stage', existing_record['stage']),
+                'probability': data.get('probability', existing_record['probability'])
+            }
+            
+            # Validate the merged state including stage-probability correlation
+            try:
+                validate_opportunity(merged_data, is_update=True)
+            except ValidationError as e:
+                # Convert ValidationError to ValueError for consistent error handling
+                raise ValueError(str(e))
         
         # Map API format to database format
         db_data = _map_api_to_db_format(data)

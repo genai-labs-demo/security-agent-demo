@@ -21,6 +21,7 @@ from handlers import accounts_handler, opportunities_handler, team_members_handl
 from handlers import security_handler
 from s3_integration import enhance_with_images
 from cors_handler import process_cors
+from validation import ValidationError
 from error_handler import (
     handle_validation_error,
     handle_not_found_error,
@@ -129,6 +130,11 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         logger.info(f"Request {request_id} completed successfully with status {response['statusCode']}")
         return response
         
+    except ValidationError as e:
+        # Validation errors from validation module (400)
+        logger.warning(f"Validation error in request {request_id}: {str(e)}")
+        response = handle_validation_error(str(e))
+        return process_cors(event, response)
     except ValueError as e:
         # Validation errors (400)
         logger.warning(f"Validation error in request {request_id}: {str(e)}")
