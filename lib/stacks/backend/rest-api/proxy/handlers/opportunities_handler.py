@@ -511,7 +511,7 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         raise
 
 
-def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any], user_context: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
     """
     Update an existing opportunity record in the database.
     
@@ -519,6 +519,7 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         connection: Database connection object
         opportunity_id: Opportunity ID to update
         data: Partial opportunity data in API format (camelCase)
+        user_context: Optional user context from Lambda authorizer for audit logging
     
     Returns:
         Updated opportunity dictionary in API format, or None if not found
@@ -548,6 +549,20 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
             return get_opportunity(connection, opportunity_id)
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
+        
+        # Retrieve the old opportunity record to detect account_id changes
+        # This is required to recalculate aggregates on BOTH old and new accounts
+        cursor.execute("""
+            SELECT id, account_id, amount, name
+            FROM opportunities
+            WHERE id = %s AND deleted_at IS NULL
+        """, (opportunity_id,))
+        old_record = cursor.fetchone()
+        
+        if not old_record:
+            cursor.close()
+            logger.info(f"Opportunity not found for update: {opportunity_id}")
+            return None
         
         # Validate account_id exists if being updated
         if 'account_id' in db_data and db_data['account_id']:
@@ -594,8 +609,41 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         # Map to API format
         opportunity = _map_opportunity_to_api_format(dict(record))
         
-        # Recalculate parent account aggregates (handles amount or account changes)
-        _recalculate_account_aggregates(connection, record.get('account_id'))
+        # Recalculate parent account aggregates
+        # If account changed, recalculate both old and new account
+        old_account_id = old_record.get('account_id')
+        new_account_id = record.get('account_id')
+        
+        if old_account_id and old_account_id != new_account_id:
+            # Account changed - recalculate both accounts
+            logger.info(f"Account transfer detected for opportunity {opportunity_id}: "
+                       f"{old_account_id} -> {new_account_id}")
+            
+            # Audit log: Record the account transfer with user context
+            user_info = "unknown"
+            if user_context:
+                # Extract user identity from Cognito claims if available
+                user_info = user_context.get('username') or user_context.get('sub') or user_context.get('email') or "authenticated_user"
+            
+            logger.warning(
+                f"AUDIT: Opportunity account transfer | "
+                f"Opportunity ID: {opportunity_id} | "
+                f"Opportunity Name: {record.get('name')} | "
+                f"Old Account ID: {old_account_id} | "
+                f"New Account ID: {new_account_id} | "
+                f"Amount: ${record.get('amount')} | "
+                f"User: {user_info} | "
+                f"Timestamp: {datetime.utcnow().isoformat()}"
+            )
+            
+            # Recalculate aggregates for BOTH old and new accounts
+            # This prevents metric manipulation through account transfers
+            _recalculate_account_aggregates(connection, old_account_id)
+            _recalculate_account_aggregates(connection, new_account_id)
+        else:
+            # Account did not change, only recalculate current account
+            # (handles amount changes or other field updates)
+            _recalculate_account_aggregates(connection, new_account_id)
         
         logger.info(f"Updated opportunity: {opportunity_id}")
         return opportunity
