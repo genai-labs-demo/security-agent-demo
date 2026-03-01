@@ -35,69 +35,29 @@ export class FederateUserPool extends UserPool {
         });
     }
     constructor(scope: Construct, id: string, props: UserPoolProps) {
+        // Use explicit removalPolicy from props, defaulting to RETAIN for data safety
+        const removalPolicy = props.removalPolicy !== undefined ? props.removalPolicy : RemovalPolicy.RETAIN;
+        
         super(scope, id, {
             ...props,
-            removalPolicy: RemovalPolicy.DESTROY,
-            customAttributes: getAccountDetail(scope, "midway")
-                ? {
-                      posix: new StringAttribute({
-                          mutable: true,
-                      }),
-                      ldap: new StringAttribute({
-                          mutable: true,
-                      }),
-                  }
-                : props.customAttributes,
+            removalPolicy: removalPolicy,
+            // Use explicit customAttributes from props - no context-dependent logic
         });
     }
 }
 
 export class FederateUserPoolClient extends UserPoolClient {
     constructor(scope: Construct, id: string, props: UserPoolClientProps) {
-        const midway = getAccountDetail(scope, "midway");
+        // Remove context-dependent authentication configuration
+        // All authentication settings should be explicitly passed via props
         super(scope, id, {
             ...props,
-            authFlows: midway
-                ? {
-                      custom: true,
-                      userSrp: true,
-                  }
-                : props.authFlows,
-            oAuth: midway
-                ? {
-                      flows: {
-                          authorizationCodeGrant: true,
-                          implicitCodeGrant: false,
-                      },
-                      scopes: [OAuthScope.OPENID, OAuthScope.PROFILE],
-                      callbackUrls: props.oAuth?.callbackUrls,
-                      logoutUrls: props.oAuth?.logoutUrls,
-                  }
-                : props.oAuth,
-            supportedIdentityProviders: midway
-                ? [
-                      UserPoolClientIdentityProvider.custom(
-                          new UserPoolIdentityProviderOidc(scope, "userPoolIdentityProvider", {
-                              userPool: props.userPool as UserPool,
-                              name: "AmazonFederate",
-                              attributeMapping: {
-                                  email: ProviderAttribute.other("EMAIL"),
-                                  custom: {
-                                      "custom:posix": ProviderAttribute.other("POSIX_GROUPS"),
-                                  },
-                              },
-                              clientId: scope.node.getContext("projectId"),
-                              clientSecret: SecretValue.secretsManager(
-                                  `${getProfile(scope)}-federateSecret`
-                              ).unsafeUnwrap(),
-                              attributeRequestMethod: OidcAttributeRequestMethod.GET,
-                              issuerUrl: getAccountDetail(scope, "prod")
-                                  ? "https://idp.federate.amazon.com"
-                                  : "https://idp-integ.federate.amazon.com",
-                          }).providerName
-                      ),
-                  ]
-                : props.supportedIdentityProviders,
+            // Use explicit props for authentication configuration
+            // authFlows: defined by caller
+            // oAuth: defined by caller
+            // supportedIdentityProviders: defined by caller
+            // This ensures consistent security posture across all deployment environments
+            // and eliminates context-dependent security misconfigurations
         });
     }
 }
