@@ -118,7 +118,7 @@ def _recalculate_account_aggregates(connection, account_id: str) -> None:
         cursor.close()
 
 
-def search_opportunities(connection, search_query: str, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
+def search_opportunities(connection, search_query: str, account_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Perform full text search on opportunities using multiple keywords.
     
@@ -128,16 +128,29 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
         account_id: Optional account ID to filter opportunities
     
     Returns:
-        List of opportunity dictionaries in API format, ordered by relevance
+        Dictionary containing:
+            - results: List of opportunity dictionaries in API format, ordered by relevance
+            - metadata: Search metadata including truncation information
     
     Raises:
         Exception: If database query fails
     """
     try:
         if not search_query or not search_query.strip():
-            return []
+            # Return empty results with metadata
+            return {
+                'results': [],
+                'metadata': {
+                    'totalKeywords': 0,
+                    'keywordsUsed': 0,
+                    'truncated': False,
+                    'keywords': [],
+                    'maxKeywords': 10
+                }
+            }
         
         keywords = search_query.strip().split()
+        original_keyword_count = len(keywords)
         
         # Limit keyword count to prevent resource exhaustion via query explosion
         MAX_KEYWORDS = 10
@@ -259,7 +272,18 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
             opportunities.append(opportunity)
         
         logger.info(f"Found {len(opportunities)} opportunities matching search query")
-        return opportunities
+        
+        # Return structured response with metadata
+        return {
+            'results': opportunities,
+            'metadata': {
+                'totalKeywords': original_keyword_count,
+                'keywordsUsed': len(keywords),
+                'truncated': len(keywords) < original_keyword_count,
+                'keywords': keywords,
+                'maxKeywords': MAX_KEYWORDS
+            }
+        }
         
     except psycopg2.Error as e:
         logger.error(f"Database error searching opportunities: {str(e)}")
