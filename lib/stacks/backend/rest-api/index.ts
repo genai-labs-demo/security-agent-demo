@@ -140,60 +140,41 @@ export class RestApi extends Construct {
             }));
         }
 
-        // Add unauthenticated security demo endpoints BEFORE the catch-all proxy
-        // These must be explicitly defined so pen test scanners can reach them without a JWT
+        // Add security demo endpoints with proper authentication BEFORE the catch-all proxy
+        // These endpoints now require Cognito authentication to prevent unauthorized access to sensitive data
         const lambdaInteg = new LambdaIntegration(proxyFunction);
-        const noAuth = { authorizationType: AuthorizationType.NONE };
 
         const secProfile = restApi.root.addResource("security-profile");
-        secProfile.addMethod("GET", lambdaInteg, noAuth);
-        secProfile.addMethod("POST", lambdaInteg, noAuth);
+        secProfile.addMethod("GET", lambdaInteg);
+        secProfile.addMethod("POST", lambdaInteg);
         const secProfileId = secProfile.addResource("{id}");
-        secProfileId.addMethod("GET", lambdaInteg, noAuth);
+        secProfileId.addMethod("GET", lambdaInteg);
 
         const secComments = restApi.root.addResource("security-comments");
-        secComments.addMethod("GET", lambdaInteg, noAuth);
-        secComments.addMethod("POST", lambdaInteg, noAuth);
+        secComments.addMethod("GET", lambdaInteg);
+        secComments.addMethod("POST", lambdaInteg);
 
         const secSearch = restApi.root.addResource("security-search");
-        secSearch.addMethod("GET", lambdaInteg, noAuth);
-        secSearch.addMethod("POST", lambdaInteg, noAuth);
+        secSearch.addMethod("GET", lambdaInteg);
+        secSearch.addMethod("POST", lambdaInteg);
 
         const secTools = restApi.root.addResource("security-tools");
         const secPing = secTools.addResource("ping");
-        secPing.addMethod("POST", lambdaInteg, noAuth);
+        secPing.addMethod("POST", lambdaInteg);
         const secNslookup = secTools.addResource("nslookup");
-        secNslookup.addMethod("POST", lambdaInteg, noAuth);
+        secNslookup.addMethod("POST", lambdaInteg);
 
         const secHealth = restApi.root.addResource("security-health");
-        secHealth.addMethod("GET", lambdaInteg, noAuth);
+        secHealth.addMethod("GET", lambdaInteg);
 
         const secXssPage = restApi.root.addResource("security-xss-page");
-        secXssPage.addMethod("GET", lambdaInteg, noAuth);
+        secXssPage.addMethod("GET", lambdaInteg);
 
         const secXssComments = restApi.root.addResource("security-xss-comments");
-        secXssComments.addMethod("GET", lambdaInteg, noAuth);
+        secXssComments.addMethod("GET", lambdaInteg);
 
         const secXssSearch = restApi.root.addResource("security-xss-search");
-        secXssSearch.addMethod("GET", lambdaInteg, noAuth);
-
-        // Suppress cdk-nag authorization warnings for intentionally vulnerable security demo endpoints.
-        // These endpoints are deliberately unauthenticated to allow pen test scanners to discover
-        // and exploit vulnerabilities (IDOR, SQLi, XSS, Command Injection, Mass Assignment)
-        // as part of the AWS Security Agent educational demo.
-        const securityDemoNagSuppression = [
-            {
-                id: "AwsSolutions-APIG4",
-                reason: "Security demo endpoints are intentionally unauthenticated to allow pen test scanners to test for vulnerabilities without requiring Cognito JWT tokens.",
-            },
-            {
-                id: "AwsSolutions-COG4",
-                reason: "Security demo endpoints are intentionally unauthenticated to allow pen test scanners to test for vulnerabilities without requiring Cognito JWT tokens.",
-            },
-        ];
-        for (const resource of [secProfile, secProfileId, secComments, secSearch, secTools, secPing, secNslookup, secHealth, secXssPage, secXssComments, secXssSearch]) {
-            NagSuppressions.addResourceSuppressions(resource, securityDemoNagSuppression, true);
-        }
+        secXssSearch.addMethod("GET", lambdaInteg);
 
         // Catch-all proxy for remaining (authenticated) CRM endpoints
         restApi.root.addProxy({
