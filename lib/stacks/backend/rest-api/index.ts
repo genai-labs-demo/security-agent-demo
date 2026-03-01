@@ -140,16 +140,8 @@ export class RestApi extends Construct {
             }));
         }
 
-        // Add unauthenticated security demo endpoints BEFORE the catch-all proxy
-        // These must be explicitly defined so pen test scanners can reach them without a JWT
         const lambdaInteg = new LambdaIntegration(proxyFunction);
         const noAuth = { authorizationType: AuthorizationType.NONE };
-
-        const secProfile = restApi.root.addResource("security-profile");
-        secProfile.addMethod("GET", lambdaInteg, noAuth);
-        secProfile.addMethod("POST", lambdaInteg, noAuth);
-        const secProfileId = secProfile.addResource("{id}");
-        secProfileId.addMethod("GET", lambdaInteg, noAuth);
 
         const secComments = restApi.root.addResource("security-comments");
         secComments.addMethod("GET", lambdaInteg, noAuth);
@@ -177,7 +169,7 @@ export class RestApi extends Construct {
         const secXssSearch = restApi.root.addResource("security-xss-search");
         secXssSearch.addMethod("GET", lambdaInteg, noAuth);
 
-        // Suppress cdk-nag authorization warnings for intentionally vulnerable security demo endpoints.
+        // Suppress cdk-nag authorization warnings for remaining intentionally vulnerable security demo endpoints.
         // These endpoints are deliberately unauthenticated to allow pen test scanners to discover
         // and exploit vulnerabilities (IDOR, SQLi, XSS, Command Injection, Mass Assignment)
         // as part of the AWS Security Agent educational demo.
@@ -191,7 +183,7 @@ export class RestApi extends Construct {
                 reason: "Security demo endpoints are intentionally unauthenticated to allow pen test scanners to test for vulnerabilities without requiring Cognito JWT tokens.",
             },
         ];
-        for (const resource of [secProfile, secProfileId, secComments, secSearch, secTools, secPing, secNslookup, secHealth, secXssPage, secXssComments, secXssSearch]) {
+        for (const resource of [secComments, secSearch, secTools, secPing, secNslookup, secHealth, secXssPage, secXssComments, secXssSearch]) {
             NagSuppressions.addResourceSuppressions(resource, securityDemoNagSuppression, true);
         }
 
