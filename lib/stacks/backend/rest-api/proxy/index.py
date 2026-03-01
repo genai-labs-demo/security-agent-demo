@@ -257,21 +257,29 @@ def execute_operation(connection, route_info, operation: str) -> Any:
         elif operation == 'delete':
             success = team_members_handler.delete_team_member(connection, resource_id)
             if not success:
+            # List operation is allowed for all authenticated users
                 raise ValueError(f"Team member with id {resource_id} not found")
             return None
+            # Get operation is allowed for all authenticated users
     
     # Route to industries handler
     elif resource_type == 'industries':
         if operation == 'list':
             return industries_handler.list_industries(connection)
-        elif operation == 'get':
+            # Create operation requires Admin privileges
+            require_admin(user_context)
+            return team_members_handler.create_team_member(connection, body, user_context)
             result = industries_handler.get_industry(connection, resource_id)
-            if result is None:
+            # Update operation requires Admin privileges
+            require_admin(user_context)
+            result = team_members_handler.update_team_member(connection, resource_id, body, user_context)
                 raise ValueError(f"Industry with id {resource_id} not found")
             return result
         else:
             raise ValueError(f"Industries resource only supports GET operations")
-    
+            # Delete operation requires Admin privileges
+            require_admin(user_context)
+            success = team_members_handler.delete_team_member(connection, resource_id, user_context)
     # Route to security profile handler (SQL Injection demo)
     elif resource_type == 'security-profile':
         # Support path parameter, query parameter, or POST body for user ID
