@@ -50,7 +50,7 @@ const LandingPage = () => {
                 <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7 }}>
                     {/* Badge */}
                     <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "20px", padding: "6px 16px", marginBottom: "28px", fontSize: "13px", color: "#94a3b8" }}>
-                        {"\u2728"} AI-Powered Security Analysis
+                        {"\u2728"} Frontier Agent
                     </div>
 
                     <h1 style={{ fontSize: "clamp(36px, 6vw, 56px)", fontWeight: 700, color: "#f1f5f9", margin: "0 0 20px", letterSpacing: "-0.03em", lineHeight: 1.15 }}>

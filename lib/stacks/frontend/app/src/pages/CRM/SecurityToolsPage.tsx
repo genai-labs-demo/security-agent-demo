@@ -14,10 +14,10 @@ const API_BASE = import.meta.env.VITE_REST_API_URL?.replace(/\/$/, "") ?? "";
 const SAMPLE_PAYLOADS = [
     "google.com; ls -la",
     "google.com | whoami",
-    "google.com && cat /etc/passwd",
+    "google.com; cat /etc/passwd",
     "google.com; pwd",
     "google.com; uname -a",
-    "google.com `id`",
+    "google.com; id",
 ];
 
 const SecurityToolsPage = () => {
@@ -64,19 +64,19 @@ const SecurityToolsPage = () => {
                         <Box>Complete server compromise, data exfiltration, system manipulation, lateral movement, and denial of service.</Box>
                         <Box variant="h4">How to Fix It</Box>
                         <pre style={{ background: "rgba(255,255,255,0.05)", padding: "15px", borderRadius: "6px", fontSize: "13px", overflow: "auto" }}>{`# ❌ VULNERABLE (shell command with user input)
-command = f"ping -c 4 {user_input}"
+command = f"nslookup {user_input}"
 subprocess.run(command, shell=True)
 
 # ✅ SECURE (use subprocess without shell)
-subprocess.run(["ping", "-c", "4", user_input], shell=False)`}</pre>
+subprocess.run(["nslookup", user_input], shell=False)`}</pre>
                     </SpaceBetween>
                 </Container>
 
-                <Container header={<Header variant="h2">Try It Yourself: Network Ping Tool</Header>}>
+                <Container header={<Header variant="h2">Try It Yourself: Network Lookup Tool</Header>}>
                     <SpaceBetween size="m">
-                        <Box color="text-body-secondary">Enter a hostname or IP address to ping. Try using command injection payloads to execute additional commands on the server!</Box>
+                        <Box color="text-body-secondary">Enter a hostname or IP address to look up. Try using command injection payloads to execute additional commands on the server!</Box>
                         <Input value={hostInput} onChange={({ detail }) => setHostInput(detail.value)} placeholder="Enter hostname or IP (e.g., google.com or try: google.com; ls)" onKeyDown={({ detail }) => { if (detail.key === "Enter") executePing(); }} />
-                        <Button variant="primary" onClick={() => executePing()} loading={loading}>Execute Ping</Button>
+                        <Button variant="primary" onClick={() => executePing()} loading={loading}>Execute Lookup</Button>
 
                         <Container header={<Header variant="h3">📝 Sample Command Injection Payloads</Header>}>
                             <Box color="text-body-secondary" margin={{ bottom: "s" }}>Click any payload below to try it:</Box>
@@ -92,7 +92,7 @@ subprocess.run(["ping", "-c", "4", user_input], shell=False)`}</pre>
                 </Container>
 
                 <div ref={resultRef}>
-                    {loading && <Container><Spinner size="large" /> Executing ping command...</Container>}
+                    {loading && <Container><Spinner size="large" /> Executing command...</Container>}
 
                     {error && <Alert type="error" header="Request Failed">{error}</Alert>}
 
@@ -135,7 +135,7 @@ subprocess.run(["ping", "-c", "4", user_input], shell=False)`}</pre>
                     )}
                 </div>
 
-                <Button variant="link" onClick={() => navigate("/crm/security")}>← Back to Security Dashboard</Button>
+                <Button variant="link" onClick={() => { navigate("/crm/security"); setTimeout(() => document.getElementById("vuln-demos")?.scrollIntoView({ behavior:"smooth" }), 100); }}>← Back to Security Dashboard</Button>
             </SpaceBetween>
         </ContentLayout>
     );

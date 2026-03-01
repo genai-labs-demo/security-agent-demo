@@ -27,6 +27,7 @@ import {
   Input,
   Button,
   FormField,
+  Textarea,
 } from '@cloudscape-design/components';
 import { OpportunityTable } from './components/pipeline/OpportunityTable';
 import { CurrencyDisplay } from './components/shared';
@@ -34,6 +35,7 @@ import { useCRM } from './context/CRMContext';
 import { Opportunity, OpportunityStage } from './types';
 import { LoadingSpinner, ErrorAlert } from '../../common/components';
 import { fetchOpportunities, searchOpportunities } from '../../services/api';
+import { getCurrentUser } from 'aws-amplify/auth';
 
 /**
  * Calculate personal pipeline metrics for the current user
@@ -81,6 +83,91 @@ const calculatePersonalMetrics = (opportunities: Opportunity[]) => {
     overdueOpportunities,
     opportunitiesByStage,
   };
+};
+
+/**
+ * Opportunity Notes Component
+ * Allows adding notes/comments to opportunities.
+ * VULNERABILITY: Stored XSS — notes are rendered with dangerouslySetInnerHTML.
+ */
+const OpportunityNotes = () => {
+  const [noteInput, setNoteInput] = useState('');
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editText, setEditText] = useState('');
+  const [displayName, setDisplayName] = useState('You');
+  const [notes, setNotes] = useState<{ author: string; text: string; date: string }[]>([
+    { author: "Sarah Chen", text: "Customer requested a follow-up demo next week. Need to prepare updated pricing.", date: new Date(Date.now() - 86400000 * 2).toLocaleString() },
+    { author: "Michael Torres", text: "Spoke with VP of Engineering — they're evaluating two other vendors. We need to highlight our security features.", date: new Date(Date.now() - 86400000).toLocaleString() },
+  ]);
+
+  useEffect(() => {
+    const fetchUser = async () => {
+      try {
+        const user = await getCurrentUser();
+        if (user.username.startsWith("Amazon")) {
+          setDisplayName(user.username.split("_")[1] || user.username);
+        } else {
+          setDisplayName(user.signInDetails?.loginId || user.username);
+        }
+      } catch { /* keep default */ }
+    };
+    fetchUser();
+  }, []);
+
+  const addNote = () => {
+    if (!noteInput.trim()) return;
+    setNotes(prev => [{ author: displayName, text: noteInput, date: new Date().toLocaleString() }, ...prev]);
+    setNoteInput('');
+  };
+
+  const deleteNote = (index: number) => {
+    setNotes(prev => prev.filter((_, i) => i !== index));
+    if (editingIndex === index) { setEditingIndex(null); setEditText(''); }
+  };
+
+  const startEdit = (index: number) => {
+    setEditingIndex(index);
+    setEditText(notes[index].text);
+  };
+
+  const saveEdit = () => {
+    if (editingIndex === null || !editText.trim()) return;
+    setNotes(prev => prev.map((n, i) => i === editingIndex ? { ...n, text: editText, date: `${n.date} (edited)` } : n));
+    setEditingIndex(null);
+    setEditText('');
+  };
+
+  return (
+    <Container header={<Header variant="h2" description="Add notes and comments to your opportunities">Opportunity Notes</Header>}>
+      <SpaceBetween size="m">
+        <Textarea value={noteInput} onChange={({ detail }) => setNoteInput(detail.value)} placeholder="Add a note about an opportunity..." rows={2} />
+        <Button variant="primary" onClick={addNote}>Add Note</Button>
+        {notes.map((note, i) => (
+          <div key={i} style={{ padding: "12px", background: "rgba(0,0,0,0.02)", borderRadius: "8px", border: "1px solid rgba(0,0,0,0.06)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <Box variant="small" color="text-body-secondary">{note.author} — {note.date}</Box>
+              <SpaceBetween direction="horizontal" size="xs">
+                <Button variant="inline-link" onClick={() => startEdit(i)}>Edit</Button>
+                <Button variant="inline-link" onClick={() => deleteNote(i)}>Delete</Button>
+              </SpaceBetween>
+            </div>
+            {editingIndex === i ? (
+              <SpaceBetween size="xs">
+                <Textarea value={editText} onChange={({ detail }) => setEditText(detail.value)} rows={2} />
+                <SpaceBetween direction="horizontal" size="xs">
+                  <Button variant="primary" onClick={saveEdit}>Save</Button>
+                  <Button onClick={() => { setEditingIndex(null); setEditText(''); }}>Cancel</Button>
+                </SpaceBetween>
+              </SpaceBetween>
+            ) : (
+              /* VULNERABILITY: Stored XSS — rendering note content without encoding */
+              <div dangerouslySetInnerHTML={{ __html: note.text }} style={{ marginTop: "4px" }} />
+            )}
+          </div>
+        ))}
+      </SpaceBetween>
+    </Container>
+  );
 };
 
 /**
@@ -488,6 +575,9 @@ export const MyOpportunitiesPage: React.FC = () => {
                 : `${displayOpportunities.length} open opportunities`
           }
         />
+
+        {/* Opportunity Notes */}
+        <OpportunityNotes />
       </SpaceBetween>
     </ContentLayout>
   );

@@ -144,7 +144,7 @@ pool.query(query, [userId]);`}</pre>
                     )}
                 </div>
 
-                <Button variant="link" onClick={() => navigate("/crm/security")}>← Back to Security Dashboard</Button>
+                <Button variant="link" onClick={() => { navigate("/crm/security"); setTimeout(() => document.getElementById("vuln-demos")?.scrollIntoView({ behavior:"smooth" }), 100); }}>← Back to Security Dashboard</Button>
             </SpaceBetween>
         </ContentLayout>
     );

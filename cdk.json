@@ -24,7 +24,7 @@
             "dev": {
                 "number": "946486897599",
                 "region": "us-east-1",
-                "midway": false
+                "midway": true
             }
         },
         "gitlab": {

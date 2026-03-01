@@ -1,6 +1,6 @@
 // @export {"deleteFile": true}
 
-import { RemovalPolicy, SecretValue, Stage } from "aws-cdk-lib";
+import { RemovalPolicy, SecretValue, Stack, Stage } from "aws-cdk-lib";
 import {
     OAuthScope,
     OidcAttributeRequestMethod,
@@ -30,7 +30,7 @@ export class FederateUserPool extends UserPool {
         return super.addDomain(id, {
             ...options,
             cognitoDomain: {
-                domainPrefix: getProfile(this),
+                domainPrefix: `${this.node.getContext("projectId")}-${Stack.of(this).account}`,
             },
         });
     }

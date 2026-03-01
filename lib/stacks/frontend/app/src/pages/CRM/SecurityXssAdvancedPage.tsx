@@ -98,7 +98,7 @@ document.getElementById('greeting').textContent = 'Hello ' + name;`}</pre>
                         <Container header={<Header variant="h3">Greeting</Header>}><div ref={greetingRef}><Box color="text-body-secondary">Enter your name above to see a greeting</Box></div></Container>
                         <Container header={<Header variant="h3">📝 Sample DOM-based XSS Payloads</Header>}>
                             <SpaceBetween size="xs">
-                                {DOM_PAYLOADS.map((p) => (<Button key={p} variant="inline-link" onClick={() => { setNameInput(p); updateGreeting(p); }}><code>{p}</code></Button>))}
+                                {DOM_PAYLOADS.map((p) => (<Button key={p} variant="inline-link" onClick={() => setNameInput(p)}><code>{p}</code></Button>))}
                             </SpaceBetween>
                         </Container>
                     </SpaceBetween>
@@ -113,7 +113,7 @@ document.getElementById('greeting').textContent = 'Hello ' + name;`}</pre>
                         <Container header={<Header variant="h3">Generated Link</Header>}><div ref={linkRef}><Box color="text-body-secondary">Enter a URL above to create a link</Box></div></Container>
                         <Container header={<Header variant="h3">📝 Sample Attribute-based XSS Payloads</Header>}>
                             <SpaceBetween size="xs">
-                                {ATTR_PAYLOADS.map((p) => (<Button key={p} variant="inline-link" onClick={() => { setLinkInput(p); createLink(p); }}><code>{p}</code></Button>))}
+                                {ATTR_PAYLOADS.map((p) => (<Button key={p} variant="inline-link" onClick={() => setLinkInput(p)}><code>{p}</code></Button>))}
                             </SpaceBetween>
                         </Container>
                     </SpaceBetween>
@@ -128,7 +128,7 @@ document.getElementById('greeting').textContent = 'Hello ' + name;`}</pre>
                         <Container header={<Header variant="h3">Image Preview</Header>}><div ref={imageRef}><Box color="text-body-secondary">Enter an image URL above to display it</Box></div></Container>
                         <Container header={<Header variant="h3">📝 Sample Event Handler Injection Payloads</Header>}>
                             <SpaceBetween size="xs">
-                                {EVENT_PAYLOADS.map((p) => (<Button key={p} variant="inline-link" onClick={() => { setImageInput(p); displayImage(p); }}><code>{p}</code></Button>))}
+                                {EVENT_PAYLOADS.map((p) => (<Button key={p} variant="inline-link" onClick={() => setImageInput(p)}><code>{p}</code></Button>))}
                             </SpaceBetween>
                         </Container>
                     </SpaceBetween>
@@ -143,7 +143,7 @@ document.getElementById('greeting').textContent = 'Hello ' + name;`}</pre>
                     </Alert>
                 )}
 
-                <Button variant="link" onClick={() => navigate("/crm/security")}>← Back to Security Dashboard</Button>
+                <Button variant="link" onClick={() => { navigate("/crm/security"); setTimeout(() => document.getElementById("vuln-demos")?.scrollIntoView({ behavior:"smooth" }), 100); }}>← Back to Security Dashboard</Button>
             </SpaceBetween>
         </ContentLayout>
     );

@@ -53,6 +53,25 @@ This application serves as a demonstration environment for:
 - AWS CDK CLI
 - AWS Account with appropriate permissions
 
+### Post-Deployment: Create a Demo User
+
+After deploying the CDK stacks, you need to create a Cognito user to log in to the application. The user pool is created automatically during deployment, but no default user is provisioned.
+
+1. Find your User Pool ID in the CDK output or AWS Console (Cognito → User Pools)
+2. Create a user:
+
+```bash
+aws cognito-idp admin-create-user \
+  --user-pool-id <YOUR_USER_POOL_ID> \
+  --username <EMAIL> \
+  --user-attributes Name=email,Value=<EMAIL> Name=email_verified,Value=true \
+  --temporary-password <TEMP_PASSWORD> \
+  --region <YOUR_REGION>
+```
+
+3. On first login, you'll be prompted to set a permanent password
+4. The Security Agent portal (accessed via "Open Security Agent Portal") uses separate credentials — set those up in the Security Agent console
+
 ### Quick Start
 
 ```bash
@@ -71,6 +90,21 @@ npm run kit -- deploy dev --all
 # 3. Access the application
 # Open CloudFormation console → Find frontend stack → Click CloudFront URL
 ```
+
+### Post-Deployment: Create a Demo User
+
+After deploying, you need to create a Cognito user to log in to the CRM app. Run the following command (replace the values with your deployed User Pool ID and desired credentials):
+
+```bash
+aws cognito-idp admin-create-user \
+  --user-pool-id <YOUR_USER_POOL_ID> \
+  --username <EMAIL> \
+  --temporary-password <TEMP_PASSWORD> \
+  --user-attributes Name=email,Value=<EMAIL> Name=email_verified,Value=true \
+  --region <YOUR_REGION>
+```
+
+On first login, you'll be prompted to set a permanent password. The User Pool ID can be found in the CDK deployment output or in the `.env` file (`VITE_USER_POOL_ID`).
 
 ### Local Development
 

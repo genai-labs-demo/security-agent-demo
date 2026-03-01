@@ -20,10 +20,11 @@ import {
   Header,
   SpaceBetween,
   Container,
-  Select,
-  SelectProps,
   Grid,
   Box,
+  Input,
+  Button,
+  FormField,
 } from '@cloudscape-design/components';
 import { TeamMetrics } from './components/team/TeamMetrics';
 import { RepPerformanceCard } from './components/team/RepPerformanceCard';
@@ -40,22 +41,6 @@ import { OpportunityStage, ChartDataPoint } from './types';
 import { LoadingSpinner, ErrorAlert } from '../../common/components';
 
 /**
- * Time period options for filtering
- */
-type TimePeriod = 'quarter' | 'month' | 'year';
-
-interface TimePeriodOption {
-  label: string;
-  value: TimePeriod;
-}
-
-const TIME_PERIOD_OPTIONS: TimePeriodOption[] = [
-  { label: 'This Quarter', value: 'quarter' },
-  { label: 'This Month', value: 'month' },
-  { label: 'This Year', value: 'year' },
-];
-
-/**
  * TeamPerformancePage Component
  * 
  * Displays team-wide metrics and individual rep performance with time period filtering.
@@ -64,6 +49,7 @@ export const TeamPerformancePage: React.FC = () => {
   // Loading and error state
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [nameFilter, setNameFilter] = useState('');
 
   // Simulate data loading
   useEffect(() => {
@@ -82,48 +68,21 @@ export const TeamPerformancePage: React.FC = () => {
     loadData();
   }, []);
 
-  // Time period filter state
-  const [selectedPeriod, setSelectedPeriod] = useState<SelectProps.Option>({
-    label: 'This Quarter',
-    value: 'quarter',
-  });
-
-  // Filter opportunities by time period
-  // Memoized to prevent recalculation on every render
+  // Filter opportunities by current quarter
   const filteredOpportunities = useMemo(() => {
-    console.time('filterOpportunitiesByPeriod');
     const now = new Date();
-    let startDate: Date;
+    const currentQuarter = Math.floor(now.getMonth() / 3);
+    const startDate = new Date(now.getFullYear(), currentQuarter * 3, 1);
 
-    switch (selectedPeriod.value) {
-      case 'month':
-        // First day of current month
-        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-        break;
-      case 'year':
-        // First day of current year
-        startDate = new Date(now.getFullYear(), 0, 1);
-        break;
-      case 'quarter':
-      default:
-        // First day of current quarter
-        const currentQuarter = Math.floor(now.getMonth() / 3);
-        startDate = new Date(now.getFullYear(), currentQuarter * 3, 1);
-        break;
-    }
-
-    const result = mockOpportunities.filter((opp) => {
+    return mockOpportunities.filter((opp) => {
       const oppDate = new Date(opp.createdDate);
       return oppDate >= startDate;
     });
-    console.timeEnd('filterOpportunitiesByPeriod');
-    return result;
-  }, [selectedPeriod]);
+  }, []);
 
   // Calculate team-wide metrics
   // Memoized to prevent recalculation on every render
   const teamMetrics = useMemo(() => {
-    console.time('calculateTeamMetrics');
     const pipelineMetrics = calculatePipelineMetrics(filteredOpportunities);
     const winRate = calculateWinRate(filteredOpportunities);
     const averageDealSize = calculateAverageDealSize(filteredOpportunities);
@@ -141,7 +100,6 @@ export const TeamPerformancePage: React.FC = () => {
       averageDealSize,
       pipelineVelocity,
     };
-    console.timeEnd('calculateTeamMetrics');
     return result;
   }, [filteredOpportunities]);
 
@@ -196,6 +154,29 @@ export const TeamPerformancePage: React.FC = () => {
     setTimeout(() => setLoading(false), 450);
   }, []);
 
+  // Filter team members by name
+  const filteredMembers = useMemo(() => {
+    const sorted = [...mockTeamMembers].sort((a, b) => b.quotaAttainment - a.quotaAttainment);
+    if (!nameFilter.trim()) return sorted;
+    return sorted.filter(m => m.name.toLowerCase().includes(nameFilter.toLowerCase()));
+  }, [nameFilter]);
+
+  // Export team performance to CSV
+  const exportCSV = () => {
+    const header = 'Name,Role,Quota,Pipeline Value,Closed Won,Quota Attainment %,Win Rate %,Opportunities';
+    const rows = filteredMembers.map(m =>
+      `${m.name},${m.role},${m.quota},${m.pipelineValue},${m.closedWonValue},${m.quotaAttainment},${m.winRate},${m.opportunityCount}`
+    );
+    const csv = [header, ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `team-performance-${nameFilter || 'all'}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   // Show loading state
   if (loading) {
     return (
@@ -243,14 +224,6 @@ export const TeamPerformancePage: React.FC = () => {
         <Header
           variant="h1"
           description="Monitor team performance, quota attainment, and pipeline health"
-          actions={
-            <Select
-              selectedOption={selectedPeriod}
-              onChange={({ detail }) => setSelectedPeriod(detail.selectedOption)}
-              options={TIME_PERIOD_OPTIONS}
-              selectedAriaLabel="Selected time period"
-            />
-          }
         >
           Team Performance
         </Header>
@@ -304,33 +277,38 @@ export const TeamPerformancePage: React.FC = () => {
             <Header
               variant="h2"
               description="Individual performance metrics and quota attainment"
+              actions={
+                <SpaceBetween direction="horizontal" size="xs">
+                  <Button onClick={exportCSV} iconName="download">Export CSV</Button>
+                  <Button onClick={() => window.print()} iconName="file">Export PDF</Button>
+                </SpaceBetween>
+              }
             >
               Individual Performance
             </Header>
           }
         >
-          <Grid
-            gridDefinition={[
-              { colspan: { default: 12, xs: 6, s: 4 } },
-              { colspan: { default: 12, xs: 6, s: 4 } },
-              { colspan: { default: 12, xs: 6, s: 4 } },
-              { colspan: { default: 12, xs: 6, s: 4 } },
-              { colspan: { default: 12, xs: 6, s: 4 } },
-              { colspan: { default: 12, xs: 6, s: 4 } },
-              { colspan: { default: 12, xs: 6, s: 4 } },
-              { colspan: { default: 12, xs: 6, s: 4 } },
-              { colspan: { default: 12, xs: 6, s: 4 } },
-              { colspan: { default: 12, xs: 6, s: 4 } },
-              { colspan: { default: 12, xs: 6, s: 4 } },
-              { colspan: { default: 12, xs: 6, s: 4 } },
-            ]}
-          >
-            {mockTeamMembers
-              .sort((a, b) => b.quotaAttainment - a.quotaAttainment)
-              .map((member) => (
+          <SpaceBetween size="m">
+            <FormField label="Filter by name">
+              <Input
+                value={nameFilter}
+                onChange={({ detail }) => setNameFilter(detail.value)}
+                placeholder="Search team members..."
+                type="search"
+                clearAriaLabel="Clear filter"
+              />
+            </FormField>
+            <Grid
+              gridDefinition={filteredMembers.map(() => ({ colspan: { default: 12, xs: 6, s: 4, l: 2 } }))}
+            >
+              {filteredMembers.map((member) => (
                 <RepPerformanceCard key={member.id} member={member} />
               ))}
-          </Grid>
+            </Grid>
+            {filteredMembers.length === 0 && (
+              <Box textAlign="center" color="text-body-secondary" padding="l">No team members match "{nameFilter}"</Box>
+            )}
+          </SpaceBetween>
         </Container>
 
         {/* Additional Insights */}
@@ -350,7 +328,7 @@ export const TeamPerformancePage: React.FC = () => {
                 +12.5%
               </Box>
               <Box variant="small" color="text-body-secondary">
-                Compared to previous {selectedPeriod.label?.toLowerCase()}
+                Compared to previous quarter
               </Box>
             </Box>
             <Box>

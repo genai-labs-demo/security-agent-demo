@@ -65,7 +65,7 @@ export const OpportunityTable: React.FC<OpportunityTableProps> = ({
 }) => {
   // Pagination state
   const [currentPageIndex, setCurrentPageIndex] = useState(1);
-  const pageSize = 50;
+  const pageSize = 10;
   
   // Sorting state
   const [sortingColumn, setSortingColumn] = useState<string>('closeDate');

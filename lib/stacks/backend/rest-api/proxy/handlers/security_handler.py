@@ -503,7 +503,8 @@ def execute_ping(body):
             logger.info(f"[VULNERABLE] Executing custom command: {command}")
         else:
             # VULNERABILITY: Command Injection — unsanitized input to shell
-            command = f"ping -c 2 -W 2 {host}"
+            # nslookup is reliably available in Lambda (ping is not)
+            command = f"nslookup {host}"
             logger.info(f"[VULNERABLE] Executing command: {command}")
 
         result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=10)

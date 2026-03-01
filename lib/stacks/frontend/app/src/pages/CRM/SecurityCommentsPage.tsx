@@ -6,10 +6,11 @@ import {
     Alert, Box, Button, Container, ContentLayout, Header, Input, SpaceBetween,
     Textarea,
 } from "@cloudscape-design/components";
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 
 const API_BASE = import.meta.env.VITE_REST_API_URL?.replace(/\/$/, "") ?? "";
+const PAGE_SIZE = 10;
 
 const XSS_PAYLOADS = [
     '<script>alert("XSS")</script>',
@@ -30,6 +31,7 @@ const SecurityCommentsPage = () => {
     const [loading, setLoading] = useState(false);
     const [searchLoading, setSearchLoading] = useState(false);
     const [loadError, setLoadError] = useState<string | null>(null);
+    const [currentPage, setCurrentPage] = useState(1);
     const commentsRef = useRef<HTMLDivElement>(null);
 
     const loadComments = useCallback(async () => {
@@ -47,8 +49,6 @@ const SecurityCommentsPage = () => {
             setLoadError(err?.message || String(err) || "Failed to load comments");
         }
     }, []);
-
-    useEffect(() => { loadComments(); }, [loadComments]);
 
     const postComment = async () => {
         if (!commentInput.trim()) return;
@@ -175,20 +175,31 @@ element.textContent = userInput;`}</pre>
 
                 {/* Comments Display */}
                 <div ref={commentsRef}>
-                    <Container header={<Header variant="h2" actions={<Button onClick={loadComments}>Refresh</Button>}>All Comments</Header>}>
+                    <Container header={<Header variant="h2" actions={<Button onClick={() => { setCurrentPage(1); loadComments(); }}>Refresh</Button>}>All Comments ({comments.length})</Header>}>
                         <SpaceBetween size="s">
                             {loadError && <Alert type="error" header="Failed to load comments">{loadError}</Alert>}
                             {!loadError && comments.length === 0 ? (
-                                <Box color="text-body-secondary">No comments yet. Be the first to comment!</Box>
-                            ) : comments.map((comment, i) => (
-                                <Container key={i}>
-                                    <SpaceBetween size="xxs">
-                                        <Box variant="strong">{comment.username || "Anonymous"} <Box variant="small" display="inline" color="text-body-secondary">{new Date(comment.created_at).toLocaleString()}</Box></Box>
-                                        {/* VULNERABILITY: Stored XSS - rendering content without encoding */}
-                                        <div dangerouslySetInnerHTML={{ __html: comment.content }} />
-                                    </SpaceBetween>
-                                </Container>
-                            ))}
+                                <Box color="text-body-secondary">No comments yet. Click Refresh to load comments, or post one above.</Box>
+                            ) : (
+                                <>
+                                    {comments.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE).map((comment, i) => (
+                                        <Container key={i}>
+                                            <SpaceBetween size="xxs">
+                                                <Box variant="strong">{comment.username || "Anonymous"} <Box variant="small" display="inline" color="text-body-secondary">{new Date(comment.created_at).toLocaleString()}</Box></Box>
+                                                {/* VULNERABILITY: Stored XSS - rendering content without encoding */}
+                                                <div dangerouslySetInnerHTML={{ __html: comment.content }} />
+                                            </SpaceBetween>
+                                        </Container>
+                                    ))}
+                                    {comments.length > PAGE_SIZE && (
+                                        <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "12px", paddingTop: "8px" }}>
+                                            <Button disabled={currentPage <= 1} onClick={() => setCurrentPage(p => p - 1)}>Previous</Button>
+                                            <Box color="text-body-secondary">Page {currentPage} of {Math.ceil(comments.length / PAGE_SIZE)}</Box>
+                                            <Button disabled={currentPage >= Math.ceil(comments.length / PAGE_SIZE)} onClick={() => setCurrentPage(p => p + 1)}>Next</Button>
+                                        </div>
+                                    )}
+                                </>
+                            )}
                         </SpaceBetween>
                     </Container>
                 </div>
@@ -205,7 +216,7 @@ element.textContent = userInput;`}</pre>
                     </Alert>
                 )}
 
-                <Button variant="link" onClick={() => navigate("/crm/security")}>← Back to Security Dashboard</Button>
+                <Button variant="link" onClick={() => { navigate("/crm/security"); setTimeout(() => document.getElementById("vuln-demos")?.scrollIntoView({ behavior:"smooth" }), 100); }}>← Back to Security Dashboard</Button>
             </SpaceBetween>
         </ContentLayout>
     );

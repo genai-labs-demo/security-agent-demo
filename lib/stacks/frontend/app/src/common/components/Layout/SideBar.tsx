@@ -29,30 +29,24 @@ const SideBar = () => {
             }}
             items={[
                 {
-                    type: "section" as const,
-                    text: "Sales",
-                    items: [
-                        {
-                            type: "link" as const,
-                            text: "Pipeline",
-                            href: "/crm/pipeline",
-                        },
-                        {
-                            type: "link" as const,
-                            text: "Accounts",
-                            href: "/crm/accounts",
-                        },
-                        {
-                            type: "link" as const,
-                            text: "My Opportunities",
-                            href: "/crm/my-opportunities",
-                        },
-                        {
-                            type: "link" as const,
-                            text: "Team Performance",
-                            href: "/crm/team",
-                        }
-                    ]
+                    type: "link" as const,
+                    text: "Pipeline",
+                    href: "/crm/pipeline",
+                },
+                {
+                    type: "link" as const,
+                    text: "Accounts",
+                    href: "/crm/accounts",
+                },
+                {
+                    type: "link" as const,
+                    text: "My Opportunities",
+                    href: "/crm/my-opportunities",
+                },
+                {
+                    type: "link" as const,
+                    text: "Team Performance",
+                    href: "/crm/team",
                 },
                 { type: "divider" as const },
                 {
