@@ -1,4 +1,4 @@
-import { CfnOutput, StackProps } from "aws-cdk-lib";
+import { CfnOutput, Duration, StackProps } from "aws-cdk-lib";
 import { Certificate, CertificateValidation } from "aws-cdk-lib/aws-certificatemanager";
 import {
     AllowedMethods,
@@ -7,7 +7,10 @@ import {
     Function as CloudFrontFunction,
     FunctionCode,
     FunctionEventType,
+    HeadersFrameOption,
+    HeadersReferrerPolicy,
     OriginRequestPolicy,
+    ResponseHeadersPolicy,
     SecurityPolicyProtocol,
     SSLMethod,
     ViewerProtocolPolicy,
@@ -33,6 +36,7 @@ const HOSTED_ZONE_NAME = "jossai.people.aws.dev";
 export class Frontend extends CommonStack {
     public readonly websiteBucket: Bucket;
     public readonly distribution: Distribution;
+    private readonly securityHeadersPolicy: ResponseHeadersPolicy;
     public readonly urls: string[];
 
     constructor(scope: Construct, id: string, props?: StackProps) {
@@ -147,6 +151,33 @@ export class Frontend extends CommonStack {
             validation: CertificateValidation.fromDns(hostedZone),
         });
 
+        // Response Headers Policy for security headers
+        this.securityHeadersPolicy = new ResponseHeadersPolicy(this, "securityHeadersPolicy", {
+            securityHeadersBehavior: {
+                strictTransportSecurity: {
+                    accessControlMaxAge: Duration.seconds(31536000),
+                    includeSubdomains: true,
+                    override: true,
+                },
+                contentTypeOptions: {
+                    override: true,
+                },
+                frameOptions: {
+                    frameOption: HeadersFrameOption.DENY,
+                    override: true,
+                },
+                referrerPolicy: {
+                    referrerPolicy: HeadersReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN,
+                    override: true,
+                },
+                xssProtection: {
+                    protection: true,
+                    modeBlock: true,
+                    override: true,
+                },
+            },
+        });
+
         const distribution = new Distribution(this, "distribution", {
             defaultRootObject: "index.html",
             domainNames: [CUSTOM_DOMAIN],
@@ -156,6 +187,7 @@ export class Frontend extends CommonStack {
                 viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                 allowedMethods: AllowedMethods.ALLOW_ALL,
                 originRequestPolicy: OriginRequestPolicy.CORS_S3_ORIGIN,
+                responseHeadersPolicy: this.securityHeadersPolicy,
             },
             additionalBehaviors: {
                 "/assets/*": {
@@ -163,6 +195,7 @@ export class Frontend extends CommonStack {
                     viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                     allowedMethods: AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
                     originRequestPolicy: OriginRequestPolicy.CORS_S3_ORIGIN,
+                    responseHeadersPolicy: this.securityHeadersPolicy,
                 },
             },
             errorResponses: [
@@ -248,6 +281,7 @@ function handler(event) {
                 function: rewriteFunction,
                 eventType: FunctionEventType.VIEWER_REQUEST,
             }],
+            responseHeadersPolicy: this.securityHeadersPolicy,
         });
 
         NagSuppressions.addResourceSuppressions(rewriteFunction, [
