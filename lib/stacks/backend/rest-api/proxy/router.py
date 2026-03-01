@@ -24,7 +24,8 @@ class RouteInfo:
         resource_id: Optional[str] = None,
         query_params: Optional[Dict[str, str]] = None,
         body: Optional[Dict[str, Any]] = None,
-        path: Optional[str] = None
+        path: Optional[str] = None,
+        user_id: Optional[str] = None
     ):
         self.resource_type = resource_type
         self.http_method = http_method
@@ -32,12 +33,14 @@ class RouteInfo:
         self.query_params = query_params or {}
         self.body = body or {}
         self.path = path or ""
+        self.user_id = user_id
     
     def __repr__(self):
         return (f"RouteInfo(resource_type={self.resource_type}, "
                 f"http_method={self.http_method}, "
                 f"resource_id={self.resource_id}, "
-                f"query_params={self.query_params})")
+                f"query_params={self.query_params}, "
+                f"user_id={self.user_id})")
 
 
 def parse_api_gateway_event(event: Dict[str, Any]) -> RouteInfo:
@@ -81,6 +84,9 @@ def parse_api_gateway_event(event: Dict[str, Any]) -> RouteInfo:
         
         logger.info(f"Parsing route: {http_method} {path}")
         
+        # Extract authenticated user ID from Cognito authorizer claims
+        user_id = _extract_user_id(event)
+        
         # Extract resource type and ID from path
         resource_type, resource_id = _parse_path(path)
         
@@ -96,7 +102,8 @@ def parse_api_gateway_event(event: Dict[str, Any]) -> RouteInfo:
             resource_id=resource_id,
             query_params=query_params,
             body=body,
-            path=path
+            path=path,
+            user_id=user_id
         )
         
         logger.info(f"Parsed route: {route_info}")
@@ -105,6 +112,34 @@ def parse_api_gateway_event(event: Dict[str, Any]) -> RouteInfo:
     except Exception as e:
         logger.error(f"Failed to parse API Gateway event: {str(e)}")
         raise ValueError(f"Failed to parse API Gateway event: {str(e)}")
+
+
+def _extract_user_id(event: Dict[str, Any]) -> Optional[str]:
+    """
+    Extract the authenticated user ID from API Gateway event's Cognito authorizer claims.
+    
+    Args:
+        event: API Gateway event dictionary
+    
+    Returns:
+        User ID (Cognito sub claim) if authenticated, None otherwise
+    """
+    try:
+        # Extract user ID from Cognito authorizer claims
+        request_context = event.get('requestContext', {})
+        authorizer = request_context.get('authorizer', {})
+        claims = authorizer.get('claims', {})
+        user_id = claims.get('sub')  # Cognito user ID is in the 'sub' claim
+        
+        if user_id:
+            logger.info(f"Extracted authenticated user ID: {user_id}")
+        else:
+            logger.warning("No user ID found in authorizer claims (unauthenticated request)")
+        
+        return user_id
+    except Exception as e:
+        logger.error(f"Failed to extract user ID from event: {str(e)}")
+        return None
 
 
 def _parse_path(path: str) -> Tuple[str, Optional[str]]:

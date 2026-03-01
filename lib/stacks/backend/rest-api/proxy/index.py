@@ -139,6 +139,12 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Check if it's a custom error message from handlers
         error_str = str(e)
         
+        # Forbidden errors (403) - authorization failures
+        if "forbidden" in error_str.lower() or "do not have permission" in error_str.lower():
+            logger.warning(f"Authorization error in request {request_id}: {str(e)}")
+            response = {'statusCode': 403, 'headers': {'Content-Type': 'application/json'}, 'body': json.dumps({'error': str(e)})}
+            return process_cors(event, response)
+        
         # Not found errors (404)
         if "not found" in error_str.lower():
             resource_type = route_info.resource_type if 'route_info' in locals() else "Resource"

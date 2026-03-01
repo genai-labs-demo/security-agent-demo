@@ -79,12 +79,24 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
     return db_data
 
 
-def list_accounts(connection) -> List[Dict[str, Any]]:
+def _recalculate_health(connection, account_id: str) -> None:
+    """
+    Placeholder for health score recalculation logic.
+    In a production system, this would compute health_status and health_score
+    based on business metrics.
+    """
+    # This is a placeholder - the actual implementation would calculate
+    # health metrics based on opportunity pipeline, activity, etc.
+    pass
+
+
+def list_accounts(connection, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Query all accounts from the database.
     
     Args:
         connection: Database connection object
+        user_id: Authenticated user ID for authorization (filters by owner_id)
     
     Returns:
         List of account dictionaries in API format
@@ -105,10 +117,17 @@ def list_accounts(connection) -> List[Dict[str, Any]]:
                 last_activity_date, created_date, logo_url
             FROM accounts
             WHERE deleted_at IS NULL
-            ORDER BY name ASC
         """
         
-        cursor.execute(query)
+        params = []
+        # Add owner filter for authorization - users can only list their own accounts
+        if user_id:
+            query += " AND owner_id = %s"
+            params.append(user_id)
+        
+        query += " ORDER BY name ASC"
+        
+        cursor.execute(query, params)
         records = cursor.fetchall()
         cursor.close()
         
@@ -130,13 +149,14 @@ COMPUTED_FIELDS = {'health_status', 'health_score', 'opportunity_count', 'total_
 
 
 
-def get_account(connection, account_id: str) -> Optional[Dict[str, Any]]:
+def get_account(connection, account_id: str, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
     Query a single account by ID from the database.
     
     Args:
         connection: Database connection object
         account_id: Account ID to retrieve
+        user_id: Authenticated user ID for authorization (validates ownership)
     
     Returns:
         Account dictionary in API format, or None if not found
@@ -157,10 +177,16 @@ def get_account(connection, account_id: str) -> Optional[Dict[str, Any]]:
                 last_activity_date, created_date, logo_url
             FROM accounts
             WHERE id = %s AND deleted_at IS NULL
-        """
+            WHERE id = %s AND deleted_at IS NULL AND owner_id = %s
         
         cursor.execute(query, (account_id,))
-        record = cursor.fetchone()
+        # If user_id is not provided (e.g., internal operations), allow access without owner check
+        if user_id:
+            cursor.execute(query, (account_id, user_id))
+        else:
+            query = query.replace("AND owner_id = %s", "")
+            cursor.execute(query, (account_id,))
+        
         cursor.close()
         
         if not record:
@@ -181,13 +207,14 @@ def get_account(connection, account_id: str) -> Optional[Dict[str, Any]]:
         raise
 
 
-def create_account(connection, data: Dict[str, Any]) -> Dict[str, Any]:
+def create_account(connection, data: Dict[str, Any], user_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Insert a new account record into the database.
     
     Args:
         connection: Database connection object
         data: Account data in API format (camelCase)
+        user_id: Authenticated user ID (set as owner if not specified in data)
     
     Returns:
         Created account dictionary in API format
@@ -220,6 +247,11 @@ def create_account(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         if 'last_activity_date' not in db_data:
             db_data['last_activity_date'] = datetime.utcnow()
         
+        # Set owner_id to authenticated user if not already set
+        # This ensures users can only create accounts they own
+        if 'owner_id' not in db_data and user_id:
+            db_data['owner_id'] = user_id
+        
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
         # Build INSERT query dynamically based on provided fields
@@ -246,7 +278,7 @@ def create_account(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         _recalculate_health(connection, db_data['id'])
         
         # Re-fetch to include computed fields
-        account = get_account(connection, db_data['id'])
+        account = get_account(connection, db_data['id'], None)
         
         logger.info(f"Created account with ID: {db_data['id']}")
         return account
@@ -271,7 +303,7 @@ def create_account(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         raise
 
 
-def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def update_account(connection, account_id: str, data: Dict[str, Any], user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
     Update an existing account record in the database.
     
@@ -279,6 +311,7 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
         connection: Database connection object
         account_id: Account ID to update
         data: Partial account data in API format (camelCase)
+        user_id: Authenticated user ID for authorization (validates ownership)
     
     Returns:
         Updated account dictionary in API format, or None if not found
@@ -303,10 +336,24 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
             logger.warning("No fields to update")
             # Return current account
             return get_account(connection, account_id)
-        
+            return get_account(connection, account_id, user_id)
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
         # Build UPDATE query dynamically based on provided fields
+        # Verify ownership before allowing update
+        if user_id:
+            cursor.execute(
+                "SELECT owner_id FROM accounts WHERE id = %s AND deleted_at IS NULL",
+                (account_id,)
+            )
+            record = cursor.fetchone()
+            if not record:
+                cursor.close()
+                return None
+            if record['owner_id'] != user_id:
+                cursor.close()
+                raise Exception(f"Forbidden: You do not have permission to update this account")
+        
         set_clauses = [f"{col} = %s" for col in db_data.keys()]
         values = list(db_data.values())
         values.append(account_id)  # For WHERE clause
@@ -338,7 +385,7 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
         _recalculate_health(connection, account_id)
         
         # Re-fetch to include recomputed fields
-        account = get_account(connection, account_id)
+        account = get_account(connection, account_id, None)
         
         logger.info(f"Updated account: {account_id}")
         return account
@@ -363,7 +410,7 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
         raise
 
 
-def delete_account(connection, account_id: str) -> bool:
+def delete_account(connection, account_id: str, user_id: Optional[str] = None) -> bool:
     """
     Soft-delete an account record by marking it as deleted.
     The record is retained in the database for recovery purposes.
@@ -372,6 +419,7 @@ def delete_account(connection, account_id: str) -> bool:
     Args:
         connection: Database connection object
         account_id: Account ID to soft-delete
+        user_id: Authenticated user ID for authorization (validates ownership)
 
     Returns:
         True if account was soft-deleted, False if not found
@@ -386,14 +434,27 @@ def delete_account(connection, account_id: str) -> bool:
 
         # Check if account exists and is not already deleted
         cursor.execute(
-            "SELECT id FROM accounts WHERE id = %s AND (deleted_at IS NULL)",
-            (account_id,)
-        )
-        if not cursor.fetchone():
-            cursor.close()
+        # Also verify ownership if user_id is provided
+        if user_id:
+            cursor.execute(
+                "SELECT id, owner_id FROM accounts WHERE id = %s AND (deleted_at IS NULL)",
+                (account_id,)
+            )
+        else:
+            cursor.execute(
+                "SELECT id FROM accounts WHERE id = %s AND (deleted_at IS NULL)",
+                (account_id,)
+            )
+        row = cursor.fetchone()
+        if not row:
             logger.info(f"Account not found for deletion: {account_id}")
             return False
 
+        
+        # Verify ownership
+        if user_id and len(row) > 1 and row[1] != user_id:
+            cursor.close()
+            raise Exception(f"Forbidden: You do not have permission to delete this account")
         # Check for active (non-deleted) associated opportunities
         cursor.execute(
             "SELECT COUNT(*) as count FROM opportunities WHERE account_id = %s AND (deleted_at IS NULL)",
