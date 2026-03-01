@@ -407,7 +407,7 @@ def get_opportunity(connection, opportunity_id: str) -> Optional[Dict[str, Any]]
 def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Insert a new opportunity record into the database.
-    Validates that account_id and owner_id reference existing records.
+def create_opportunity(connection, data: Dict[str, Any], user_id: Optional[str] = None) -> Dict[str, Any]:
     
     Args:
         connection: Database connection object
@@ -415,6 +415,7 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     
     Returns:
         Created opportunity dictionary in API format
+        user_id: Optional authenticated user ID for audit logging
     
     Raises:
         Exception: If database insert fails or validation fails
@@ -423,7 +424,10 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         logger.info(f"Creating new opportunity: {data.get('name')}")
         
         # Map API format to database format
-        db_data = _map_api_to_db_format(data)
+        if user_id:
+            logger.info(f"Creating new opportunity: {data.get('name')} by user {user_id}")
+        else:
+            logger.info(f"Creating new opportunity: {data.get('name')}")
         
         # Validate amount bounds
         _validate_amount(db_data.get('amount'))
