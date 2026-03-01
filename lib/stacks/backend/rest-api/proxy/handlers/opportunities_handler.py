@@ -85,7 +85,8 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
 def _recalculate_account_aggregates(connection, account_id: str) -> None:
     """
     Recalculate and update the aggregate fields (opportunity_count, total_opportunity_value)
-    on the parent account after any opportunity create/update/delete.
+    on the parent account after any opportunity create/update/delete. This function must be
+    called BEFORE committing the main transaction to ensure ACID compliance.
     
     Args:
         connection: Database connection object
@@ -110,11 +111,10 @@ def _recalculate_account_aggregates(connection, account_id: str) -> None:
             WHERE accounts.id = %s
         """, (account_id, account_id))
         connection.commit()
-        logger.info(f"Recalculated aggregates for account {account_id}")
     except Exception as e:
         logger.error(f"Failed to recalculate aggregates for account {account_id}: {str(e)}")
         # Don't rollback here — let the caller handle transaction management
-    finally:
+        raise  # Propagate exception to trigger rollback in caller
         cursor.close()
 
 
@@ -477,15 +477,17 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         cursor.execute(query, values)
         record = cursor.fetchone()
         connection.commit()
-        cursor.close()
         
         # Map to API format
         opportunity = _map_opportunity_to_api_format(dict(record))
         
         # Recalculate parent account aggregates
-        _recalculate_account_aggregates(connection, db_data.get('account_id'))
+        # Recalculate parent account aggregates BEFORE commit to ensure atomicity
         
         logger.info(f"Created opportunity with ID: {opportunity['id']}")
+        # Commit both the opportunity insert and aggregate update atomically
+        connection.commit()
+        
         return opportunity
         
     except psycopg2.IntegrityError as e:
@@ -589,15 +591,17 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
             return None
         
         connection.commit()
-        cursor.close()
         
         # Map to API format
         opportunity = _map_opportunity_to_api_format(dict(record))
         
         # Recalculate parent account aggregates (handles amount or account changes)
-        _recalculate_account_aggregates(connection, record.get('account_id'))
+        # Recalculate parent account aggregates BEFORE commit to ensure atomicity
         
         logger.info(f"Updated opportunity: {opportunity_id}")
+        # Commit both the opportunity update and aggregate update atomically
+        connection.commit()
+        
         return opportunity
         
     except psycopg2.IntegrityError as e:
@@ -663,12 +667,14 @@ def delete_opportunity(connection, opportunity_id: str) -> bool:
             (opportunity_id,)
         )
         connection.commit()
-        cursor.close()
 
         # Recalculate parent account aggregates
-        _recalculate_account_aggregates(connection, account_id)
+        # Recalculate parent account aggregates BEFORE commit to ensure atomicity
 
         logger.info(f"Soft-deleted opportunity: {opportunity_id}")
+        # Commit both the opportunity deletion and aggregate update atomically
+        connection.commit()
+
         return True
 
     except psycopg2.Error as e:
