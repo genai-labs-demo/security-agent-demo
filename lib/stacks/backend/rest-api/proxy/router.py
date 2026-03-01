@@ -24,7 +24,8 @@ class RouteInfo:
         resource_id: Optional[str] = None,
         query_params: Optional[Dict[str, str]] = None,
         body: Optional[Dict[str, Any]] = None,
-        path: Optional[str] = None
+        path: Optional[str] = None,
+        user_id: Optional[str] = None
     ):
         self.resource_type = resource_type
         self.http_method = http_method
@@ -32,12 +33,59 @@ class RouteInfo:
         self.query_params = query_params or {}
         self.body = body or {}
         self.path = path or ""
+        self.user_id = user_id
     
     def __repr__(self):
         return (f"RouteInfo(resource_type={self.resource_type}, "
                 f"http_method={self.http_method}, "
                 f"resource_id={self.resource_id}, "
-                f"query_params={self.query_params})")
+                f"query_params={self.query_params}, "
+                f"user_id={self.user_id})")
+
+
+def extract_user_identity(event: Dict[str, Any]) -> Optional[str]:
+    """
+    Extract authenticated user identity from API Gateway requestContext.
+    
+    AWS Cognito JWT tokens are validated by API Gateway authorizer, and the
+    claims are made available in requestContext.authorizer.claims.
+    
+    Args:
+        event: API Gateway event dictionary
+    
+    Returns:
+        User ID (sub claim from JWT token) or None if not authenticated
+    
+    Example requestContext structure:
+        {
+            "requestContext": {
+                "authorizer": {
+                    "claims": {
+                        "sub": "e408f4f8-d0a1-70d7-c080-4701dd39748a",
+                        "cognito:username": "e408f4f8-d0a1-70d7-c080-4701dd39748a",
+                        "email": "user_test@example.com"
+                    }
+                }
+            }
+        }
+    """
+    try:
+        request_context = event.get('requestContext', {})
+        authorizer = request_context.get('authorizer', {})
+        claims = authorizer.get('claims', {})
+        
+        # The 'sub' claim contains the unique user ID from Cognito
+        user_id = claims.get('sub')
+        
+        if user_id:
+            logger.info(f"Extracted user identity: {user_id}")
+        else:
+            logger.warning("No user identity found in requestContext")
+        
+        return user_id
+    except Exception as e:
+        logger.error(f"Failed to extract user identity: {str(e)}")
+        return None
 
 
 def parse_api_gateway_event(event: Dict[str, Any]) -> RouteInfo:
@@ -90,13 +138,17 @@ def parse_api_gateway_event(event: Dict[str, Any]) -> RouteInfo:
         # Extract and parse request body
         body = _parse_request_body(event)
         
+        # Extract authenticated user identity from JWT token
+        user_id = extract_user_identity(event)
+        
         route_info = RouteInfo(
             resource_type=resource_type,
             http_method=http_method,
             resource_id=resource_id,
             query_params=query_params,
             body=body,
-            path=path
+            path=path,
+            user_id=user_id
         )
         
         logger.info(f"Parsed route: {route_info}")

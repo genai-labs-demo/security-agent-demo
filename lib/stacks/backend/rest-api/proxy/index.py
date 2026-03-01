@@ -29,6 +29,7 @@ from error_handler import (
     handle_server_error,
     parse_database_error
 )
+from authorization import AuthorizationError
 
 # CloudWatch client for custom metrics
 cloudwatch = boto3.client('cloudwatch')
@@ -134,6 +135,12 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         logger.warning(f"Validation error in request {request_id}: {str(e)}")
         response = handle_validation_error(str(e))
         return process_cors(event, response)
+    
+    except AuthorizationError as e:
+        # Authorization errors (403 Forbidden)
+        logger.warning(f"Authorization error in request {request_id}: {str(e)}")
+        response = {'statusCode': 403, 'headers': {'Content-Type': 'application/json'}, 'body': json.dumps({'error': str(e)})}
+        return process_cors(event, response)
         
     except Exception as e:
         # Check if it's a custom error message from handlers
@@ -185,24 +192,27 @@ def execute_operation(connection, route_info, operation: str) -> Any:
     logger.info(f"Executing {operation} operation on {resource_type}")
     
     # Route to accounts handler
+    # Extract user_id for authorization
+    user_id = route_info.user_id
+    
     if resource_type == 'accounts':
         if operation == 'list':
             return accounts_handler.list_accounts(connection)
-        elif operation == 'get':
+            return accounts_handler.list_accounts(connection, user_id=user_id)
             result = accounts_handler.get_account(connection, resource_id)
-            if result is None:
+            result = accounts_handler.get_account(connection, resource_id, user_id=user_id)
                 raise ValueError(f"Account with id {resource_id} not found")
             return result
         elif operation == 'create':
             return accounts_handler.create_account(connection, body)
-        elif operation == 'update':
+            return accounts_handler.create_account(connection, body, user_id=user_id)
             result = accounts_handler.update_account(connection, resource_id, body)
-            if result is None:
+            result = accounts_handler.update_account(connection, resource_id, body, user_id=user_id)
                 raise ValueError(f"Account with id {resource_id} not found")
             return result
         elif operation == 'delete':
             success = accounts_handler.delete_account(connection, resource_id)
-            if not success:
+            success = accounts_handler.delete_account(connection, resource_id, user_id=user_id)
                 raise ValueError(f"Account with id {resource_id} not found")
             return None
     
@@ -218,23 +228,23 @@ def execute_operation(connection, route_info, operation: str) -> Any:
             # If search query is provided, perform search instead of list
             if search_query:
                 return opportunities_handler.search_opportunities(connection, search_query, account_id)
-            else:
+                return opportunities_handler.search_opportunities(connection, search_query, user_id=user_id, account_id=account_id)
                 return opportunities_handler.list_opportunities(connection, account_id)
-        elif operation == 'get':
+                return opportunities_handler.list_opportunities(connection, user_id=user_id, account_id=account_id)
             result = opportunities_handler.get_opportunity(connection, resource_id)
-            if result is None:
+            result = opportunities_handler.get_opportunity(connection, resource_id, user_id=user_id)
                 raise ValueError(f"Opportunity with id {resource_id} not found")
             return result
         elif operation == 'create':
             return opportunities_handler.create_opportunity(connection, body)
-        elif operation == 'update':
+            return opportunities_handler.create_opportunity(connection, body, user_id=user_id)
             result = opportunities_handler.update_opportunity(connection, resource_id, body)
-            if result is None:
+            result = opportunities_handler.update_opportunity(connection, resource_id, body, user_id=user_id)
                 raise ValueError(f"Opportunity with id {resource_id} not found")
             return result
         elif operation == 'delete':
             success = opportunities_handler.delete_opportunity(connection, resource_id)
-            if not success:
+            success = opportunities_handler.delete_opportunity(connection, resource_id, user_id=user_id)
                 raise ValueError(f"Opportunity with id {resource_id} not found")
             return None
     
