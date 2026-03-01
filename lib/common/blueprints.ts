@@ -21,8 +21,8 @@ export class LogGroupInjector implements IPropertyInjector {
 
     public inject(originalProps: LogGroupProps): LogGroupProps {
         return {
-            retention: RetentionDays.THREE_MONTHS,
-            removalPolicy: RemovalPolicy.DESTROY,
+            retention: RetentionDays.ONE_YEAR,
+            removalPolicy: RemovalPolicy.RETAIN,
             ...originalProps,
         };
     }
@@ -76,10 +76,10 @@ export class BucketInjector implements IPropertyInjector {
             ...(originalProps?.serverAccessLogsBucket && {
                 serverAccessLogsPrefix: `${context.id}/`,
             }),
-            autoDeleteObjects: true,
+            autoDeleteObjects: false,
             ...originalProps,
-            ...((originalProps?.autoDeleteObjects ?? true) && {
-                removalPolicy: RemovalPolicy.DESTROY,
+            ...((originalProps?.autoDeleteObjects ?? false) && {
+                removalPolicy: originalProps?.autoDeleteObjects ? RemovalPolicy.DESTROY : RemovalPolicy.RETAIN,
             }),
             blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
             enforceSSL: true,
