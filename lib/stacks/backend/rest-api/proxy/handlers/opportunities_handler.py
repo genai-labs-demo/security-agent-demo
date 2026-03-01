@@ -87,6 +87,9 @@ def _recalculate_account_aggregates(connection, account_id: str) -> None:
     Recalculate and update the aggregate fields (opportunity_count, total_opportunity_value)
     on the parent account after any opportunity create/update/delete.
     
+    Uses row-level locking (SELECT FOR UPDATE) to prevent concurrent update race conditions
+    and ensure aggregate consistency under high concurrency.
+    
     Args:
         connection: Database connection object
         account_id: Account ID whose aggregates need recalculation
@@ -96,24 +99,48 @@ def _recalculate_account_aggregates(connection, account_id: str) -> None:
     
     cursor = connection.cursor()
     try:
+        # Step 1: Acquire row-level lock on the account to prevent concurrent updates
+        # This ensures only one transaction can recalculate aggregates at a time
+        # for a given account, preventing lost update race conditions (CWE-362)
+        cursor.execute("""
+            SELECT id FROM accounts 
+            WHERE id = %s 
+            FOR UPDATE
+        """, (account_id,))
+        
+        if not cursor.fetchone():
+            logger.warning(f"Account {account_id} not found for aggregate recalculation")
+            cursor.close()
+            return
+        
+        # Step 2: Calculate aggregates from opportunities while holding the lock
+        cursor.execute("""
+            SELECT
+                COUNT(*)::int AS cnt,
+                COALESCE(SUM(amount), 0) AS total
+            FROM opportunities
+            WHERE account_id = %s AND deleted_at IS NULL
+        """, (account_id,))
+        
+        result = cursor.fetchone()
+        if result:
+            opp_count, opp_total = result
+        else:
+            opp_count, opp_total = 0, 0
+        
+        # Step 3: Update the locked account row with calculated aggregates
         cursor.execute("""
             UPDATE accounts
-            SET opportunity_count = sub.cnt,
-                total_opportunity_value = sub.total
-            FROM (
-                SELECT
-                    COUNT(*)::int AS cnt,
-                    COALESCE(SUM(amount), 0) AS total
-                FROM opportunities
-                WHERE account_id = %s AND deleted_at IS NULL
-            ) sub
-            WHERE accounts.id = %s
-        """, (account_id, account_id))
+            SET opportunity_count = %s,
+                total_opportunity_value = %s
+            WHERE id = %s
+        """, (opp_count, opp_total, account_id))
+        
         connection.commit()
-        logger.info(f"Recalculated aggregates for account {account_id}")
+        logger.info(f"Recalculated aggregates for account {account_id}: {opp_count} opps, ${opp_total}")
     except Exception as e:
         logger.error(f"Failed to recalculate aggregates for account {account_id}: {str(e)}")
-        # Don't rollback here — let the caller handle transaction management
+        connection.rollback()
     finally:
         cursor.close()
 
