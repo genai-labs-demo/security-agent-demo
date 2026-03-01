@@ -110,6 +110,11 @@ def _initialize_connection_pool() -> psycopg2.pool.SimpleConnectionPool:
         # Get database credentials
         credentials = _get_database_credentials()
         
+        # Configure statement timeout to prevent resource exhaustion from complex queries
+        # This limits any single SQL statement to 5 seconds of execution time
+        # Helps protect against denial of service via expensive pattern matching operations
+        statement_timeout_ms = int(os.environ.get('DATABASE_STATEMENT_TIMEOUT_MS', '5000'))
+        
         # Create connection pool
         _connection_pool = psycopg2.pool.SimpleConnectionPool(
             minconn=1,
@@ -119,7 +124,9 @@ def _initialize_connection_pool() -> psycopg2.pool.SimpleConnectionPool:
             host=credentials['host'],
             port=credentials['port'],
             database=credentials['dbname'],
-            connect_timeout=10
+            connect_timeout=10,
+            # Set statement_timeout for all queries to prevent resource exhaustion
+            options=f'-c statement_timeout={statement_timeout_ms}ms'
         )
         
         logger.info("Connection pool initialized successfully")
