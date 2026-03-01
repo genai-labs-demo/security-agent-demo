@@ -679,3 +679,65 @@ def delete_opportunity(connection, opportunity_id: str) -> bool:
         connection.rollback()
         logger.error(f"Unexpected error soft-deleting opportunity {opportunity_id}: {str(e)}")
         raise
+
+
+def bulk_delete_opportunities(connection, account_id: str) -> int:
+    """
+    Soft-delete all active opportunities for a given account.
+    This is used for cascade deletion when deleting an account.
+    All opportunities are soft-deleted in a single transaction.
+
+    Args:
+        connection: Database connection object
+        account_id: Account ID whose opportunities should be deleted
+
+    Returns:
+        Number of opportunities that were soft-deleted
+
+    Raises:
+        Exception: If database update fails
+    """
+    try:
+        logger.info(f"Bulk soft-deleting opportunities for account: {account_id}")
+
+        cursor = connection.cursor()
+
+        # Get count of active opportunities before deletion
+        cursor.execute(
+            "SELECT COUNT(*) FROM opportunities WHERE account_id = %s AND deleted_at IS NULL",
+            (account_id,)
+        )
+        result = cursor.fetchone()
+        count = result[0] if result else 0
+
+        if count == 0:
+            cursor.close()
+            logger.info(f"No active opportunities found for account {account_id}")
+            return 0
+
+        # Soft-delete all active opportunities for this account
+        cursor.execute(
+            """
+            UPDATE opportunities 
+            SET deleted_at = NOW() 
+            WHERE account_id = %s AND deleted_at IS NULL
+            """,
+            (account_id,)
+        )
+        connection.commit()
+        cursor.close()
+
+        # Recalculate parent account aggregates (should be zero now)
+        _recalculate_account_aggregates(connection, account_id)
+
+        logger.info(f"Bulk soft-deleted {count} opportunities for account {account_id}")
+        return count
+
+    except psycopg2.Error as e:
+        connection.rollback()
+        logger.error(f"Database error bulk-deleting opportunities for account {account_id}: {str(e)}")
+        raise Exception(f"Failed to bulk delete opportunities: {str(e)}")
+    except Exception as e:
+        connection.rollback()
+        logger.error(f"Unexpected error bulk-deleting opportunities for account {account_id}: {str(e)}")
+        raise
