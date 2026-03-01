@@ -18,6 +18,7 @@ import boto3
 from router import parse_api_gateway_event, validate_route, get_operation_type
 from db_connection import get_database_connection, return_database_connection
 from handlers import accounts_handler, opportunities_handler, team_members_handler, industries_handler
+from handlers import accounts_restore, opportunities_restore
 from handlers import security_handler
 from s3_integration import enhance_with_images
 from cors_handler import process_cors
@@ -189,6 +190,15 @@ def execute_operation(connection, route_info, operation: str) -> Any:
         if operation == 'list':
             return accounts_handler.list_accounts(connection)
         elif operation == 'get':
+        elif operation == 'list_deleted':
+            return accounts_restore.list_deleted_accounts(connection)
+        elif operation == 'restore':
+            # Extract actual ID from "id/restore" format
+            actual_id = resource_id.replace('/restore', '')
+            result = accounts_restore.restore_account(connection, actual_id)
+            if result is None:
+                raise ValueError(f"Account with id {actual_id} not found or not deleted")
+            return result
             result = accounts_handler.get_account(connection, resource_id)
             if result is None:
                 raise ValueError(f"Account with id {resource_id} not found")
@@ -219,6 +229,15 @@ def execute_operation(connection, route_info, operation: str) -> Any:
             if search_query:
                 return opportunities_handler.search_opportunities(connection, search_query, account_id)
             else:
+        elif operation == 'list_deleted':
+            return opportunities_restore.list_deleted_opportunities(connection, account_id)
+        elif operation == 'restore':
+            # Extract actual ID from "id/restore" format
+            actual_id = resource_id.replace('/restore', '')
+            result = opportunities_restore.restore_opportunity(connection, actual_id)
+            if result is None:
+                raise ValueError(f"Opportunity with id {actual_id} not found or not deleted")
+            return result
                 return opportunities_handler.list_opportunities(connection, account_id)
         elif operation == 'get':
             result = opportunities_handler.get_opportunity(connection, resource_id)
@@ -350,6 +369,7 @@ def format_success_response(result: Any, route_info, operation: str) -> Dict[str
     elif operation == 'delete':
         status_code = 204
     else:
+        # All other operations including restore return 200
         status_code = 200
     
     # For delete operations, return empty response

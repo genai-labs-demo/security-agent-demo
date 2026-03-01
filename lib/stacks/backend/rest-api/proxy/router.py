@@ -117,6 +117,8 @@ def _parse_path(path: str) -> Tuple[str, Optional[str]]:
         - /opportunities -> (opportunities, None)
         - /opportunities/456 -> (opportunities, 456)
         - /team-members -> (team-members, None)
+        - /accounts/{id}/restore -> (accounts, {id}/restore)
+        - /accounts/deleted -> (accounts, deleted)
         - /team-members/789 -> (team-members, 789)
         - /industries -> (industries, None)
         - /industries/tech -> (industries, tech)
@@ -160,15 +162,27 @@ def _parse_path(path: str) -> Tuple[str, Optional[str]]:
             # For search operations, we don't set resource_id
             # The search logic will be handled by query parameters
             resource_id = None
+        elif second_part == 'deleted':
+            # For deleted listings like /accounts/deleted or /opportunities/deleted
+            resource_id = 'deleted'
         elif resource_type == 'security-tools' and second_part in ('ping', 'nslookup'):
             # For security-tools/ping and security-tools/nslookup, treat as special operations
             resource_id = None
         else:
             resource_id = second_part
+            
+            # Check for third part (e.g., /accounts/{id}/restore)
+            if len(parts) > 2:
+                third_part = parts[2]
+                if third_part == 'restore':
+                    # Mark this as a restore operation
+                    resource_id = f"{second_part}/restore"
+                else:
+                    raise ValueError(f"Invalid path: unsupported operation. Expected format: /{resource_type}/{{id}}/restore")
     
     # Validate no extra path segments
-    if len(parts) > 2:
-        raise ValueError(f"Invalid path: too many segments. Expected format: /{resource_type} or /{resource_type}/{{id}} or /{resource_type}/search")
+    if len(parts) > 3:
+        raise ValueError(f"Invalid path: too many segments. Expected format: /{resource_type}, /{resource_type}/{{id}}, /{resource_type}/search, /{resource_type}/deleted, or /{resource_type}/{{id}}/restore")
     
     return resource_type, resource_id
 
@@ -318,10 +332,13 @@ def validate_route(route_info: RouteInfo) -> None:
     
     # POST should not have resource ID (creating new resource)
     # Exception: security-profile POST doesn't need ID validation
-    if method == 'POST' and resource_id is not None and resource_type != 'security-profile':
-        raise ValueError(f"POST requests should not include resource ID in path")
-    
-    # PUT and DELETE must have resource ID
+    # POST validation: normally should not have resource ID (creating new resource)
+    # Exceptions: security-profile, and restore operations
+    if method == 'POST' and resource_id is not None:
+        # Allow restore operations (e.g., POST /accounts/123/restore)
+        is_restore = isinstance(resource_id, str) and resource_id.endswith('/restore')
+        if resource_type != 'security-profile' and not is_restore:
+            raise ValueError(f"POST requests should not include resource ID in path")
     if method in ['PUT', 'DELETE'] and resource_id is None:
         raise ValueError(f"{method} requests must include resource ID in path")
     
