@@ -12,6 +12,64 @@ HEALTH_STATUS_VALUES = ['Green', 'Yellow', 'Red']
 OPPORTUNITY_STAGE_VALUES = ['Launched', 'Qualified', 'Proof of Concept', 'Negotiation', 'Closed Won', 'Closed Lost']
 FORECAST_CATEGORY_VALUES = ['Pipeline', 'Best Case', 'Commit', 'Closed']
 
+# Define valid stage transitions for opportunity workflow
+# Maps each stage to the list of stages it can transition to
+STAGE_TRANSITIONS = {
+    'Launched': ['Qualified', 'Proof of Concept', 'Negotiation', 'Closed Won', 'Closed Lost'],
+    'Qualified': ['Proof of Concept', 'Negotiation', 'Closed Won', 'Closed Lost'],
+    'Proof of Concept': ['Negotiation', 'Closed Won', 'Closed Lost'],
+    'Negotiation': ['Closed Won', 'Closed Lost'],
+    'Closed Won': [],  # Terminal state - no transitions allowed
+    'Closed Lost': []  # Terminal state - no transitions allowed
+}
+
+# Terminal states that should not regress
+TERMINAL_STAGES = ['Closed Won', 'Closed Lost']
+
+
+def validate_stage_transition(current_stage: str, new_stage: str) -> None:
+    """
+    Validate that a stage transition is allowed according to business workflow rules.
+    
+    Args:
+        current_stage: Current opportunity stage
+        new_stage: Requested new stage
+    
+    Raises:
+        ValidationError: If the transition is not allowed
+    """
+    if current_stage == new_stage:
+        # Same stage is always valid (no-op update)
+        return
+    
+    if current_stage not in STAGE_TRANSITIONS:
+        raise ValidationError(
+            f"Invalid current stage: '{current_stage}'",
+            field='stage'
+        )
+    
+    if new_stage not in OPPORTUNITY_STAGE_VALUES:
+        raise ValidationError(
+            f"Invalid target stage: '{new_stage}'",
+            field='stage'
+        )
+    
+    allowed_transitions = STAGE_TRANSITIONS[current_stage]
+    
+    if new_stage not in allowed_transitions:
+        if current_stage in TERMINAL_STAGES:
+            raise ValidationError(
+                f"Cannot transition from terminal stage '{current_stage}' to '{new_stage}'. "
+                f"Closed opportunities cannot be moved back to earlier pipeline stages.",
+                field='stage'
+            )
+        else:
+            raise ValidationError(
+                f"Invalid stage transition from '{current_stage}' to '{new_stage}'. "
+                f"Allowed transitions from '{current_stage}': {', '.join(allowed_transitions) if allowed_transitions else 'none'}",
+                field='stage'
+            )
+
 # Email validation regex pattern
 EMAIL_PATTERN = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
 
