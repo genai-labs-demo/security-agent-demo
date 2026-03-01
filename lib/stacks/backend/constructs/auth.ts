@@ -1,4 +1,4 @@
-import { Duration } from "aws-cdk-lib";
+import { Duration, RemovalPolicy } from "aws-cdk-lib";
 import {
     AccountRecovery,
     ClientAttributes,
@@ -37,6 +37,8 @@ export class Auth extends Construct {
 
         // @export {"replace": "FederateUserPool", "with": "UserPool"}
         const userPool = new FederateUserPool(this, "userPool", {
+            // Explicitly set RemovalPolicy to RETAIN to prevent accidental data loss
+            removalPolicy: RemovalPolicy.RETAIN,
             // @export {"replace": "false,", "with": "true,"}
             selfSignUpEnabled: false,
             signInAliases: {
