@@ -10,7 +10,7 @@ Vulnerability inventory (matches pen-test target set):
   4. DOM-based / Reflected XSS — GET /security-xss-page?name=...  (reflected in HTML)
   5. Command Injection #1   — POST /security-tools/ping   (shell=True with user input)
   6. Command Injection #2   — POST /security-tools/ping   (pipe / semicolon chaining)
-  7. Mass Assignment        — POST /security-comments     (author_name & role accepted from body)
+  7. Mass Assignment        — POST /security-comments     [FIXED: field whitelisting implemented]
   8. Stored XSS (HTML)      — GET /security-xss-comments  (renders stored comments as HTML for pen-test detection)
   9. Reflected XSS (HTML)   — GET /security-xss-search?q= (reflects search query in HTML for pen-test detection)
 """
@@ -174,8 +174,8 @@ def list_security_profiles(connection):
 def create_security_comment(connection, body):
     """
     POST /security-comments
-    VULNERABILITY 3: Stored XSS — stores unsanitized user input.
-    VULNERABILITY 7: Mass Assignment — accepts author_name and role from body.
+    VULNERABILITY 3: Stored XSS — stores unsanitized user input (still present).
+    FIXED: Mass Assignment vulnerability has been remediated with field whitelisting.
     """
     user_id = body.get("user_id")
     content = body.get("content")
@@ -183,30 +183,32 @@ def create_security_comment(connection, body):
     if not user_id or not content:
         return {"success": False, "error": "user_id and content are required"}
 
-    # VULNERABILITY: Mass Assignment — accept author_name and role from request body
-    author_name = body.get("author_name")
-    author_role = body.get("role")
+    # SECURITY FIX: Implement field whitelisting - reject author_name and role from request body
+    # Only accept user_id and content fields. Author metadata is derived from security_users table.
+    disallowed_fields = []
+    if "author_name" in body:
+        disallowed_fields.append("author_name")
+    if "role" in body:
+        disallowed_fields.append("role")
+    
+    if disallowed_fields:
+        return {
+            "success": False,
+            "error": "Field validation failed",
+            "message": f"The following fields are not allowed: {', '.join(disallowed_fields)}. These fields are derived from the authenticated user profile."
+        }
 
     cursor = connection.cursor()
     try:
         logger.info(f"[VULNERABLE] Storing unsanitized comment: {content}")
 
-        if author_name or author_role:
-            # Mass Assignment: if attacker supplies author_name or role, persist them
-            logger.info(f"[VULNERABLE] Mass assignment — author_name={author_name}, role={author_role}")
-            cursor.execute(
-                """INSERT INTO security_comments (user_id, content, author_name, author_role, created_at)
-                   VALUES (%s, %s, %s, %s, NOW())
-                   RETURNING id, user_id, content, author_name, author_role, created_at""",
-                (user_id, content, author_name, author_role),
-            )
-        else:
-            cursor.execute(
-                """INSERT INTO security_comments (user_id, content, created_at)
-                   VALUES (%s, %s, NOW())
-                   RETURNING id, user_id, content, author_name, author_role, created_at""",
-                (user_id, content),
-            )
+        # Only insert whitelisted fields (user_id and content)
+        cursor.execute(
+            """INSERT INTO security_comments (user_id, content, created_at)
+               VALUES (%s, %s, NOW())
+               RETURNING id, user_id, content, created_at""",
+            (user_id, content),
+        )
         connection.commit()
         columns = [desc[0] for desc in cursor.description]
         row = dict(zip(columns, cursor.fetchone()))
@@ -217,16 +219,12 @@ def create_security_comment(connection, body):
         is_xss = _detect_xss(content)
         is_mass = bool(author_name or author_role)
 
-        result = {"success": True, "data": row}
         if is_xss:
             result["message"] = "Stored XSS Detected"
             result["educational"] = _get_educational_content("xss_stored")
         if is_mass:
             result["message"] = result.get("message", "") + " | Mass Assignment Detected"
-            result["educational_mass_assignment"] = _get_educational_content("mass_assignment")
-        if not is_xss and not is_mass:
-            result["message"] = "Comment created successfully"
-        return result
+        else:
 
     except Exception as e:
         connection.rollback()
@@ -236,7 +234,6 @@ def create_security_comment(connection, body):
         cursor.close()
 
 
-def list_security_comments(connection):
     """
     GET /security-comments
     VULNERABILITY: Stored XSS — returns unsanitized content.
