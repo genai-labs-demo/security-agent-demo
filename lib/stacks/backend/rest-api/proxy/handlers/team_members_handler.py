@@ -203,7 +203,7 @@ def create_team_member(connection, data: Dict[str, Any]) -> Dict[str, Any]:
             )
             if cursor.fetchone():
                 cursor.close()
-                raise Exception(f"Email already exists: {db_data['email']}")
+                raise Exception("Email already exists")
         
         # Build INSERT query dynamically based on provided fields
         columns = list(db_data.keys())
@@ -234,7 +234,7 @@ def create_team_member(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         logger.error(f"Integrity error creating team member: {str(e)}")
         # Check for unique constraint violation on email
         if 'unique' in str(e).lower() and 'email' in str(e).lower():
-            raise Exception(f"Email already exists")
+            raise Exception("Email already exists")
         raise Exception(f"Failed to create team member: constraint violation")
     except psycopg2.Error as e:
         connection.rollback()
@@ -289,7 +289,7 @@ def update_team_member(connection, member_id: str, data: Dict[str, Any]) -> Opti
             )
             if cursor.fetchone():
                 cursor.close()
-                raise Exception(f"Email already exists: {db_data['email']}")
+                raise Exception("Email already exists")
         
         # Build UPDATE query dynamically based on provided fields
         set_clauses = [f"{col} = %s" for col in db_data.keys()]
@@ -328,7 +328,7 @@ def update_team_member(connection, member_id: str, data: Dict[str, Any]) -> Opti
         logger.error(f"Integrity error updating team member {member_id}: {str(e)}")
         # Check for unique constraint violation on email
         if 'unique' in str(e).lower() and 'email' in str(e).lower():
-            raise Exception(f"Email already exists")
+            raise Exception("Email already exists")
         raise Exception(f"Failed to update team member: constraint violation")
     except psycopg2.Error as e:
         connection.rollback()
