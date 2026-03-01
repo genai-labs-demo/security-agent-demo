@@ -85,7 +85,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             start_time = time.time()
             
             # Route to appropriate handler and execute operation
-            result = execute_operation(connection, route_info, operation)
+            result = execute_operation(connection, route_info, operation, event)
             
             # Calculate and publish search latency metrics
             elapsed_time = (time.time() - start_time) * 1000  # Convert to milliseconds
@@ -162,7 +162,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         return process_cors(event, response)
 
 
-def execute_operation(connection, route_info, operation: str) -> Any:
+def execute_operation(connection, route_info, operation: str, event: Dict[str, Any]) -> Any:
     """
     Execute the appropriate CRUD operation based on route information.
     
@@ -170,6 +170,7 @@ def execute_operation(connection, route_info, operation: str) -> Any:
         connection: Database connection object
         route_info: Parsed route information
         operation: Operation type ('list', 'get', 'create', 'update', 'delete')
+        event: Original API Gateway event (for authentication)
         
     Returns:
         Operation result (record, list of records, or boolean)
@@ -277,9 +278,9 @@ def execute_operation(connection, route_info, operation: str) -> Any:
         # Support path parameter, query parameter, or POST body for user ID
         user_id = resource_id or query_params.get('userId') or body.get('user_id')
         if user_id:
-            return security_handler.get_security_profile(connection, str(user_id))
+            return security_handler.get_security_profile(connection, str(user_id), event)
         else:
-            return security_handler.list_security_profiles(connection)
+            return security_handler.list_security_profiles(connection, event)
     
     # Route to security comments handler (XSS demo)
     elif resource_type == 'security-comments':
@@ -343,14 +344,28 @@ def format_success_response(result: Any, route_info, operation: str) -> Dict[str
         API Gateway response dictionary
     """
     resource_type = route_info.resource_type
-    
-    # Determine status code based on operation
-    if operation == 'create':
-        status_code = 201
-    elif operation == 'delete':
-        status_code = 204
+    # Handle security endpoints that return custom status codes (for auth errors)
+    if isinstance(result, dict) and 'status_code' in result:
+        custom_status = result.pop('status_code')
+        # If it's an error status code, format as error response
+        if custom_status >= 400:
+            return {
+                'statusCode': custom_status,
+                'headers': {'Content-Type': 'application/json'},
+                'body': json.dumps(result)
+            }
+        # Otherwise use the custom status for success response
+        status_code = custom_status
     else:
-        status_code = 200
+        # Determine status code based on operation
+        if operation == 'create':
+            status_code = 201
+        elif operation == 'delete':
+            status_code = 204
+        else:
+            status_code = 200
+    
+    
     
     # For delete operations, return empty response
     if operation == 'delete':

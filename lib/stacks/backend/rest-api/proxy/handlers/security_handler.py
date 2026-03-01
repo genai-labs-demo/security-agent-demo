@@ -16,6 +16,7 @@ Vulnerability inventory (matches pen-test target set):
 """
 
 import json
+import base64
 import logging
 import subprocess
 from datetime import datetime
@@ -96,15 +97,87 @@ def _get_educational_content(vuln_type):
 
 
 # ============================================================
+# Authorization functions for IDOR remediation
+# ============================================================
+
+def extract_claims_from_jwt(gateway_event):
+    """Decode JWT token from request headers and extract claims."""
+    if gateway_event is None:
+        return None
+    
+    request_headers = gateway_event.get('headers', {})
+    auth_value = request_headers.get('Authorization', request_headers.get('authorization'))
+    
+    if auth_value is None or not auth_value.startswith('Bearer '):
+        return None
+    
+    token_string = auth_value[7:]
+    token_parts = token_string.split('.')
+    
+    if len(token_parts) != 3:
+        return None
+    
+    try:
+        payload_part = token_parts[1]
+        remainder = len(payload_part) % 4
+        if remainder != 0:
+            payload_part = payload_part + ('=' * (4 - remainder))
+        
+        decoded_bytes = base64.urlsafe_b64decode(payload_part)
+        payload_json = json.loads(decoded_bytes)
+        
+        user_subject = payload_json.get('sub')
+        cognito_groups = payload_json.get('cognito:groups', [])
+        custom_role = payload_json.get('role', 'user')
+        
+        effective_role = 'admin' if 'admin' in cognito_groups else custom_role
+        
+        return {'user_subject': user_subject, 'effective_role': effective_role}
+    except Exception:
+        return None
+
+
+def is_authorized_for_profile(db_connection, claims, target_id):
+    """Determine if the user from claims can view target_id profile."""
+    if claims is None:
+        return (False, 401, "Authentication is required")
+    
+    db_cursor = db_connection.cursor()
+    db_cursor.execute("SELECT id, role FROM security_users WHERE cognito_sub = %s", 
+                      (claims['user_subject'],))
+    query_result = db_cursor.fetchone()
+    db_cursor.close()
+    
+    if query_result is None:
+        return (False, 403, "User not found in database")
+    
+    requester_database_id = query_result[0]
+    requester_database_role = query_result[1]
+    is_administrator = (requester_database_role == 'admin') or (claims['effective_role'] == 'admin')
+    is_same_person = (str(requester_database_id) == str(target_id))
+    
+    return (is_same_person or is_administrator, 403 if not (is_same_person or is_administrator) else 200, 
+            "Access granted" if (is_same_person or is_administrator) else "Not authorized")
+
+
+# ============================================================
 # 1. SQL Injection + 2. IDOR — Profile endpoint
 # ============================================================
 
-def get_security_profile(connection, user_id):
+def get_security_profile(connection, user_id, event=None):
     """
     GET /security-profile/{userId}
     VULNERABILITY 1: SQL Injection via string concatenation.
-    VULNERABILITY 2: IDOR — any sequential ID returns data, no auth check.
+    REMEDIATED: Authorization checks prevent IDOR exploitation.
     """
+    # Perform authorization check
+    token_claims = extract_claims_from_jwt(event)
+    authorized, status_code, message = is_authorized_for_profile(connection, token_claims, user_id)
+    
+    if not authorized:
+        logger.warning(f"Blocked unauthorized profile access: {message}")
+        return {"success": False, "error": message, "status_code": status_code}
+    
     cursor = connection.cursor()
     try:
         # VULNERABILITY: SQL Injection - string concatenation instead of parameterized query
@@ -133,7 +206,7 @@ def get_security_profile(connection, user_id):
         elif len(rows) == 0:
             return {"success": False, "error": "User not found"}
         else:
-            # VULNERABILITY: IDOR — returns full user record for any ID without auth
+            # Authorization passed
             return {"success": True, "data": rows[0]}
 
     except Exception as e:
@@ -148,8 +221,26 @@ def get_security_profile(connection, user_id):
         cursor.close()
 
 
-def list_security_profiles(connection):
-    """GET /security-profile — list all demo users (IDOR: full enumeration)"""
+def list_security_profiles(connection, event=None):
+    """
+    GET /security-profile
+    REMEDIATED: Requires administrator privileges.
+    """
+    token_claims = extract_claims_from_jwt(event)
+    
+    if token_claims is None:
+        return {"success": False, "error": "Authentication required", "status_code": 401}
+    
+    db_cursor = connection.cursor()
+    db_cursor.execute("SELECT role FROM security_users WHERE cognito_sub = %s", 
+                      (token_claims['user_subject'],))
+    role_result = db_cursor.fetchone()
+    
+    is_admin = role_result and (role_result[0] == 'admin' or token_claims['effective_role'] == 'admin')
+    
+    if not is_admin:
+        return {"success": False, "error": "Administrator access required", "status_code": 403}
+    
     cursor = connection.cursor()
     try:
         cursor.execute("SELECT id, username, email, role, bio, created_at FROM security_users ORDER BY id")
