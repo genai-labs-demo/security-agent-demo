@@ -174,8 +174,8 @@ def list_security_profiles(connection):
 def create_security_comment(connection, body):
     """
     POST /security-comments
-    VULNERABILITY 3: Stored XSS — stores unsanitized user input.
-    VULNERABILITY 7: Mass Assignment — accepts author_name and role from body.
+    VULNERABILITY 3: Stored XSS — stores unsanitized user input (intentional for demo).
+    FIXED: Mass Assignment vulnerability - rejects author_name and role from request body.
     """
     user_id = body.get("user_id")
     content = body.get("content")
@@ -183,30 +183,26 @@ def create_security_comment(connection, body):
     if not user_id or not content:
         return {"success": False, "error": "user_id and content are required"}
 
-    # VULNERABILITY: Mass Assignment — accept author_name and role from request body
-    author_name = body.get("author_name")
-    author_role = body.get("role")
+    # SECURITY FIX: Reject mass assignment attempts - author fields must not be user-controllable
+    if "author_name" in body or "role" in body:
+        logger.warning(f"[SECURITY] Mass assignment attempt blocked - author_name or role in request body")
+        return {
+            "success": False,
+            "error": "Invalid request: author_name and role fields are not allowed. Identity attribution is controlled server-side.",
+            "message": "Mass assignment attempt detected and blocked"
+        }
 
     cursor = connection.cursor()
     try:
         logger.info(f"[VULNERABLE] Storing unsanitized comment: {content}")
-
-        if author_name or author_role:
-            # Mass Assignment: if attacker supplies author_name or role, persist them
-            logger.info(f"[VULNERABLE] Mass assignment — author_name={author_name}, role={author_role}")
-            cursor.execute(
-                """INSERT INTO security_comments (user_id, content, author_name, author_role, created_at)
-                   VALUES (%s, %s, %s, %s, NOW())
-                   RETURNING id, user_id, content, author_name, author_role, created_at""",
-                (user_id, content, author_name, author_role),
-            )
-        else:
-            cursor.execute(
-                """INSERT INTO security_comments (user_id, content, created_at)
-                   VALUES (%s, %s, NOW())
-                   RETURNING id, user_id, content, author_name, author_role, created_at""",
-                (user_id, content),
-            )
+        
+        # Insert comment without accepting author fields from request body
+        cursor.execute(
+            """INSERT INTO security_comments (user_id, content, created_at)
+               VALUES (%s, %s, NOW())
+               RETURNING id, user_id, content, author_name, author_role, created_at""",
+            (user_id, content),
+        )
         connection.commit()
         columns = [desc[0] for desc in cursor.description]
         row = dict(zip(columns, cursor.fetchone()))
@@ -215,16 +211,12 @@ def create_security_comment(connection, body):
                 row[key] = val.isoformat()
 
         is_xss = _detect_xss(content)
-        is_mass = bool(author_name or author_role)
 
         result = {"success": True, "data": row}
         if is_xss:
             result["message"] = "Stored XSS Detected"
             result["educational"] = _get_educational_content("xss_stored")
-        if is_mass:
-            result["message"] = result.get("message", "") + " | Mass Assignment Detected"
-            result["educational_mass_assignment"] = _get_educational_content("mass_assignment")
-        if not is_xss and not is_mass:
+        else:
             result["message"] = "Comment created successfully"
         return result
 
