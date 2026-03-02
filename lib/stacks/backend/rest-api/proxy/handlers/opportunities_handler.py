@@ -514,6 +514,7 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
 def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     Update an existing opportunity record in the database.
+    Enforces business logic validation for opportunity stage transitions.
     
     Args:
         connection: Database connection object
@@ -529,12 +530,23 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
     try:
         logger.info(f"Updating opportunity: {opportunity_id}")
         
+        # Retrieve current opportunity for stage transition validation
+        current_opportunity = get_opportunity(connection, opportunity_id)
+        if not current_opportunity:
+            logger.info(f"Opportunity not found for update: {opportunity_id}")
+            return None
+        
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
         
         # Validate amount bounds if being updated
         if 'amount' in db_data:
             _validate_amount(db_data.get('amount'))
+        
+        # Import validation function for stage transition checking
+        from validation import validate_opportunity, ValidationError
+        # Validate opportunity data including stage transitions
+        validate_opportunity(data, is_update=True, current_opportunity=current_opportunity)
         
         # Remove id if present (shouldn't be updated)
         db_data.pop('id', None)
@@ -618,6 +630,9 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         connection.rollback()
         # Re-raise if it's already our custom exception
         if "Invalid account ID" in str(e) or "Invalid owner ID" in str(e) or "Invalid amount" in str(e):
+            raise
+        # Re-raise ValidationError from stage transition validation
+        if hasattr(e, '__class__') and e.__class__.__name__ == 'ValidationError':
             raise
         logger.error(f"Unexpected error updating opportunity {opportunity_id}: {str(e)}")
         raise
