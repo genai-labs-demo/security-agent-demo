@@ -129,6 +129,78 @@ def list_accounts(connection) -> List[Dict[str, Any]]:
 COMPUTED_FIELDS = {'health_status', 'health_score', 'opportunity_count', 'total_opportunity_value'}
 
 
+def _recalculate_health(connection, account_id: str) -> None:
+    """
+    Calculate health metrics from opportunities and activity data.
+    """
+    cursor = connection.cursor(cursor_factory=RealDictCursor)
+    
+    # Get opportunities data
+    cursor.execute(
+        "SELECT COUNT(*) as cnt, COALESCE(SUM(value), 0) as total FROM opportunities WHERE account_id = %s AND deleted_at IS NULL",
+        (account_id,)
+    )
+    result = cursor.fetchone()
+    num_opps = int(result['cnt'])
+    sum_opps = float(result['total'])
+    
+    # Get activity date
+    cursor.execute(
+        "SELECT last_activity_date FROM accounts WHERE id = %s",
+        (account_id,)
+    )
+    acc_result = cursor.fetchone()
+    activity_date = acc_result['last_activity_date'] if acc_result else None
+    
+    # Calculate score
+    base_score = 50
+    activity_points = 0
+    opportunity_points = 0
+    value_points = 0
+    
+    # Activity component
+    if activity_date:
+        days_old = (datetime.utcnow() - activity_date).days
+        if days_old <= 7:
+            activity_points = 30
+        elif days_old <= 30:
+            activity_points = 20
+        elif days_old <= 90:
+            activity_points = 10
+    
+    # Opportunity component
+    if num_opps > 0:
+        opportunity_points = min(15, num_opps * 3)
+    
+    # Value component
+    if sum_opps >= 1000000:
+        value_points = 10
+    elif sum_opps >= 100000:
+        value_points = 5
+    elif sum_opps > 0:
+        value_points = 2
+    
+    final_score = min(100, base_score + activity_points + opportunity_points + value_points)
+    
+    # Determine status
+    if final_score >= 70:
+        status_value = 'Green'
+    elif final_score >= 40:
+        status_value = 'Yellow'
+    else:
+        status_value = 'Red'
+    
+    # Update database
+    cursor.execute(
+        "UPDATE accounts SET opportunity_count = %s, total_opportunity_value = %s, health_score = %s, health_status = %s WHERE id = %s",
+        (num_opps, sum_opps, final_score, status_value, account_id)
+    )
+    
+    connection.commit()
+    cursor.close()
+    logger.info(f"Health calculated for account {account_id}: {status_value} score {final_score}")
+
+
 
 def get_account(connection, account_id: str) -> Optional[Dict[str, Any]]:
     """
