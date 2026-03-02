@@ -118,7 +118,7 @@ def _recalculate_account_aggregates(connection, account_id: str) -> None:
         cursor.close()
 
 
-def search_opportunities(connection, search_query: str, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
+def search_opportunities(connection, search_query: str, account_id: Optional[str] = None, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Perform full text search on opportunities using multiple keywords.
     
@@ -126,6 +126,7 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
         connection: Database connection object
         search_query: Search string (e.g., "finance software platform")
         account_id: Optional account ID to filter opportunities
+        user_id: Authenticated user ID (required for authorization)
     
     Returns:
         List of opportunity dictionaries in API format, ordered by relevance
@@ -133,6 +134,11 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
     Raises:
         Exception: If database query fails
     """
+        # Authorization: Require user_id for search operations
+        if not user_id:
+            logger.error("Unauthorized search attempt: missing user_id")
+            raise Exception("Unauthorized: user authentication required")
+        
     try:
         if not search_query or not search_query.strip():
             return []
@@ -217,11 +223,16 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
             WHERE 
                 o.deleted_at IS NULL
                 AND {where_clause}
+                AND o.owner_id = %s
         """
         
         # Add account filter if specified
         if account_id:
             query += " AND o.account_id = %s"
+        
+        # Add user_id to parameters for authorization check
+        keyword_params.append(user_id)
+        if account_id:
             keyword_params.append(account_id)
         
         query += """
@@ -299,13 +310,14 @@ def _validate_amount(amount) -> None:
         )
 
 
-def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
+def list_opportunities(connection, account_id: Optional[str] = None, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Query opportunities from the database with optional account filter.
     
     Args:
         connection: Database connection object
         account_id: Optional account ID to filter opportunities
+        user_id: Authenticated user ID (required for authorization)
     
     Returns:
         List of opportunity dictionaries in API format
@@ -313,6 +325,11 @@ def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dic
     Raises:
         Exception: If database query fails
     """
+        # Authorization: Require user_id for list operations
+        if not user_id:
+            logger.error("Unauthorized list attempt: missing user_id")
+            raise Exception("Unauthorized: user authentication required")
+        
     try:
         logger.info(f"Listing opportunities{f' for account {account_id}' if account_id else ''}")
         
@@ -327,6 +344,9 @@ def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dic
             FROM opportunities
             WHERE deleted_at IS NULL
         """
+        # Authorization: Filter by owner_id to ensure users only see their own opportunities
+        query += " AND owner_id = %s"
+        params = [user_id]
         
         params = []
         if account_id:
@@ -353,13 +373,14 @@ def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dic
         raise
 
 
-def get_opportunity(connection, opportunity_id: str) -> Optional[Dict[str, Any]]:
+def get_opportunity(connection, opportunity_id: str, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
     Query a single opportunity by ID from the database.
     
     Args:
         connection: Database connection object
         opportunity_id: Opportunity ID to retrieve
+        user_id: Authenticated user ID (required for authorization)
     
     Returns:
         Opportunity dictionary in API format, or None if not found
@@ -367,6 +388,11 @@ def get_opportunity(connection, opportunity_id: str) -> Optional[Dict[str, Any]]
     Raises:
         Exception: If database query fails
     """
+        # Authorization: Require user_id for get operations
+        if not user_id:
+            logger.error("Unauthorized get attempt: missing user_id")
+            raise Exception("Unauthorized: user authentication required")
+        
     try:
         logger.info(f"Getting opportunity with ID: {opportunity_id}")
         
@@ -380,9 +406,11 @@ def get_opportunity(connection, opportunity_id: str) -> Optional[Dict[str, Any]]
                 created_date, last_modified_date
             FROM opportunities
             WHERE id = %s AND deleted_at IS NULL
+            AND owner_id = %s
         """
         
-        cursor.execute(query, (opportunity_id,))
+        # Authorization: Check both resource ID and owner_id
+        cursor.execute(query, (opportunity_id, user_id))
         record = cursor.fetchone()
         cursor.close()
         
@@ -404,7 +432,7 @@ def get_opportunity(connection, opportunity_id: str) -> Optional[Dict[str, Any]]
         raise
 
 
-def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
+def create_opportunity(connection, data: Dict[str, Any], user_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Insert a new opportunity record into the database.
     Validates that account_id and owner_id reference existing records.
@@ -412,6 +440,7 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     Args:
         connection: Database connection object
         data: Opportunity data in API format (camelCase)
+        user_id: Authenticated user ID (required for authorization)
     
     Returns:
         Created opportunity dictionary in API format
@@ -419,6 +448,11 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     Raises:
         Exception: If database insert fails or validation fails
     """
+        # Authorization: Require user_id for create operations
+        if not user_id:
+            logger.error("Unauthorized create attempt: missing user_id")
+            raise Exception("Unauthorized: user authentication required")
+        
     try:
         logger.info(f"Creating new opportunity: {data.get('name')}")
         
@@ -511,7 +545,7 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         raise
 
 
-def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any], user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
     Update an existing opportunity record in the database.
     
@@ -519,6 +553,7 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         connection: Database connection object
         opportunity_id: Opportunity ID to update
         data: Partial opportunity data in API format (camelCase)
+        user_id: Authenticated user ID (required for authorization)
     
     Returns:
         Updated opportunity dictionary in API format, or None if not found
@@ -526,6 +561,11 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
     Raises:
         Exception: If database update fails or validation fails
     """
+        # Authorization: Require user_id for update operations
+        if not user_id:
+            logger.error("Unauthorized update attempt: missing user_id")
+            raise Exception("Unauthorized: user authentication required")
+        
     try:
         logger.info(f"Updating opportunity: {opportunity_id}")
         
@@ -544,7 +584,7 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         
         if not db_data or (len(db_data) == 1 and 'last_modified_date' in db_data):
             logger.warning("No fields to update")
-            # Return current opportunity
+            return get_opportunity(connection, opportunity_id, user_id)
             return get_opportunity(connection, opportunity_id)
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
@@ -567,11 +607,13 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         set_clauses = [f"{col} = %s" for col in db_data.keys()]
         values = list(db_data.values())
         values.append(opportunity_id)  # For WHERE clause
+        values.append(user_id)  # For authorization check
         
         query = f"""
             UPDATE opportunities
             SET {', '.join(set_clauses)}
             WHERE id = %s
+            AND owner_id = %s
             RETURNING 
                 id, name, account_id, account_name, amount, close_date,
                 stage, next_step, recent_activity, recent_activity_date,
@@ -623,7 +665,7 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         raise
 
 
-def delete_opportunity(connection, opportunity_id: str) -> bool:
+def delete_opportunity(connection, opportunity_id: str, user_id: Optional[str] = None) -> bool:
     """
     Soft-delete an opportunity record by marking it as deleted.
     The record is retained in the database for recovery purposes.
@@ -632,6 +674,7 @@ def delete_opportunity(connection, opportunity_id: str) -> bool:
     Args:
         connection: Database connection object
         opportunity_id: Opportunity ID to soft-delete
+        user_id: Authenticated user ID (required for authorization)
 
     Returns:
         True if opportunity was soft-deleted, False if not found
@@ -639,14 +682,20 @@ def delete_opportunity(connection, opportunity_id: str) -> bool:
     Raises:
         Exception: If database update fails
     """
+        # Authorization: Require user_id for delete operations
+        if not user_id:
+            logger.error("Unauthorized delete attempt: missing user_id")
+            raise Exception("Unauthorized: user authentication required")
+        
     try:
         logger.info(f"Soft-deleting opportunity: {opportunity_id}")
 
         cursor = connection.cursor()
 
+        # Authorization: Ensure the opportunity belongs to the authenticated user
         # Check if opportunity exists and capture account_id for aggregate recalculation
-        cursor.execute(
-            "SELECT id, account_id FROM opportunities WHERE id = %s AND (deleted_at IS NULL)",
+            "SELECT id, account_id FROM opportunities WHERE id = %s AND owner_id = %s AND (deleted_at IS NULL)",
+            (opportunity_id, user_id)
             (opportunity_id,)
         )
         row = cursor.fetchone()
