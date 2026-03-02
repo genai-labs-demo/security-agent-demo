@@ -17,6 +17,7 @@ Vulnerability inventory (matches pen-test target set):
 
 import json
 import logging
+import re
 import subprocess
 from datetime import datetime
 
@@ -486,44 +487,41 @@ def render_xss_search_page(connection, query):
 def execute_ping(body):
     """
     POST /security-tools/ping
-    VULNERABILITY 5: Command Injection — passes user input directly to shell.
-    VULNERABILITY 6: Second vector — also supports 'command' field for direct execution.
+    FIXED: Command Injection vulnerability remediated.
+    Now uses input validation and shell=False to prevent command injection.
     """
     host = body.get("host", "")
-    # VULNERABILITY 6: Second command injection vector — direct command field
-    custom_command = body.get("command", "")
 
-    if not host and not custom_command:
+    if not host:
         return {"success": False, "error": "Host parameter is required"}
 
-    try:
-        if custom_command:
-            # VULNERABILITY: Direct command execution from user input
-            command = custom_command
-            logger.info(f"[VULNERABLE] Executing custom command: {command}")
-        else:
-            # VULNERABILITY: Command Injection — unsanitized input to shell
-            # nslookup is reliably available in Lambda (ping is not)
-            command = f"nslookup {host}"
-            logger.info(f"[VULNERABLE] Executing command: {command}")
+    # SECURITY FIX: Validate host format - only allow alphanumeric, dots, and hyphens
+    # This prevents shell metacharacters like ;, |, &, $, `, etc.
+    if not re.match(r'^[a-zA-Z0-9\.\-]+$', host):
+        return {
+            "success": False,
+            "error": "Invalid host format. Only alphanumeric characters, dots, and hyphens are allowed."
+        }
 
-        result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=10)
+    try:
+        # SECURITY FIX: Use argument list with shell=False to prevent shell interpretation
+        # This ensures the host parameter is passed as an argument, not interpreted by shell
+        logger.info(f"[SECURE] Executing nslookup for host: {host}")
+        result = subprocess.run(
+            ["nslookup", host],
+            shell=False,
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
         output = result.stdout or result.stderr
 
-        is_injection = _detect_command_injection(host or custom_command, output)
-        if is_injection:
-            return {
-                "success": True,
-                "message": "Command Injection Detected",
-                "educational": _get_educational_content("command_injection"),
-                "output": output,
-            }
         return {"success": True, "output": output}
 
     except subprocess.TimeoutExpired:
         return {"success": False, "error": "Command timed out", "output": ""}
     except Exception as e:
-        logger.error(f"[VULNERABLE] Command execution error: {str(e)}")
+        logger.error(f"[SECURE] Command execution error: {str(e)}")
         return {"success": False, "error": "Command execution failed", "message": str(e)}
 
 
@@ -534,32 +532,38 @@ def execute_ping(body):
 def execute_nslookup(body):
     """
     POST /security-tools/nslookup
-    VULNERABILITY: Command Injection — second distinct endpoint with shell=True.
+    FIXED: Command Injection vulnerability remediated.
+    Now uses input validation and shell=False to prevent command injection.
     """
     host = body.get("host", "")
     if not host:
         return {"success": False, "error": "Host parameter is required"}
 
-    try:
-        # VULNERABILITY: Command Injection — unsanitized input to shell
-        command = f"nslookup {host}"
-        logger.info(f"[VULNERABLE] Executing nslookup command: {command}")
+    # SECURITY FIX: Validate host format - only allow alphanumeric, dots, and hyphens
+    # This prevents shell metacharacters like ;, |, &, $, `, etc.
+    if not re.match(r'^[a-zA-Z0-9\.\-]+$', host):
+        return {
+            "success": False,
+            "error": "Invalid host format. Only alphanumeric characters, dots, and hyphens are allowed."
+        }
 
-        result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=10)
+    try:
+        # SECURITY FIX: Use argument list with shell=False to prevent shell interpretation
+        # This ensures the host parameter is passed as an argument, not interpreted by shell
+        logger.info(f"[SECURE] Executing nslookup for host: {host}")
+        result = subprocess.run(
+            ["nslookup", host],
+            shell=False,
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
         output = result.stdout or result.stderr
 
-        is_injection = _detect_command_injection(host, output)
-        if is_injection:
-            return {
-                "success": True,
-                "message": "Command Injection Detected",
-                "educational": _get_educational_content("command_injection"),
-                "output": output,
-            }
         return {"success": True, "output": output}
 
     except subprocess.TimeoutExpired:
         return {"success": False, "error": "Command timed out", "output": ""}
     except Exception as e:
-        logger.error(f"[VULNERABLE] Command execution error: {str(e)}")
+        logger.error(f"[SECURE] Command execution error: {str(e)}")
         return {"success": False, "error": "Command execution failed", "message": str(e)}
