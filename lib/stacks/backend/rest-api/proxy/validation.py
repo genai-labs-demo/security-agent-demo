@@ -12,6 +12,17 @@ HEALTH_STATUS_VALUES = ['Green', 'Yellow', 'Red']
 OPPORTUNITY_STAGE_VALUES = ['Launched', 'Qualified', 'Proof of Concept', 'Negotiation', 'Closed Won', 'Closed Lost']
 FORECAST_CATEGORY_VALUES = ['Pipeline', 'Best Case', 'Commit', 'Closed']
 
+# Define stage-to-forecast-category alignment rules based on CRM best practices
+STAGE_FORECAST_RULES = {
+    'Launched': ['Pipeline'],
+    'Qualified': ['Pipeline'],
+    'Proof of Concept': ['Best Case'],
+    'Negotiation': ['Commit'],
+    'Closed Won': ['Closed'],
+    'Closed Lost': ['Closed']
+}
+
+
 # Email validation regex pattern
 EMAIL_PATTERN = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
 
@@ -23,6 +34,33 @@ class ValidationError(Exception):
         self.message = message
         self.field = field
         super().__init__(self.message)
+
+
+def _validate_stage_forecast_alignment(stage: str, forecast_category: str) -> None:
+    """
+    Validate that forecast category aligns with opportunity stage according to CRM business rules.
+    
+    Standard CRM practice requires forecast categories to align with stage confidence levels:
+    - Pipeline: Early stages (Launched, Qualified)
+    - Best Case: Mid-stage (Proof of Concept)
+    - Commit: Late stage (Negotiation)
+    - Closed: Won or Lost deals only
+    
+    Args:
+        stage: Opportunity stage value
+        forecast_category: Forecast category value
+    
+    Raises:
+        ValidationError: If stage and forecast category combination is invalid
+    """
+    if stage in STAGE_FORECAST_RULES:
+        allowed_categories = STAGE_FORECAST_RULES[stage]
+        if forecast_category not in allowed_categories:
+            raise ValidationError(
+                f"Invalid combination: stage '{stage}' must have forecast category "
+                f"'{' or '.join(allowed_categories)}', not '{forecast_category}'",
+                field='forecastCategory'
+            )
 
 
 def validate_account(data: Dict[str, Any], is_update: bool = False) -> None:
@@ -180,6 +218,12 @@ def validate_opportunity(data: Dict[str, Any], is_update: bool = False) -> None:
                 f"Field 'forecastCategory' must be one of: {', '.join(FORECAST_CATEGORY_VALUES)}",
                 field='forecastCategory'
             )
+    
+    # Cross-field validation: stage and forecastCategory must align
+    # Only validate if both fields are present in the data
+    if 'stage' in data and 'forecastCategory' in data:
+        # Both fields provided - validate alignment
+        _validate_stage_forecast_alignment(data['stage'], data['forecastCategory'])
     
     # Validate ownerId (foreign key)
     if 'ownerId' in data:
