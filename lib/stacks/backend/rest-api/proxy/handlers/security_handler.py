@@ -95,16 +95,88 @@ def _get_educational_content(vuln_type):
     return content_map.get(vuln_type, {})
 
 
+def check_authentication(event):
+    """
+    Check if the request is authenticated by validating the Authorization header.
+    
+    For demo purposes, this uses a simplified Bearer token format: "Bearer {user_id}:{role}"
+    In production, this should validate JWT tokens with proper signature verification.
+    
+    Args:
+        event: API Gateway event dictionary
+    
+    Returns:
+        Tuple of (is_authenticated, user_id, role, error_message)
+        - is_authenticated: Boolean indicating if request is authenticated
+        - user_id: Authenticated user ID (None if not authenticated)
+        - role: User role (None if not authenticated)
+        - error_message: Error description (None if authenticated)
+    """
+    # Extract Authorization header from event
+    headers = event.get('headers', {})
+    # API Gateway may lowercase header names
+    auth_header = headers.get('Authorization') or headers.get('authorization')
+    
+    if not auth_header:
+        logger.warning("[SECURITY] Missing Authorization header")
+        return False, None, None, "Missing Authorization header"
+    
+    # Validate Bearer token format
+    if not auth_header.startswith('Bearer '):
+        logger.warning(f"[SECURITY] Invalid Authorization header format: {auth_header}")
+        return False, None, None, "Invalid Authorization header format. Expected: Bearer <token>"
+    
+    # Extract token (simplified format: user_id:role)
+    token = auth_header[7:]  # Remove "Bearer " prefix
+    
+    if ':' not in token:
+        logger.warning(f"[SECURITY] Invalid token format: {token}")
+        return False, None, None, "Invalid token format"
+    
+    try:
+        user_id, role = token.split(':', 1)
+        logger.info(f"[SECURITY] Authenticated user_id={user_id}, role={role}")
+        return True, user_id, role, None
+    except ValueError:
+        logger.warning(f"[SECURITY] Failed to parse token: {token}")
+        return False, None, None, "Invalid token format"
+
+
 # ============================================================
 # 1. SQL Injection + 2. IDOR — Profile endpoint
 # ============================================================
 
-def get_security_profile(connection, user_id):
+def get_security_profile(connection, user_id, event):
     """
     GET /security-profile/{userId}
     VULNERABILITY 1: SQL Injection via string concatenation.
-    VULNERABILITY 2: IDOR — any sequential ID returns data, no auth check.
+    FIXED VULNERABILITY 2: Now requires authentication and authorization checks.
     """
+    # SECURITY FIX: Check authentication
+    is_authenticated, authenticated_user_id, authenticated_role, error_msg = check_authentication(event)
+    
+    if not is_authenticated:
+        logger.warning(f"[SECURITY] Unauthenticated access attempt to profile {user_id}")
+        return {
+            "success": False,
+            "error": "Unauthorized",
+            "message": error_msg,
+            "statusCode": 401
+        }
+    
+    # SECURITY FIX: Authorization check - users can only access their own profile
+    # Admin role can access any profile
+    if authenticated_role != 'admin' and str(authenticated_user_id) != str(user_id):
+        logger.warning(f"[SECURITY] User {authenticated_user_id} attempted to access profile {user_id}")
+        return {
+            "success": False,
+            "error": "Forbidden",
+            "message": "You are not authorized to access this profile",
+            "statusCode": 403
+        }
+    
+    logger.info(f"[SECURITY] Authorized access to profile {user_id} by user {authenticated_user_id}")
+    
     cursor = connection.cursor()
     try:
         # VULNERABILITY: SQL Injection - string concatenation instead of parameterized query
@@ -148,8 +220,35 @@ def get_security_profile(connection, user_id):
         cursor.close()
 
 
-def list_security_profiles(connection):
-    """GET /security-profile — list all demo users (IDOR: full enumeration)"""
+def list_security_profiles(connection, event):
+    """
+    GET /security-profile — list all demo users
+    FIXED: Now requires authentication and admin role
+    """
+    # SECURITY FIX: Check authentication
+    is_authenticated, authenticated_user_id, authenticated_role, error_msg = check_authentication(event)
+    
+    if not is_authenticated:
+        logger.warning("[SECURITY] Unauthenticated access attempt to list all profiles")
+        return {
+            "success": False,
+            "error": "Unauthorized",
+            "message": error_msg,
+            "statusCode": 401
+        }
+    
+    # SECURITY FIX: Authorization check - only admins can list all profiles
+    if authenticated_role != 'admin':
+        logger.warning(f"[SECURITY] Non-admin user {authenticated_user_id} attempted to list all profiles")
+        return {
+            "success": False,
+            "error": "Forbidden",
+            "message": "Only administrators can list all profiles",
+            "statusCode": 403
+        }
+    
+    logger.info(f"[SECURITY] Admin user {authenticated_user_id} listing all profiles")
+    
     cursor = connection.cursor()
     try:
         cursor.execute("SELECT id, username, email, role, bio, created_at FROM security_users ORDER BY id")
