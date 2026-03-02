@@ -10,7 +10,7 @@ Vulnerability inventory (matches pen-test target set):
   4. DOM-based / Reflected XSS — GET /security-xss-page?name=...  (reflected in HTML)
   5. Command Injection #1   — POST /security-tools/ping   (shell=True with user input)
   6. Command Injection #2   — POST /security-tools/ping   (pipe / semicolon chaining)
-  7. Mass Assignment        — POST /security-comments     (author_name & role accepted from body)
+  7. Mass Assignment        — POST /security-comments     (FIXED: author_name & role now server-side)
   8. Stored XSS (HTML)      — GET /security-xss-comments  (renders stored comments as HTML for pen-test detection)
   9. Reflected XSS (HTML)   — GET /security-xss-search?q= (reflects search query in HTML for pen-test detection)
 """
@@ -176,7 +176,7 @@ def create_security_comment(connection, body):
     POST /security-comments
     VULNERABILITY 3: Stored XSS — stores unsanitized user input.
     VULNERABILITY 7: Mass Assignment — accepts author_name and role from body.
-    """
+    FIXED: Mass Assignment vulnerability - author_name and role now derived server-side.
     user_id = body.get("user_id")
     content = body.get("content")
 
@@ -184,30 +184,34 @@ def create_security_comment(connection, body):
         return {"success": False, "error": "user_id and content are required"}
 
     # VULNERABILITY: Mass Assignment — accept author_name and role from request body
-    author_name = body.get("author_name")
-    author_role = body.get("role")
-
-    cursor = connection.cursor()
     try:
         logger.info(f"[VULNERABLE] Storing unsanitized comment: {content}")
+        # SECURITY FIX: Derive author_name and author_role from authenticated user context
+        # Query the security_users table to get legitimate user information
+        cursor.execute(
+            "SELECT username, role FROM security_users WHERE id = %s",
+            (user_id,)
+        )
+        user_row = cursor.fetchone()
+        
+        if not user_row:
+            return {"success": False, "error": f"User with id {user_id} not found"}
+        
+        # Use server-determined values, not client-provided ones
+        author_name = user_row[0]  # username from database
+        author_role = user_row[1]  # role from database
+        
 
+        logger.info(f"[SECURE] Using server-side author_name={author_name}, role={author_role}")
         if author_name or author_role:
-            # Mass Assignment: if attacker supplies author_name or role, persist them
-            logger.info(f"[VULNERABLE] Mass assignment — author_name={author_name}, role={author_role}")
-            cursor.execute(
-                """INSERT INTO security_comments (user_id, content, author_name, author_role, created_at)
-                   VALUES (%s, %s, %s, %s, NOW())
-                   RETURNING id, user_id, content, author_name, author_role, created_at""",
-                (user_id, content, author_name, author_role),
-            )
-        else:
-            cursor.execute(
-                """INSERT INTO security_comments (user_id, content, created_at)
-                   VALUES (%s, %s, NOW())
-                   RETURNING id, user_id, content, author_name, author_role, created_at""",
-                (user_id, content),
-            )
-        connection.commit()
+        # Always insert with server-determined author information
+        cursor.execute(
+            """INSERT INTO security_comments (user_id, content, author_name, author_role, created_at)
+               VALUES (%s, %s, %s, %s, NOW())
+               RETURNING id, user_id, content, author_name, author_role, created_at""",
+            (user_id, content, author_name, author_role),
+        )
+        
         columns = [desc[0] for desc in cursor.description]
         row = dict(zip(columns, cursor.fetchone()))
         for key, val in row.items():
@@ -215,16 +219,12 @@ def create_security_comment(connection, body):
                 row[key] = val.isoformat()
 
         is_xss = _detect_xss(content)
-        is_mass = bool(author_name or author_role)
 
         result = {"success": True, "data": row}
         if is_xss:
             result["message"] = "Stored XSS Detected"
             result["educational"] = _get_educational_content("xss_stored")
-        if is_mass:
-            result["message"] = result.get("message", "") + " | Mass Assignment Detected"
-            result["educational_mass_assignment"] = _get_educational_content("mass_assignment")
-        if not is_xss and not is_mass:
+        else:
             result["message"] = "Comment created successfully"
         return result
 
