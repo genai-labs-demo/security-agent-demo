@@ -11,6 +11,8 @@ from typing import Dict, Any, List, Optional
 HEALTH_STATUS_VALUES = ['Green', 'Yellow', 'Red']
 OPPORTUNITY_STAGE_VALUES = ['Launched', 'Qualified', 'Proof of Concept', 'Negotiation', 'Closed Won', 'Closed Lost']
 FORECAST_CATEGORY_VALUES = ['Pipeline', 'Best Case', 'Commit', 'Closed']
+# Define allowed team member role values to prevent role manipulation attacks
+TEAM_MEMBER_ROLE_VALUES = ['Sales Rep', 'Sales Manager', 'Account Executive', 'Business Development Rep', 'Sales Engineer', 'Customer Success Manager']
 
 # Email validation regex pattern
 EMAIL_PATTERN = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
@@ -250,12 +252,15 @@ def validate_team_member(data: Dict[str, Any], is_update: bool = False) -> None:
         if not EMAIL_PATTERN.match(data['email']):
             raise ValidationError("Field 'email' must be a valid email address", field='email')
     
-    # Validate role
+    # Validate role with whitelist to prevent arbitrary role assignment
     if 'role' in data:
         if not isinstance(data['role'], str) or not data['role'].strip():
             raise ValidationError("Field 'role' must be a non-empty string", field='role')
-        if len(data['role']) > 100:
-            raise ValidationError("Field 'role' must not exceed 100 characters", field='role')
+        if data['role'] not in TEAM_MEMBER_ROLE_VALUES:
+            raise ValidationError(
+                f"Field 'role' must be one of: {', '.join(TEAM_MEMBER_ROLE_VALUES)}",
+                field='role'
+            )
     
     # Validate quota
     if 'quota' in data:
