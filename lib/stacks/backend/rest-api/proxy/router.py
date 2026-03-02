@@ -120,6 +120,8 @@ def _parse_path(path: str) -> Tuple[str, Optional[str]]:
         - /team-members/789 -> (team-members, 789)
         - /industries -> (industries, None)
         - /industries/tech -> (industries, tech)
+        - /accounts/123/restore -> (accounts, 123)
+        - /opportunities/456/restore -> (opportunities, 456)
     
     Args:
         path: URL path from API Gateway event
@@ -166,10 +168,19 @@ def _parse_path(path: str) -> Tuple[str, Optional[str]]:
         else:
             resource_id = second_part
     
-    # Validate no extra path segments
+    # Handle third path segment for restore operations
     if len(parts) > 2:
-        raise ValueError(f"Invalid path: too many segments. Expected format: /{resource_type} or /{resource_type}/{{id}} or /{resource_type}/search")
+        third_part = parts[2]
+        if third_part == 'restore':
+            # For restore operations on accounts and opportunities only
+            if resource_type not in ['accounts', 'opportunities']:
+                raise ValueError(f"Restore operation not supported for {resource_type}")
+            # resource_id should already be set from second_part
+        else:
+            raise ValueError(f"Invalid path: too many segments. Expected format: /{resource_type} or /{resource_type}/{{id}} or /{resource_type}/search or /{resource_type}/{{id}}/restore")
     
+    if len(parts) > 3:
+        raise ValueError(f"Invalid path: too many segments")
     return resource_type, resource_id
 
 
@@ -319,7 +330,9 @@ def validate_route(route_info: RouteInfo) -> None:
     # POST should not have resource ID (creating new resource)
     # Exception: security-profile POST doesn't need ID validation
     if method == 'POST' and resource_id is not None and resource_type != 'security-profile':
-        raise ValueError(f"POST requests should not include resource ID in path")
+    # Exception: POST with /restore path is allowed for restore operations
+    is_restore_operation = route_info.path.endswith('/restore')
+    if method == 'POST' and resource_id is not None and resource_type != 'security-profile' and not is_restore_operation:
     
     # PUT and DELETE must have resource ID
     if method in ['PUT', 'DELETE'] and resource_id is None:
@@ -343,6 +356,11 @@ def get_operation_type(route_info: RouteInfo) -> str:
     """
     method = route_info.http_method
     has_id = route_info.resource_id is not None
+    
+    # Check if this is a restore operation
+    if method == 'POST' and has_id and route_info.path.endswith('/restore'):
+        logger.info(f"Operation type: restore")
+        return 'restore'
     
     operation_map = {
         ('GET', False): 'list',      # GET /accounts
