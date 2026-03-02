@@ -83,6 +83,40 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _recalculate_account_aggregates(connection, account_id: str) -> None:
+def _lock_account_for_update(cursor, account_id: str) -> None:
+    """
+    Acquire a pessimistic lock on the account record using SELECT FOR UPDATE.
+    This prevents race conditions when multiple concurrent transactions modify
+    opportunities for the same account. The lock is held until the transaction
+    commits or rolls back.
+    
+    This addresses CWE-362 (Concurrent Execution using Shared Resource with 
+    Improper Synchronization) by ensuring serialized access to account aggregates.
+    
+    Args:
+        cursor: Database cursor (must be part of active transaction)
+        account_id: Account ID to lock
+    
+    Raises:
+        Exception: If account doesn't exist or lock cannot be acquired
+    """
+    if not account_id:
+        return
+    
+    try:
+        # Acquire exclusive row-level lock on account record
+        # Other transactions attempting to lock the same account will block
+        cursor.execute(
+            "SELECT id FROM accounts WHERE id = %s FOR UPDATE",
+            (account_id,)
+        )
+        if not cursor.fetchone():
+            raise Exception(f"Account {account_id} does not exist")
+    except psycopg2.Error as e:
+        logger.error(f"Failed to acquire lock on account {account_id}: {str(e)}")
+        raise Exception(f"Failed to lock account for update: {str(e)}")
+
+
     """
     Recalculate and update the aggregate fields (opportunity_count, total_opportunity_value)
     on the parent account after any opportunity create/update/delete.
@@ -446,6 +480,9 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
         # Validate account_id exists
+        # Acquire pessimistic lock on parent account to prevent race conditions
+        _lock_account_for_update(cursor, db_data.get('account_id'))
+        
         if 'account_id' in db_data and db_data['account_id']:
             cursor.execute("SELECT id FROM accounts WHERE id = %s", (db_data['account_id'],))
             if not cursor.fetchone():
@@ -550,6 +587,14 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
         # Validate account_id exists if being updated
+        # First, get the current account_id to handle account reassignment
+        cursor.execute(
+            "SELECT account_id FROM opportunities WHERE id = %s AND deleted_at IS NULL",
+            (opportunity_id,)
+        )
+        current_record = cursor.fetchone()
+        current_account_id = current_record['account_id'] if current_record else None
+        
         if 'account_id' in db_data and db_data['account_id']:
             cursor.execute("SELECT id FROM accounts WHERE id = %s", (db_data['account_id'],))
             if not cursor.fetchone():
@@ -557,6 +602,16 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
                 raise Exception(f"Invalid account ID: account does not exist")
         
         # Validate owner_id exists if being updated
+        # Acquire pessimistic locks to prevent race conditions
+        # Lock current account (if exists)
+        if current_account_id:
+            _lock_account_for_update(cursor, current_account_id)
+        
+        # Lock new account if being reassigned (and different from current)
+        new_account_id = db_data.get('account_id')
+        if new_account_id and new_account_id != current_account_id:
+            _lock_account_for_update(cursor, new_account_id)
+        
         if 'owner_id' in db_data and db_data['owner_id']:
             cursor.execute("SELECT id FROM team_members WHERE id = %s", (db_data['owner_id'],))
             if not cursor.fetchone():
@@ -595,7 +650,11 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         opportunity = _map_opportunity_to_api_format(dict(record))
         
         # Recalculate parent account aggregates (handles amount or account changes)
-        _recalculate_account_aggregates(connection, record.get('account_id'))
+        # Recalculate for both old and new accounts if account was reassigned
+        if current_account_id:
+            _recalculate_account_aggregates(connection, current_account_id)
+        if record.get('account_id') and record.get('account_id') != current_account_id:
+            _recalculate_account_aggregates(connection, record.get('account_id'))
         
         logger.info(f"Updated opportunity: {opportunity_id}")
         return opportunity
@@ -656,6 +715,9 @@ def delete_opportunity(connection, opportunity_id: str) -> bool:
             return False
 
         account_id = row[1]
+        
+        # Lock the account now that we have its ID
+        _lock_account_for_update(cursor, account_id)
 
         # Soft-delete: set deleted_at timestamp instead of removing the row
         cursor.execute(
