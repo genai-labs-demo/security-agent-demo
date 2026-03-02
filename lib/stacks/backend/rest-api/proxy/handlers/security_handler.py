@@ -18,6 +18,7 @@ Vulnerability inventory (matches pen-test target set):
 import json
 import logging
 import subprocess
+import re
 from datetime import datetime
 
 logger = logging.getLogger()
@@ -51,6 +52,29 @@ def _detect_command_injection(host, output):
     has_unexpected = output and "PING" not in output and len(output) > 0
     has_many_lines = output and len(output.split("\n")) > 20
     return has_pattern or has_unexpected or has_many_lines
+
+
+def _sanitize_and_validate_host(user_input):
+    """
+    Validates host input using allowlist pattern matching.
+    Prevents command injection by rejecting shell metacharacters.
+    Returns tuple: (is_valid, sanitized_value, error_msg)
+    """
+    if not user_input or not isinstance(user_input, str):
+        return (False, None, "Host must be a non-empty string")
+    
+    # Check maximum length (RFC 1035: 253 chars)
+    if len(user_input) > 253:
+        return (False, None, "Host exceeds maximum allowed length")
+    
+    # Allowlist: alphanumeric, dots, hyphens, colons only
+    # Matches valid hostnames, IPv4, and IPv6 addresses
+    allowlist_regex = r'^[a-zA-Z0-9][a-zA-Z0-9\.\-:]*[a-zA-Z0-9]$|^[a-zA-Z0-9]$'
+    
+    if not re.match(allowlist_regex, user_input):
+        return (False, None, "Invalid characters in host. Only letters, numbers, dots, hyphens, and colons permitted")
+    
+    return (True, user_input, None)
 
 
 def _get_educational_content(vuln_type):
@@ -486,44 +510,37 @@ def render_xss_search_page(connection, query):
 def execute_ping(body):
     """
     POST /security-tools/ping
-    VULNERABILITY 5: Command Injection — passes user input directly to shell.
-    VULNERABILITY 6: Second vector — also supports 'command' field for direct execution.
+    Executes nslookup command with proper input validation and safe subprocess invocation.
     """
     host = body.get("host", "")
-    # VULNERABILITY 6: Second command injection vector — direct command field
-    custom_command = body.get("command", "")
 
-    if not host and not custom_command:
+    if not host:
         return {"success": False, "error": "Host parameter is required"}
 
-    try:
-        if custom_command:
-            # VULNERABILITY: Direct command execution from user input
-            command = custom_command
-            logger.info(f"[VULNERABLE] Executing custom command: {command}")
-        else:
-            # VULNERABILITY: Command Injection — unsanitized input to shell
-            # nslookup is reliably available in Lambda (ping is not)
-            command = f"nslookup {host}"
-            logger.info(f"[VULNERABLE] Executing command: {command}")
+    # Validate and sanitize host parameter
+    valid, sanitized_host, err_msg = _sanitize_and_validate_host(host)
+    if not valid:
+        logger.warning(f"Rejected invalid host input: {host}")
+        return {"success": False, "error": err_msg}
 
-        result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=10)
+    try:
+        # Execute with argument list and shell=False for security
+        logger.info(f"Executing nslookup with sanitized host: {sanitized_host}")
+        result = subprocess.run(
+            ['nslookup', sanitized_host],
+            shell=False,
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
         output = result.stdout or result.stderr
 
-        is_injection = _detect_command_injection(host or custom_command, output)
-        if is_injection:
-            return {
-                "success": True,
-                "message": "Command Injection Detected",
-                "educational": _get_educational_content("command_injection"),
-                "output": output,
-            }
         return {"success": True, "output": output}
 
     except subprocess.TimeoutExpired:
         return {"success": False, "error": "Command timed out", "output": ""}
     except Exception as e:
-        logger.error(f"[VULNERABLE] Command execution error: {str(e)}")
+        logger.error(f"Command execution error: {str(e)}")
         return {"success": False, "error": "Command execution failed", "message": str(e)}
 
 
@@ -534,32 +551,34 @@ def execute_ping(body):
 def execute_nslookup(body):
     """
     POST /security-tools/nslookup
-    VULNERABILITY: Command Injection — second distinct endpoint with shell=True.
+    Executes nslookup command with proper input validation and safe subprocess invocation.
     """
     host = body.get("host", "")
     if not host:
         return {"success": False, "error": "Host parameter is required"}
 
-    try:
-        # VULNERABILITY: Command Injection — unsanitized input to shell
-        command = f"nslookup {host}"
-        logger.info(f"[VULNERABLE] Executing nslookup command: {command}")
+    # Validate and sanitize host parameter
+    valid, sanitized_host, err_msg = _sanitize_and_validate_host(host)
+    if not valid:
+        logger.warning(f"Rejected invalid host input: {host}")
+        return {"success": False, "error": err_msg}
 
-        result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=10)
+    try:
+        # Execute with argument list and shell=False for security
+        logger.info(f"Executing nslookup with sanitized host: {sanitized_host}")
+        result = subprocess.run(
+            ['nslookup', sanitized_host],
+            shell=False,
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
         output = result.stdout or result.stderr
 
-        is_injection = _detect_command_injection(host, output)
-        if is_injection:
-            return {
-                "success": True,
-                "message": "Command Injection Detected",
-                "educational": _get_educational_content("command_injection"),
-                "output": output,
-            }
         return {"success": True, "output": output}
 
     except subprocess.TimeoutExpired:
         return {"success": False, "error": "Command timed out", "output": ""}
     except Exception as e:
-        logger.error(f"[VULNERABLE] Command execution error: {str(e)}")
+        logger.error(f"Command execution error: {str(e)}")
         return {"success": False, "error": "Command execution failed", "message": str(e)}
