@@ -13,10 +13,7 @@ import AccountsPage from "./AccountsPage";
 import MyOpportunitiesPage from "./MyOpportunitiesPage";
 import TeamPerformancePage from "./TeamPerformancePage";
 import SecurityPage from "./SecurityPage";
-import SecurityProfilePage from "./SecurityProfilePage";
-import SecurityCommentsPage from "./SecurityCommentsPage";
-import SecurityXssAdvancedPage from "./SecurityXssAdvancedPage";
-import SecurityToolsPage from "./SecurityToolsPage";
+import DocumentViewerPage, { DocumentIndex } from "./DocumentViewerPage";
 
 const CRM = () => {
     const location = useLocation();
@@ -26,7 +23,7 @@ const CRM = () => {
         const pathSegments = location.pathname.split('/').filter(Boolean);
         const breadcrumbs = [
             { text: "Home", href: "/" },
-            { text: "AnyCompany CRM", href: "/crm" }
+            { text: "AnyCompany CRM App", href: "/crm" }
         ];
 
         if (pathSegments.length > 1) {
@@ -46,16 +43,19 @@ const CRM = () => {
                     break;
                 case 'security':
                     breadcrumbs.push({ text: "Security Demo", href: "/crm/security" });
+                    break;
+                case 'docs':
+                    breadcrumbs.push({ text: "Design Docs", href: "/crm/docs" });
                     if (pathSegments.length > 2) {
-                        const subPage = pathSegments[2];
-                        const subPageNames: Record<string, string> = {
-                            'profile': 'SQL Injection',
-                            'comments': 'Cross-Site Scripting',
-                            'xss-advanced': 'Advanced XSS',
-                            'tools': 'Command Injection',
+                        const docNames: Record<string, string> = {
+                            'architecture-overview': 'Architecture Overview',
+                            'data-flow': 'Data Flow',
+                            'security-controls': 'Security Controls',
+                            'threat-model': 'Threat Model',
                         };
-                        if (subPageNames[subPage]) {
-                            breadcrumbs.push({ text: subPageNames[subPage], href: location.pathname });
+                        const docSlug = pathSegments[2];
+                        if (docNames[docSlug]) {
+                            breadcrumbs.push({ text: docNames[docSlug], href: location.pathname });
                         }
                     }
                     break;
@@ -102,10 +102,8 @@ const CRM = () => {
                                         <Route path="my-opportunities" element={<MyOpportunitiesPage />} />
                                         <Route path="team" element={<TeamPerformancePage />} />
                                         <Route path="security" element={<SecurityPage />} />
-                                        <Route path="security/profile" element={<SecurityProfilePage />} />
-                                        <Route path="security/comments" element={<SecurityCommentsPage />} />
-                                        <Route path="security/xss-advanced" element={<SecurityXssAdvancedPage />} />
-                                        <Route path="security/tools" element={<SecurityToolsPage />} />
+                                        <Route path="docs" element={<DocumentIndex />} />
+                                        <Route path="docs/:docSlug" element={<DocumentViewerPage />} />
                                     </Routes>
                                 </ErrorBoundary>
                             </SpaceBetween>

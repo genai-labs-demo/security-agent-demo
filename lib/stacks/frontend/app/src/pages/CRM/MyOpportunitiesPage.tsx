@@ -36,6 +36,7 @@ import { Opportunity, OpportunityStage } from './types';
 import { LoadingSpinner, ErrorAlert } from '../../common/components';
 import { fetchOpportunities, searchOpportunities } from '../../services/api';
 import { getCurrentUser } from 'aws-amplify/auth';
+import XSSLab from './components/security/XSSLab';
 
 /**
  * Calculate personal pipeline metrics for the current user
@@ -95,10 +96,11 @@ const OpportunityNotes = () => {
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editText, setEditText] = useState('');
   const [displayName, setDisplayName] = useState('You');
-  const [notes, setNotes] = useState<{ author: string; text: string; date: string }[]>([
-    { author: "Sarah Chen", text: "Customer requested a follow-up demo next week. Need to prepare updated pricing.", date: new Date(Date.now() - 86400000 * 2).toLocaleString() },
-    { author: "Michael Torres", text: "Spoke with VP of Engineering — they're evaluating two other vendors. We need to highlight our security features.", date: new Date(Date.now() - 86400000).toLocaleString() },
+  const [notes, setNotes] = useState<{ id: number; author: string; text: string; date: string }[]>([
+    { id: 1, author: "Sarah Chen", text: "Customer requested a follow-up demo next week. Need to prepare updated pricing.", date: new Date(Date.now() - 86400000 * 2).toLocaleString() },
+    { id: 2, author: "Michael Torres", text: "Spoke with VP of Engineering — they're evaluating two other vendors. We need to highlight our security features.", date: new Date(Date.now() - 86400000).toLocaleString() },
   ]);
+  const [nextId, setNextId] = useState(3);
 
   useEffect(() => {
     const fetchUser = async () => {
@@ -116,7 +118,8 @@ const OpportunityNotes = () => {
 
   const addNote = () => {
     if (!noteInput.trim()) return;
-    setNotes(prev => [{ author: displayName, text: noteInput, date: new Date().toLocaleString() }, ...prev]);
+    setNotes(prev => [{ id: nextId, author: displayName, text: noteInput, date: new Date().toLocaleString() }, ...prev]);
+    setNextId(prev => prev + 1);
     setNoteInput('');
   };
 
@@ -139,33 +142,33 @@ const OpportunityNotes = () => {
 
   return (
     <Container header={<Header variant="h2" description="Add notes and comments to your opportunities">Opportunity Notes</Header>}>
-      <SpaceBetween size="m">
+      <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
         <Textarea value={noteInput} onChange={({ detail }) => setNoteInput(detail.value)} placeholder="Add a note about an opportunity..." rows={2} />
         <Button variant="primary" onClick={addNote}>Add Note</Button>
         {notes.map((note, i) => (
-          <div key={i} style={{ padding: "12px", background: "rgba(0,0,0,0.02)", borderRadius: "8px", border: "1px solid rgba(0,0,0,0.06)" }}>
+          <div key={`note-${note.id}`} style={{ padding: "12px", background: "rgba(0,0,0,0.02)", borderRadius: "8px", border: "1px solid rgba(0,0,0,0.06)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <Box variant="small" color="text-body-secondary">{note.author} — {note.date}</Box>
-              <SpaceBetween direction="horizontal" size="xs">
+              <div style={{ display: "flex", gap: "8px" }}>
                 <Button variant="inline-link" onClick={() => startEdit(i)}>Edit</Button>
                 <Button variant="inline-link" onClick={() => deleteNote(i)}>Delete</Button>
-              </SpaceBetween>
+              </div>
             </div>
             {editingIndex === i ? (
-              <SpaceBetween size="xs">
+              <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "8px" }}>
                 <Textarea value={editText} onChange={({ detail }) => setEditText(detail.value)} rows={2} />
-                <SpaceBetween direction="horizontal" size="xs">
+                <div style={{ display: "flex", gap: "8px" }}>
                   <Button variant="primary" onClick={saveEdit}>Save</Button>
                   <Button onClick={() => { setEditingIndex(null); setEditText(''); }}>Cancel</Button>
-                </SpaceBetween>
-              </SpaceBetween>
+                </div>
+              </div>
             ) : (
               /* VULNERABILITY: Stored XSS — rendering note content without encoding */
               <div dangerouslySetInnerHTML={{ __html: note.text }} style={{ marginTop: "4px" }} />
             )}
           </div>
         ))}
-      </SpaceBetween>
+      </div>
     </Container>
   );
 };
@@ -386,6 +389,9 @@ export const MyOpportunitiesPage: React.FC = () => {
       }
     >
       <SpaceBetween size="l">
+        {/* XSS Security Lab */}
+        <XSSLab />
+
         {/* Personal Pipeline Metrics */}
         <Container
           header={

@@ -50,7 +50,7 @@ const LandingPage = () => {
                 <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7 }}>
                     {/* Badge */}
                     <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "20px", padding: "6px 16px", marginBottom: "28px", fontSize: "13px", color: "#94a3b8" }}>
-                        {"\u2728"} Frontier Agent
+                        {"\u2728"} Managed autonomous AI agent
                     </div>
 
                     <h1 style={{ fontSize: "clamp(36px, 6vw, 56px)", fontWeight: 700, color: "#f1f5f9", margin: "0 0 20px", letterSpacing: "-0.03em", lineHeight: 1.15 }}>
@@ -58,8 +58,12 @@ const LandingPage = () => {
                         <span style={{ background: "linear-gradient(135deg,#6366f1,#a855f7)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>Demo</span>
                     </h1>
 
-                    <p style={{ fontSize: "18px", color: "#94a3b8", maxWidth: "560px", margin: "0 auto 40px", lineHeight: 1.7 }}>
+                    <p style={{ fontSize: "18px", color: "#94a3b8", maxWidth: "560px", margin: "0 auto 20px", lineHeight: 1.7 }}>
                         An AI-powered security agent that performs automated design reviews, code analysis, and penetration testing to find vulnerabilities in your applications.
+                    </p>
+
+                    <p style={{ fontSize: "14px", color: "#64748b", maxWidth: "560px", margin: "0 auto 40px", lineHeight: 1.6, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "10px", padding: "14px 20px" }}>
+                        This is a sample CRM application built solely to give the AWS Security Agent a realistic target for running design reviews, security requirements analysis, and penetration tests.
                     </p>
 
                     {/* CTAs */}
@@ -67,7 +71,7 @@ const LandingPage = () => {
                         <motion.button whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}
                             onClick={() => navigate("/crm")}
                             style={{ display: "inline-flex", alignItems: "center", gap: "8px", background: "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#fff", border: "none", borderRadius: "10px", padding: "14px 28px", fontSize: "15px", fontWeight: 600, cursor: "pointer", boxShadow: "0 4px 20px rgba(99,102,241,0.35)" }}>
-                            Go to Error Simulator {"\u2192"}
+                            Go to CRM App {"\u2192"}
                         </motion.button>
                         <motion.button whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}
                             onClick={() => window.open("https://app-128b7ba1-4b4a-4d72-8d51-462bd04d2981.securityagent.global.app.aws", "_blank")}

@@ -9,6 +9,7 @@ import {
     Source,
 } from "aws-cdk-lib/aws-codebuild";
 import { Effect, PolicyStatement } from "aws-cdk-lib/aws-iam";
+import { Key } from "aws-cdk-lib/aws-kms";
 import { Code, Function, Runtime } from "aws-cdk-lib/aws-lambda";
 import { IBucket } from "aws-cdk-lib/aws-s3";
 import { Asset } from "aws-cdk-lib/aws-s3-assets";
@@ -63,11 +64,17 @@ export class StaticWebsiteBuild extends Construct {
             };
         }
 
+        const encryptionKey = new Key(this, "buildEncryptionKey", {
+            enableKeyRotation: true,
+            description: "KMS key for CodeBuild project encryption",
+        });
+
         this.project = new Project(this, "buildProject", {
             source: Source.s3({
                 bucket: sourceAsset.bucket,
                 path: sourceAsset.s3ObjectKey,
             }),
+            encryptionKey,
             buildSpec: BuildSpec.fromObject({
                 version: "0.2",
                 phases: {
@@ -96,7 +103,6 @@ export class StaticWebsiteBuild extends Construct {
         }));
 
         NagSuppressions.addResourceSuppressions(this.project, [
-            { id: "AwsSolutions-CB4", reason: "KMS encryption not required for demo environment" },
             { id: "AwsSolutions-IAM5", reason: "Wildcard permissions required for S3 sync and CloudFront invalidation" },
         ], true);
 

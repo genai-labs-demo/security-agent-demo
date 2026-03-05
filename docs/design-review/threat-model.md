@@ -56,7 +56,7 @@ This threat model covers the AnyCompany CRM application including its frontend, 
 |--------|------|------------|--------|
 | Database credential exposure | Low | Secrets Manager, no hardcoded credentials | Mitigated |
 | Error message leakage | Medium | Error handler formats responses, but stack traces may leak in logs | Partially Mitigated |
-| Demo credential exposure on login page | Low | Password masked with bullet characters, autofill styling overridden | Mitigated |
+| Demo credential exposure on login page | Low | Demo credentials removed from login page entirely | Mitigated |
 | S3 bucket data exposure | Low | CORS restrictions, authenticated access only | Mitigated |
 | VPC traffic inspection | Low | VPC Flow Logs enabled for rejected traffic | Mitigated |
 | Security demo data exposure via unauthenticated endpoints | Medium | Demo data only (synthetic `security_users` and `security_comments` tables); no real customer data accessible via unauthenticated endpoints | Accepted (Demo) |
@@ -88,7 +88,7 @@ This threat model covers the AnyCompany CRM application including its frontend, 
 ### Frontend to CloudFront
 - **Transport**: HTTPS enforced via CloudFront (TLS 1.2 minimum, 2021 policy)
 - **WAF**: CloudFront WAF with Common Rule Set, IP Reputation List, Bot Control (block mode); Security Agent allowlisted at priority 0
-- **Custom Domain**: secagentdemo.jossai.people.aws.dev with ACM certificate
+- **Custom Domain**: app.secagent.ai.demo.aws with ACM certificate
 
 ### CloudFront to API Gateway (API Proxy)
 - **Path Rewrite**: CloudFront Function rewrites `/api/*` to `/prod/*`

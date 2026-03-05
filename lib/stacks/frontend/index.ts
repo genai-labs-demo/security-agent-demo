@@ -26,9 +26,9 @@ import { CommonBucket } from "../../common/constructs/s3";
 import { CommonStack } from "../../common/constructs/stack";
 import { StaticWebsiteBuild } from "../../common/constructs/static-website";
 
-const CUSTOM_DOMAIN = "secagentdemo.jossai.people.aws.dev";
-const HOSTED_ZONE_ID = "Z00429881ZY3EVX6D1409";
-const HOSTED_ZONE_NAME = "jossai.people.aws.dev";
+const CUSTOM_DOMAIN = "app.secagent.ai.demo.aws";
+const HOSTED_ZONE_ID = "Z025501368ZLWUUHKBI6";
+const HOSTED_ZONE_NAME = "secagent.ai.demo.aws";
 
 export class Frontend extends CommonStack {
     public readonly websiteBucket: Bucket;
@@ -195,8 +195,8 @@ export class Frontend extends CommonStack {
             },
         ]);
 
-        // Route 53 alias record: secagentdemo.jossai.people.aws.dev -> CloudFront
-        new ARecord(this, "aliasRecord", {
+        // Route 53 alias record: app.secagent.ai.demo.aws -> CloudFront
+        new ARecord(this, "dnsAliasRecord", {
             zone: hostedZone,
             recordName: CUSTOM_DOMAIN,
             target: RecordTarget.fromAlias(new CloudFrontTarget(distribution)),

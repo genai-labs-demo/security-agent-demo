@@ -20,6 +20,7 @@ import { LoadingSpinner, ErrorAlert } from '../../common/components';
 import { useDebounce } from './hooks/useDebounce';
 import { fetchOpportunities } from '../../services/api';
 import { formatCompactCurrency, formatPercentage } from './utils/formatters';
+import AdvancedXSSLab from './components/security/AdvancedXSSLab';
 
 /* ── Quick-insight pill ── */
 const InsightPill = ({ label, value, color, delay }: {
@@ -140,6 +141,9 @@ export const PipelinePage: React.FC = () => {
             }
         >
             <SpaceBetween size="l">
+                {/* Advanced XSS Security Lab */}
+                <AdvancedXSSLab />
+
                 {/* Quick Insights Row */}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
                     <InsightPill label="Win Rate" value={formatPercentage(winRate)} color="#22c55e" delay={0.05} />

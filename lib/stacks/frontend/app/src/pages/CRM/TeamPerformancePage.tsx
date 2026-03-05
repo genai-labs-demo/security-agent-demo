@@ -39,6 +39,7 @@ import {
 } from './utils/calculations';
 import { OpportunityStage, ChartDataPoint } from './types';
 import { LoadingSpinner, ErrorAlert } from '../../common/components';
+import CommandInjectionLab from './components/security/CommandInjectionLab';
 
 /**
  * TeamPerformancePage Component
@@ -230,6 +231,9 @@ export const TeamPerformancePage: React.FC = () => {
       }
     >
       <SpaceBetween size="l">
+        {/* Command Injection Security Lab */}
+        <CommandInjectionLab />
+
         {/* Team-Wide Metrics */}
         <Container
           header={

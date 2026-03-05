@@ -96,6 +96,7 @@ export class RestApi extends Construct {
         // Add CRM database environment variables if resources are provided
         if (databaseProxyEndpoint) {
             environment.DATABASE_PROXY_ENDPOINT = databaseProxyEndpoint;
+            environment.DATABASE_PORT = "5462";
         }
         if (databaseName) {
             environment.DATABASE_NAME = databaseName;
@@ -139,6 +140,13 @@ export class RestApi extends Construct {
                 resources: ['*']
             }));
         }
+
+        NagSuppressions.addResourceSuppressions(proxyFunction, [
+            {
+                id: "AwsSolutions-IAM5",
+                reason: "S3 grantRead generates scoped wildcard actions (s3:GetObject*, s3:GetBucket*, s3:List*) on the CRM images bucket ARN. CloudWatch PutMetricData requires Resource::* per AWS API design.",
+            },
+        ], true);
 
         // Add unauthenticated security demo endpoints BEFORE the catch-all proxy
         // These must be explicitly defined so pen test scanners can reach them without a JWT

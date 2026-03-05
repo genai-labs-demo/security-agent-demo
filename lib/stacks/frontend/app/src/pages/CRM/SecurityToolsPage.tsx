@@ -46,7 +46,6 @@ const SecurityToolsPage = () => {
             setError(err?.message || "Request failed");
         } finally {
             setLoading(false);
-            setTimeout(() => resultRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
         }
     };
 
@@ -62,13 +61,7 @@ const SecurityToolsPage = () => {
                         <Box>Command Injection allows attackers to execute arbitrary operating system commands on the server. When user input is passed directly to system command execution functions without sanitization, attackers can inject additional commands using shell metacharacters.</Box>
                         <Box variant="h4">Why It's Dangerous</Box>
                         <Box>Complete server compromise, data exfiltration, system manipulation, lateral movement, and denial of service.</Box>
-                        <Box variant="h4">How to Fix It</Box>
-                        <pre style={{ background: "rgba(255,255,255,0.05)", padding: "15px", borderRadius: "6px", fontSize: "13px", overflow: "auto" }}>{`# ❌ VULNERABLE (shell command with user input)
-command = f"nslookup {user_input}"
-subprocess.run(command, shell=True)
 
-# ✅ SECURE (use subprocess without shell)
-subprocess.run(["nslookup", user_input], shell=False)`}</pre>
                     </SpaceBetween>
                 </Container>
 
@@ -116,7 +109,8 @@ subprocess.run(["nslookup", user_input], shell=False)`}</pre>
                                 </SpaceBetween>
                             ) : (
                                 <Alert type="error" header="Error">
-                                    {result.error}{result.message && <><br />{result.message}</>}
+                                    {typeof result.error === 'object' ? result.error.message || JSON.stringify(result.error) : result.error}
+                                    {result.message && <><br />{typeof result.message === 'object' ? JSON.stringify(result.message) : result.message}</>}
                                     {result.output && <pre style={{ marginTop: "10px", fontSize: "12px" }}>{result.output}</pre>}
                                 </Alert>
                             )}

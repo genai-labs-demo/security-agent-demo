@@ -4,8 +4,8 @@ import { getCurrentUser, signOut } from "aws-amplify/auth";
 import { useEffect, useState } from "react";
 import AboutModal from "./AboutModal.tsx";
 
-const APP_NAME = "AnyCompany CRM";
-const CRM_LOGO = "/crm/branding/logo-320.png";
+const APP_NAME = "AWS Security Agent Demo";
+const CRM_LOGO = "/Arch_AWS-Security-Agent_32.png";
 
 const TopBar = () => {
     const [theme, setTheme] = useState<Mode>(() => {

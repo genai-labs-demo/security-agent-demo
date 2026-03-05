@@ -54,7 +54,39 @@ export class Backend extends CommonStack {
                 id: "AwsSolutions-IAM4",
                 reason: "Lambda functions require managed policies to interface with the vpc.",
             },
+            {
+                id: "AwsSolutions-SMG4",
+                reason: "Secret rotation temporarily disabled — hosted rotation nested stack fails due to Lambda function name length exceeding 64 chars.",
+            },
         ]);
+
+        // Suppress IAM5 for CDK-generated default policies that use wildcard
+        // object-level permissions scoped to specific resource ARNs.
+        // These do NOT affect the intentional security demo vulnerabilities
+        // (IDOR, SQLi, XSS, Command Injection) which live in application code.
+        const iam5Suppression = [
+            {
+                id: "AwsSolutions-IAM5",
+                reason: "CDK high-level constructs (grantRead, grantReadWrite, Provider framework) generate scoped wildcard permissions on specific resource ARNs.",
+            },
+        ];
+        NagSuppressions.addResourceSuppressions(
+            auth.identityPool.authenticatedRole, iam5Suppression, true
+        );
+        NagSuppressions.addResourceSuppressions(
+            database.node.findChild("seedProvider"), iam5Suppression, true
+        );
+        NagSuppressions.addResourceSuppressions(
+            restApi.node.findChild("proxyFunction"), iam5Suppression, true
+        );
+        const bucketDeployment = this.node.tryFindChild(
+            "Custom::CDKBucketDeployment8693BB64968944B69AAFB0CC9EB8756C"
+        );
+        if (bucketDeployment) {
+            NagSuppressions.addResourceSuppressions(
+                bucketDeployment, iam5Suppression, true
+            );
+        }
 
         this.environmentVariables = {
             VITE_REGION: this.region!,

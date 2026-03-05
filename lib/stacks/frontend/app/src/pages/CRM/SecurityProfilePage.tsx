@@ -44,7 +44,6 @@ const SecurityProfilePage = () => {
             setError(err?.message || "Request failed");
         } finally {
             setLoading(false);
-            setTimeout(() => resultRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
         }
     };
 
@@ -60,13 +59,7 @@ const SecurityProfilePage = () => {
                         <Box>SQL Injection is a code injection technique that exploits security vulnerabilities in an application's database layer. When user input is directly concatenated into SQL queries without proper parameterization, attackers can inject malicious SQL code to bypass authentication, extract sensitive data, or modify database contents.</Box>
                         <Box variant="h4">Why It's Dangerous</Box>
                         <Box>Authentication bypass, unauthorized data access, data manipulation, and complete database compromise.</Box>
-                        <Box variant="h4">How to Fix It</Box>
-                        <pre style={{ background: "rgba(255,255,255,0.05)", padding: "15px", borderRadius: "6px", fontSize: "13px", overflow: "auto" }}>{`// ❌ VULNERABLE (string concatenation)
-const query = \`SELECT * FROM users WHERE id = \${userId}\`;
 
-// ✅ SECURE (parameterized query)
-const query = 'SELECT * FROM users WHERE id = $1';
-pool.query(query, [userId]);`}</pre>
                     </SpaceBetween>
                 </Container>
 
@@ -126,7 +119,8 @@ pool.query(query, [userId]);`}</pre>
                                 </SpaceBetween>
                             ) : (
                                 <Alert type="error" header="Error">
-                                    {result.error}{result.message && <><br />{result.message}</>}
+                                    {typeof result.error === 'object' ? result.error.message || JSON.stringify(result.error) : result.error}
+                                    {result.message && <><br />{typeof result.message === 'object' ? JSON.stringify(result.message) : result.message}</>}
                                 </Alert>
                             )}
                         </Container>

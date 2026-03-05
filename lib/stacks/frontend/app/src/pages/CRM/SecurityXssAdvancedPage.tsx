@@ -98,7 +98,7 @@ document.getElementById('greeting').textContent = 'Hello ' + name;`}</pre>
                         <Container header={<Header variant="h3">Greeting</Header>}><div ref={greetingRef}><Box color="text-body-secondary">Enter your name above to see a greeting</Box></div></Container>
                         <Container header={<Header variant="h3">📝 Sample DOM-based XSS Payloads</Header>}>
                             <SpaceBetween size="xs">
-                                {DOM_PAYLOADS.map((p) => (<Button key={p} variant="inline-link" onClick={() => setNameInput(p)}><code>{p}</code></Button>))}
+                                {DOM_PAYLOADS.map((p) => (<Button key={p} variant="inline-link" onClick={() => { setNameInput(p); updateGreeting(p); }}><code>{p}</code></Button>))}
                             </SpaceBetween>
                         </Container>
                     </SpaceBetween>

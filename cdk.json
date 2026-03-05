@@ -31,8 +31,8 @@
             "group": "genai-labs/demo-assets",
             "project": "security-agent-demo"
         },
-        "customDomain": "secagentdemo.jossai.people.aws.dev",
-        "hostedZoneName": "jossai.people.aws.dev",
+        "customDomain": "app.secagent.ai.demo.aws",
+        "hostedZoneName": "secagent.ai.demo.aws",
         "@aws-cdk/aws-lambda:recognizeLayerVersion": true,
         "@aws-cdk/core:checkSecretUsage": true,
         "@aws-cdk/core:target-partitions": ["aws", "aws-cn"],

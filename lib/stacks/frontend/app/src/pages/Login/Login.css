@@ -446,74 +446,7 @@ body:has(.login-page) {
   font-family: system-ui, -apple-system, sans-serif;
 }
 
-.demo-creds {
-  background: rgba(255, 255, 255, 0.04);
-  border-radius: 12px;
-  padding: 14px 16px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-sizing: border-box;
-  width: 100%;
-  margin-top: 8px;
-}
-
-.demo-creds-title {
-  font-size: 12px;
-  font-weight: 600;
-  color: #94a3b8 !important;
-  margin-bottom: 10px;
-  font-family: system-ui, -apple-system, sans-serif;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
-.demo-creds-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 6px;
-  padding: 6px 10px;
-  border-radius: 8px;
-  transition: background 0.2s ease;
-}
-
-.demo-creds-row:hover {
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.demo-creds-row:last-child {
-  margin-bottom: 0;
-}
-
-.demo-creds-text {
-  font-size: 13px;
-  color: #cbd5e1 !important;
-  font-family: 'SF Mono', 'Fira Code', monospace, system-ui;
-}
-
-.demo-creds-text strong {
-  font-weight: 600;
-  color: #e2e8f0 !important;
-}
-
-.demo-copy-btn {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  cursor: pointer;
-  padding: 4px 8px;
-  color: #94a3b8;
-  font-size: 13px;
-  flex-shrink: 0;
-  margin-left: 8px;
-  line-height: 1;
-  border-radius: 6px;
-  transition: all 0.2s ease;
-}
-
-.demo-copy-btn:hover {
-  background: rgba(99, 102, 241, 0.15);
-  border-color: rgba(99, 102, 241, 0.3);
-  color: #818cf8;
-}
+/* Demo credentials section removed */
 
 /* ── Particle canvas ── */
 .login-particles {

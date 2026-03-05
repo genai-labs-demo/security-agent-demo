@@ -2,13 +2,13 @@
 
 ## Overview
 
-This document outlines the demo preparation and polish checklist for the AnyCompany CRM platform. The platform is designed to showcase the "before BigWeaver" state - a fully functional CRM without email automation features.
+This document outlines the demo preparation and polish checklist for the AnyCompany CRM platform.
 
 ## Demo Narrative
 
-**Key Message**: "This is AnyCompany CRM before BigWeaver adds email automation capabilities"
+**Key Message**: "This is AnyCompany CRM — a fully functional sales opportunity management platform"
 
-### What the Platform Has (Before BigWeaver)
+### What the Platform Has
 ✅ Complete sales opportunity pipeline management
 ✅ Account health tracking and management
 ✅ Personal opportunity views for sales reps
@@ -17,14 +17,6 @@ This document outlines the demo preparation and polish checklist for the AnyComp
 ✅ Real-time pipeline metrics
 ✅ Quota attainment tracking
 ✅ Responsive design for mobile and desktop
-
-### What BigWeaver Will Add (Demo Scenario)
-❌ Automated follow-up email templates based on opportunity stage
-❌ Email sending functionality integrated with opportunities
-❌ Email activity logging in opportunity timeline
-❌ Email template management UI
-❌ Email tracking and analytics
-❌ Automated reminder notifications
 
 ## Visual Consistency Checklist
 
@@ -110,7 +102,6 @@ This document outlines the demo preparation and polish checklist for the AnyComp
 - "Here's the AnyCompany CRM pipeline dashboard showing all sales opportunities"
 - "We can see stage metrics at the top - Open Pipeline, New, Won, Lost, etc."
 - "The opportunities table shows all key information: account, amount, close date, stage"
-- "Notice there's NO email automation here - that's what BigWeaver will add"
 
 **Demo Actions**:
 1. Show stage metrics cards
@@ -125,8 +116,6 @@ This document outlines the demo preparation and polish checklist for the AnyComp
 - "We can see account revenue, employee count, and associated opportunities"
 - "Health status helps identify at-risk accounts"
 - "But there's no way to send automated emails to account contacts"
-
-**Demo Actions**:
 1. Toggle between card and table view
 2. Filter by industry (e.g., "Technology")
 3. Search for an account
@@ -158,13 +147,6 @@ This document outlines the demo preparation and polish checklist for the AnyComp
 3. View win rate by rep chart
 4. Scroll through individual rep performance cards
 5. Change time period filter
-
-### 5. BigWeaver Demo Transition
-**Talking Points**:
-- "Now, let's see what happens when BigWeaver adds email automation across 3 repos"
-- "BigWeaver will add email templates, sending logic, and activity tracking"
-- "This requires changes to the web frontend, email service, and notification service"
-- "Watch how BigWeaver coordinates changes across all three repositories..."
 
 ## Pre-Demo Checklist
 
@@ -202,7 +184,7 @@ This document outlines the demo preparation and polish checklist for the AnyComp
 ## Demo Script
 
 ### Opening (30 seconds)
-"Welcome to AnyCompany CRM - a modern sales opportunity management platform. This is the 'before' state, before BigWeaver adds email automation capabilities. Let me show you what we have today."
+"Welcome to AnyCompany CRM - a modern sales opportunity management platform. Let me show you what we have today."
 
 ### Pipeline Dashboard (1 minute)
 "Here's our main pipeline dashboard. Sales reps can see all their opportunities organized by stage. We have filtering by date range, stage, owner, and search. The stage metrics at the top give us a quick overview of pipeline health. Notice there's no email functionality here - that's intentional."
@@ -216,8 +198,8 @@ This document outlines the demo preparation and polish checklist for the AnyComp
 ### Team Performance (45 seconds)
 "Managers get team-wide visibility with performance charts and individual rep metrics. But there's no automated email coaching or performance alerts."
 
-### Transition to BigWeaver (30 seconds)
-"Now, this is where BigWeaver comes in. We want to add email automation - templates, sending, tracking - but that requires changes across three repositories: the web frontend, email service, and notification service. Let's see how BigWeaver handles this..."
+### Transition to AWS Security Agent (30 seconds)
+"Now, let's see the AWS Security Agent in action — scanning the application for vulnerabilities and generating findings with remediation guidance."
 
 ## Success Criteria
 
@@ -241,11 +223,10 @@ This document outlines the demo preparation and polish checklist for the AnyComp
 ✅ No lag or stuttering
 
 ### Demo Requirements
-✅ Clear "before BigWeaver" narrative
+✅ Clear demo narrative
 ✅ Obvious gaps where email automation would go
 ✅ Realistic data that tells a story
 ✅ Smooth demo flow without technical issues
-✅ Ready for BigWeaver to add features
 
 ## Post-Demo Notes
 
@@ -259,8 +240,8 @@ This document outlines the demo preparation and polish checklist for the AnyComp
 - Note confusing elements
 - Capture improvement suggestions
 
-### BigWeaver Integration Points
-- Document where BigWeaver will add features
+### Post-Demo Notes
+- Document any technical issues encountered
 - Note any architectural changes needed
 - Capture integration requirements
 

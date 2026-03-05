@@ -6,7 +6,7 @@
  * opportunity count, and total opportunity value.
  */
 
-import { Table, Box } from '@cloudscape-design/components';
+import { Table, Box, Pagination } from '@cloudscape-design/components';
 import { Account } from '../../types';
 import { AccountHealthBadge } from './AccountHealthBadge';
 import { IndustryIcon } from '../shared/IndustryIcon';
@@ -20,6 +20,9 @@ interface AccountTableProps {
   sortingColumn?: string;
   sortingDescending?: boolean;
   onSortingChange?: (column: string, descending: boolean) => void;
+  pageSize?: number;
+  currentPage?: number;
+  onPageChange?: (page: number) => void;
 }
 
 export const AccountTable: React.FC<AccountTableProps> = ({
@@ -29,7 +32,13 @@ export const AccountTable: React.FC<AccountTableProps> = ({
   sortingColumn,
   sortingDescending,
   onSortingChange,
+  pageSize = 10,
+  currentPage = 1,
+  onPageChange,
 }) => {
+  const totalPages = Math.ceil(accounts.length / pageSize);
+  const paginatedAccounts = accounts.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
   return (
     <Table
       columnDefinitions={[
@@ -126,9 +135,23 @@ export const AccountTable: React.FC<AccountTableProps> = ({
           width: 120,
         },
       ]}
-      items={accounts}
+      items={paginatedAccounts}
       loading={loading}
       loadingText="Loading accounts..."
+      pagination={
+        totalPages > 1 ? (
+          <Pagination
+            currentPageIndex={currentPage}
+            pagesCount={totalPages}
+            onChange={({ detail }) => onPageChange?.(detail.currentPageIndex)}
+            ariaLabels={{
+              nextPageLabel: "Next page",
+              previousPageLabel: "Previous page",
+              pageLabel: (pageNumber) => `Page ${pageNumber} of ${totalPages}`,
+            }}
+          />
+        ) : undefined
+      }
       sortingColumn={
         sortingColumn
           ? {

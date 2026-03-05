@@ -1,317 +1,325 @@
-# AnyCompany CRM - AWS Agent Services Demo
+# AWS Security Agent Demo
 
-> **A demo application for showcasing AWS Agent services**
+> A purpose-built demo environment for showcasing the **AWS Security Agent** — an AI-powered service that performs automated penetration testing and vulnerability assessment on web applications.
 
-## Overview
+## What Is This?
 
-This is a demo application designed to highlight the functionality of AWS Agent services. It uses a fictitious CRM scenario (AnyCompany CRM) as a vehicle to demonstrate various AWS capabilities. This is not a real CRM system.
+This project deploys a realistic but intentionally vulnerable web application (a fictitious CRM called "AnyCompany CRM") so that the AWS Security Agent can scan it, discover vulnerabilities, and demonstrate its remediation capabilities.
 
-### Purpose
+The CRM app is not the point — it's the target. The Security Agent is the star.
 
-This application serves as a demonstration environment for:
-- AWS Agent services and capabilities
-- Serverless architecture patterns
-- AWS service integrations
-- Modern web application development on AWS
+## How It Works
 
-## Quick Links
+```
+┌─────────────────────┐     scans      ┌──────────────────────────┐
+│  AWS Security Agent │ ──────────────► │  AnyCompany CRM (target) │
+│  (pen test service) │                 │  - IDOR endpoints        │
+│                     │ ◄────────────── │  - SQL injection         │
+│  Finds vulns,       │    findings     │  - XSS (stored/reflected)│
+│  suggests fixes     │                 │  - Command injection     │
+└─────────────────────┘                 └──────────────────────────┘
+```
 
-- � **[Detailed Documentation](./README.demo.md)** - Complete CRM documentation
-- 🎯 **[Setup Guide](./lib/stacks/frontend/app/DEMO-PREPARATION.md)** - Deployment checklist and guide
-- 🖼️ **[Image Generation](./tools/README-crm-assets.md)** - Generate CRM assets with Bedrock
+1. **Deploy** the CRM application to your AWS account
+2. **Configure** the AWS Security Agent with the target domain and credentials
+3. **Run** a penetration test — the agent crawls the app, discovers endpoints, and tests for vulnerabilities
+4. **Review** findings — the agent reports discovered vulnerabilities with severity, evidence, and remediation guidance
 
-## Features
+## Intentional Vulnerabilities
 
-### Pipeline Dashboard
-- Track sample opportunities across sales stages
-- Basic metrics and filtering
-- Search and sort functionality
+The application includes deliberately vulnerable endpoints for the Security Agent to discover:
 
-### Account Management
-- View sample customer accounts
-- Industry categorization
-- Basic account details
+| Vulnerability | Endpoint | Description |
+|---|---|---|
+| IDOR | `/api/security-profile/{id}` | Direct object references without authorization checks |
+| SQL Injection | `/api/security-search` | Unsanitized user input in database queries |
+| Stored XSS | `/api/security-comments` | User input rendered without escaping |
+| Command Injection | `/api/security-tools/ping` | OS command execution with user-supplied input |
 
-### Personal Pipeline
-- Individual sales rep views
-- Sample quota tracking
-- Performance metrics
+These endpoints are intentionally unauthenticated (`AuthorizationType.NONE`) so the Security Agent's pen test scanner can reach them without a JWT token.
 
-### Team Performance
-- Team-wide analytics
-- Individual rep performance
-- Basic reporting
+All other CRM endpoints (`/accounts`, `/opportunities`, `/team-members`, etc.) are protected by Cognito authorization and represent the "secure" portion of the application.
 
+## Architecture
+
+**Frontend:** React 18 + TypeScript, Cloudscape Design System, hosted on S3 + CloudFront with WAF
+**Backend:** API Gateway + Lambda (Python), RDS PostgreSQL with RDS Proxy, VPC with private subnets
+**Auth:** Amazon Cognito (User Pool + Identity Pool), WAF with managed rule groups
+**Security:** CDK Nag (AWS Solutions checks), VPC flow logs, encrypted storage, secret rotation
+
+
+```
+┌─────────────┐     ┌──────────────┐     ┌─────────────────┐
+│  CloudFront  │────▶│  S3 Bucket   │     │  Cognito User   │
+│ Distribution │     │ (Static App) │     │  Pool + IdP     │
+└──────┬───────┘     └──────────────┘     └────────┬────────┘
+       │                                           │
+       │  /api/* rewrite                           │
+       ▼                                           │
+┌──────────────┐                                   │
+│ CloudFront   │                                   │
+│ WAF (Global) │                                   │
+└──────┬───────┘                                   │
+       │                                           │
+┌──────▼──────┐                                    │
+│ API Gateway │◀───────────────────────────────────┘
+│  (REST)     │   JWT auth (CRM endpoints only)
+└─────┬───────┘   No auth (security-* endpoints)
+      │
+┌─────▼──────┐     ┌──────────────┐
+│  Lambda    │────▶│ Secrets Mgr  │
+│  (Proxy)   │     └──────────────┘
+└─────┬──────┘
+      │
+┌─────▼──────────┐
+│   RDS Proxy    │
+└─────┬──────────┘
+      │
+┌─────▼──────────┐
+│  RDS Postgres  │
+│   (Private)    │
+└────────────────┘
+```
+
+**Stack:** React + TypeScript (Cloudscape) / Python Lambda / RDS PostgreSQL 15 / CDK (TypeScript)
+
+## Security Controls
+
+Despite the intentional vulnerabilities on demo endpoints, the infrastructure follows AWS security best practices:
+
+- VPC with private subnets, NAT gateway, and VPC endpoints
+- WAF v2 on both CloudFront (global) and API Gateway (regional)
+- Cognito authentication on all CRM endpoints
+- RDS encryption at rest, non-default port, secret rotation
+- S3 bucket encryption, SSL enforcement, access logging
+- CloudFront TLS 1.2, OAC for S3 origin
+- CDK Nag (AwsSolutions) with zero non-compliant findings
+
+See **[Security Controls](./docs/design-review/security-controls.md)** and **[CDK Nag Report](./docs/design-review/cdk-nag-report.pdf)** for details.
 
 ## Getting Started
 
 ### Prerequisites
 
-- Node.js 18+
-- Python 3.9+
+- Node.js 22+
+- Python 3.12+
 - Docker
 - AWS CDK CLI
-- AWS Account with appropriate permissions
+- AWS account with appropriate permissions
 
-### Post-Deployment: Create a Demo User
+### Deploy
 
-After deploying, you need to create a Cognito user to log in to the CRM app. Run the following command (replace the values with your deployed User Pool ID and desired credentials):
+```bash
+# Install dependencies
+npm install
+
+# Deploy using the kit CLI
+npm run kit
+# Select your account → "Deploy CDK Stack(s)"
+
+# Or deploy directly
+npx aws-cdk@2.1105.0 deploy "dev/*" --require-approval never
+```
+
+### Create a Demo User
 
 ```bash
 aws cognito-idp admin-create-user \
-  --user-pool-id <YOUR_USER_POOL_ID> \
+  --user-pool-id <USER_POOL_ID> \
   --username <EMAIL> \
   --temporary-password <TEMP_PASSWORD> \
   --user-attributes Name=email,Value=<EMAIL> Name=email_verified,Value=true \
-  --region <YOUR_REGION>
+  --region us-east-1
 ```
 
-On first login, you'll be prompted to set a permanent password. The User Pool ID can be found in the CDK deployment output or in the `.env` file (`VITE_USER_POOL_ID`).
+The User Pool ID is in the CDK output or the frontend `.env` file (`VITE_USER_POOL_ID`).
 
-The Security Agent portal (accessed via "Open Security Agent Portal") uses separate credentials — set those up in the Security Agent console.
+### Configure the Security Agent
 
-### Post-Deployment: Create a Custom Domain (DNS)
+1. Open the AWS Security Agent console
+2. Create a new penetration test
+3. Set target URL: `https://app.secagent.ai.demo.aws/api/`
+4. Add credentials (email/password from the Cognito user above)
+5. Add accessible URLs (Cognito, API Gateway, CDNs) — see **[Pen Test Guide](./docs/pentest-guide.md)**
+6. Run the scan
 
-The AWS Security Agent requires a target domain to run penetration tests against. After CDK deployment creates your CloudFront distribution, you need to set up a custom domain that points to it.
+The agent will discover the intentional vulnerabilities and generate findings with remediation guidance.
 
-If using an Isengard account, create a `people.aws.dev` subdomain via [Supernova](https://supernova.amazon.dev/):
+### Resource Integration
 
-1. Deploy the CDK stacks first — this creates the `NovaDomainServiceRoute53Role` IAM role automatically (see `lib/stacks/dns/index.ts`)
-2. Go to https://supernova.amazon.dev/ and fill out the form:
-   - **Are you in AWS or CDO?** → Select `AWS`
-   - **Select your organization** → Select `people`
-   - **Enter your sub-domain** → Your alias (e.g., `jossai`)
-   - **Owner Bindle ID** → Your team's Bindle resource ID (find it at [Bindle UI](https://bindles.amazon.com/))
-   - **IAM Role ARN for SuperNova** → Use the role ARN from the CDK deployment output (`NovaDomainServiceRoute53Role`). The role grants Supernova's account (`791674550530`) permission to manage Route 53 hosted zones in your account. The trust policy and Route 53 permissions are created automatically by the `dns` stack.
-3. After the domain is provisioned, update `cdk.json`:
-   - Set `customDomain` to your new domain (e.g., `yourapp.youralias.people.aws.dev`)
-   - Set `hostedZoneName` to the parent zone (e.g., `youralias.people.aws.dev`)
-4. Redeploy to create the CloudFront alias record and SSL certificate
-5. Use this domain as the **Target Domain** when configuring the Security Agent
+After cloning, configure for your environment:
 
-### Quick Start
+1. **AWS Account** — Update `cdk.json` → `context.accounts.dev` with your account number and region
+2. **Custom Domain** — Update `CUSTOM_DOMAIN`, `HOSTED_ZONE_ID`, `HOSTED_ZONE_NAME` in `lib/stacks/frontend/index.ts`
+3. **API Gateway Domain** — After first deploy, update the hardcoded domain in `lib/stage.ts` (`frontend.addApiProxy(...)`)
+4. **GitHub Repo** — The Security Agent needs a repo to scan; push this code to your own repo
 
-```bash
-# 1. Clone and install
-git clone [repository-url]
-cd [repository-name]
-npm install
-
-# 2. Deploy to AWS using kit CLI
-npm run kit
-# Select your account, then choose "Deploy CDK Stack(s)"
-
-# Or deploy all stacks directly
-npm run kit -- deploy dev --all
-
-# 3. Access the application
-# Open CloudFormation console → Find frontend stack → Click CloudFront URL
-```
-
-### Local Development
-
-```bash
-# Start frontend dev server
-npm run -w frontend dev
-
-# Build frontend
-npm run -w frontend build
-
-# Run tests
-npm run -w frontend test
-```
-
-Visit http://localhost:5173 to see the demo application locally.
-
-
-## Architecture
-
-Create professional images using Amazon Bedrock Nova Canvas:
-
-```bash
-# Generate all 99 images (~17 minutes, ~$4)
-./tools/generate-crm-assets.sh
-
-# Or generate specific categories
-python3 tools/generate-sales-avatars.py      # 12 sales rep avatars
-python3 tools/generate-company-logos.py      # 75 company logos
-python3 tools/generate-industry-icons.py     # 5 industry icons
-python3 tools/generate-empty-states.py       # 3 empty state illustrations
-python3 tools/generate-app-logo.py           # 4 app logo sizes
-```
-
-See [tools/README-crm-assets.md](./tools/README-crm-assets.md) for details.
-
-
-## Architecture
-
-### Technology Stack
-
-**Frontend:**
-- React 18 + TypeScript
-- Vite build tool
-- AWS Cloudscape Design System
-- React Router v6
-- AWS Amplify for backend integration
-
-**Backend:**
-- Amazon S3 + CloudFront for hosting
-- Amazon Cognito for authentication
-- API Gateway + Lambda for REST API
-- Amazon RDS PostgreSQL with RDS Proxy
-- Amazon VPC with private subnets
-- AWS WAF for security
-
-### Project Structure
+## Project Structure
 
 ```
 ├── lib/stacks/
-│   ├── frontend/              # Frontend hosting and React app
-│   │   └── app/              # CRM application
-│   │       ├── src/pages/CRM/    # CRM pages and components
-│   │       └── README-CRM.md
-│   └── backend/              # Backend services
-│       ├── constructs/
-│       │   └── auth.ts       # Cognito authentication
-│       ├── rest-api/         # API Gateway REST API
-│       ├── database.ts       # RDS PostgreSQL database
-│       ├── networking.ts     # VPC configuration
-│       └── storage/          # S3 storage
-├── tools/                    # Image generation scripts
-│   ├── generate-crm-assets.sh
-│   └── README-crm-assets.md
-└── docs/                     # Documentation
-    └── kit/                  # Starter kit docs
+│   ├── frontend/           # CloudFront + S3 hosting, React app
+│   │   └── app/            # CRM application (scan target)
+│   ├── backend/
+│   │   ├── rest-api/       # API Gateway + Lambda proxy
+│   │   │   └── proxy/
+│   │   │       └── handlers/
+│   │   │           └── security_handler.py  ← intentional vulns
+│   │   ├── database.ts     # RDS PostgreSQL + secret rotation
+│   │   ├── networking.ts   # VPC, subnets, endpoints
+│   │   └── constructs/
+│   │       └── auth.ts     # Cognito + WAF
+│   └── dns/                # Route 53 IAM role
+├── docs/
+│   ├── pentest-guide.md    # Scanner configuration guide
+│   └── design-review/      # Architecture, security controls, CDK nag
+└── tools/                  # CLI, asset generation, nag report
 ```
-
-## Fictitious Data
-
-The application includes generated fictitious data for demo purposes:
-
-- **50,000 Mock Opportunities**: Randomly generated for demonstration
-- **75 Fictitious Accounts**: Sample company data
-- **12 Demo Users**: Simulated sales reps and managers
-
-**Note**: All data is completely fictitious and generated for demonstration purposes only.
-
-
-## Future Enhancements
-
-### Performance Targets
-- ✅ Page load: < 2 seconds
-- ✅ Filter response: < 500ms
-- ✅ Search response: < 300ms (debounced)
-- ✅ Table sorting: Instant
-
-### Code Quality
-- TypeScript strict mode
-- ESLint for linting
-- Memoized components and calculations
-- Debounced search inputs
-- Performance logging
-
-### Accessibility
-- WCAG 2.1 AA compliant
-- Keyboard navigation
-- Screen reader compatible
-- Proper ARIA labels
-
-### Browser Support
-- Chrome 90+
-- Firefox 88+
-- Safari 14+
-- Edge 90+
-
-
-## Pricing Estimation
-
-| AWS Service | Monthly Cost (Estimated) |
-|-------------|-------------------------|
-| Amazon S3 | $5 - $20 |
-| Amazon CloudFront | $10 - $50 |
-| AWS WAF | $10 - $30 |
-| Amazon Cognito | $0 - $10 (first 50K MAU free) |
-| Amazon API Gateway | $5 - $20 |
-| Amazon RDS PostgreSQL | $50 - $150 |
-| **Total** | **$120 - $380/month** |
-
-*Use [AWS Pricing Calculator](https://calculator.aws/) for detailed estimates.*
 
 ## Documentation
 
-### Main Documentation
-- **[Detailed README](./README.demo.md)** - Complete CRM documentation
-- **[CRM Application](./lib/stacks/frontend/app/README-CRM.md)** - Frontend app docs
-- **[Image Generation](./tools/README-crm-assets.md)** - Asset generation guide
+| Document | Description |
+|---|---|
+| [Pen Test Guide](./docs/pentest-guide.md) | Vulnerability endpoints and scanner configuration |
+| [Security Controls](./docs/design-review/security-controls.md) | Infrastructure security measures |
+| [CDK Nag Report](./docs/design-review/cdk-nag-report.pdf) | AwsSolutions compliance report |
+| [Architecture Overview](./docs/design-review/architecture-overview.md) | System architecture and data flow |
+| [Threat Model](./docs/design-review/threat-model.md) | Threat analysis |
+| [CRM App Details](./README.demo.md) | CRM application documentation |
+| [Setup Guide](./lib/stacks/frontend/app/DEMO-PREPARATION.md) | Deployment checklist |
 
-### Starter Kit Documentation
-- **[Machine Setup](./docs/kit/machine-setup.md)** - Developer machine setup
-- **[Demo Creation](./docs/kit/demo-creation.md)** - Creating new demos
-- **[Demo Setup](./docs/kit/demo-setup.md)** - Setting up existing demos
-- **[Design Documentation](./docs/kit/design.md)** - Starter kit architecture
-
-## Troubleshooting
-
-### Build Errors
-```bash
-# Clear and reinstall
-rm -rf node_modules package-lock.json
-npm install
-```
-
-### Deployment Issues
-```bash
-# Check AWS credentials
-aws sts get-caller-identity
-
-# Bootstrap CDK (first time only)
-npm run kit -- bootstrap dev
-
-# Deploy with kit CLI
-npm run kit -- deploy dev --all
-```
-
-### Frontend Issues
-```bash
-# Clear Vite cache
-rm -rf lib/stacks/frontend/app/node_modules/.vite
-
-# Rebuild
-npm run -w frontend build
-```
-
-
-## Clean-up
-
-To remove all AWS resources:
+## Clean Up
 
 ```bash
-# Delete all stacks using kit CLI
 npm run kit
-# Select your account, then choose "Destroy CDK Stack(s)"
+# Select your account → "Destroy CDK Stack(s)"
 
-# Or use CDK directly
-npm run cdk destroy "*/**"
+# Or directly
+npx aws-cdk@2.1105.0 destroy "dev/*"
 ```
-
-**Note**: S3 buckets may need to be emptied before deletion.
-
-## Support
-
-For questions about this demo application:
-1. Review the documentation in this repository
-2. Contact your AWS support team
-
-## Note
-
-This is a demo application for showcasing AWS Agent services. It is not intended for production use or as a real CRM system.
-- Replace mock data with real API calls
-- Add comprehensive authentication
-- Implement data persistence
-- Add error handling and logging
-- Implement rate limiting
-- Add monitoring and alerting
 
 ## License
 
 [Apache License Version 2.0](/LICENSE)
+
+### Infrastructure
+
+```
+├── lib/stacks/
+│   ├── frontend/           # S3 + CloudFront + WAF + Route 53
+│   │   └── app/            # React CRM application
+│   ├── backend/            # API Gateway + Lambda + RDS + VPC
+│   │   ├── rest-api/       # REST API with vuln endpoints
+│   │   ├── database.ts     # RDS PostgreSQL + secret rotation
+│   │   └── networking.ts   # VPC, subnets, security groups
+│   └── dns/                # IAM role for domain management
+├── tools/                  # CLI tooling, asset generation
+└── docs/                   # Design review, pen test guide
+```
+
+## Getting Started
+
+### Prerequisites
+
+- Node.js 22+
+- Python 3.12+
+- Docker (for Lambda bundling)
+- AWS CDK CLI
+- AWS account with appropriate permissions
+
+### Deploy
+
+```bash
+# Install dependencies
+npm install
+
+# Deploy using the interactive CLI
+npm run kit
+# Select your account → "Deploy CDK Stack(s)"
+
+# Or deploy directly
+npx aws-cdk@2.1105.0 deploy "dev/*" --require-approval never
+```
+
+### Create a Demo User
+
+After deployment, create a Cognito user for the CRM login:
+
+```bash
+aws cognito-idp admin-create-user \
+  --user-pool-id <USER_POOL_ID> \
+  --username <EMAIL> \
+  --temporary-password <TEMP_PASSWORD> \
+  --user-attributes Name=email,Value=<EMAIL> Name=email_verified,Value=true \
+  --region us-east-1
+```
+
+The User Pool ID is in the CDK deployment output or the frontend `.env` file (`VITE_USER_POOL_ID`).
+
+### Configure the Security Agent
+
+1. Open the AWS Security Agent console
+2. Create a new penetration test with:
+   - **Target URL:** `https://<your-domain>/api/` (unauthenticated vuln endpoints)
+   - **Target URL:** `https://<your-domain>/` (SPA frontend for login flow)
+   - **Credentials:** The Cognito user you created above
+3. Run the scan and review findings
+
+See [docs/pentest-guide.md](./docs/pentest-guide.md) for detailed configuration including accessible URLs and credential setup.
+
+## Resource Setup
+
+Before deploying, configure these for your environment:
+
+1. **AWS Account** — Update `cdk.json` → `context.accounts.dev` with your account number and region
+2. **Custom Domain** — Update `CUSTOM_DOMAIN`, `HOSTED_ZONE_ID`, `HOSTED_ZONE_NAME` in `lib/stacks/frontend/index.ts`
+3. **API Gateway Domain** — After first deploy, update the hardcoded domain in `lib/stage.ts` (`frontend.addApiProxy(...)`)
+4. **GitHub Repo** — The Security Agent needs a repo to scan for code-level findings
+
+## Security Posture
+
+Despite the intentional vulnerabilities, the infrastructure follows AWS security best practices:
+
+- **CDK Nag** — AWS Solutions checks enabled with zero non-compliant findings (see [cdk-nag-report.pdf](./docs/design-review/cdk-nag-report.pdf))
+- **WAF** — CloudFront and API Gateway protected with AWS managed rule groups (Common, Bot Control, Known Bad Inputs, SQLi, Unix)
+- **VPC** — Database in private isolated subnets, Lambda in private subnets with NAT egress, flow logs enabled
+- **Encryption** — RDS storage encrypted, Secrets Manager with automatic 30-day rotation, S3 bucket encryption
+- **Auth** — Cognito with enforced password policy, identity pool denies unauthenticated access
+- **Least Privilege** — IAM policies scoped to specific resources, no `*` resource policies outside CDK framework defaults
+
+The vulnerable endpoints are isolated to the `/security-*` path and are clearly documented as intentional for pen testing.
+
+## Design Review Documentation
+
+- [Architecture Overview](./docs/design-review/architecture-overview.md)
+- [Security Controls](./docs/design-review/security-controls.md)
+- [Data Flow](./docs/design-review/data-flow.md)
+- [Threat Model](./docs/design-review/threat-model.md)
+- [CDK Nag Report](./docs/design-review/cdk-nag-report.pdf)
+- [Pen Test Guide](./docs/pentest-guide.md)
+
+## Estimated Cost
+
+| Service | Monthly Estimate |
+|---|---|
+| RDS PostgreSQL | $50 – $150 |
+| CloudFront + S3 | $15 – $70 |
+| WAF | $10 – $30 |
+| API Gateway + Lambda | $5 – $20 |
+| VPC (NAT Gateway) | $30 – $45 |
+| Cognito | $0 – $10 |
+| **Total** | **~$110 – $325/month** |
+
+## Clean Up
+
+```bash
+npm run kit
+# Select your account → "Destroy CDK Stack(s)"
+
+# Or directly
+npx aws-cdk@2.1105.0 destroy "dev/*"
+```
+
+## License
+
+[Apache License Version 2.0](./LICENSE)

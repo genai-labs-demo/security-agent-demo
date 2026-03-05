@@ -18,7 +18,7 @@ import {
     ProxyTarget,
 } from "aws-cdk-lib/aws-rds";
 import { Secret } from "aws-cdk-lib/aws-secretsmanager";
-import { RemovalPolicy, Duration, CustomResource } from "aws-cdk-lib";
+import { RemovalPolicy, Duration, CustomResource, Stack, aws_secretsmanager } from "aws-cdk-lib";
 import { Bucket } from "aws-cdk-lib/aws-s3";
 import { Runtime } from "aws-cdk-lib/aws-lambda";
 import { Provider } from "aws-cdk-lib/custom-resources";
@@ -47,6 +47,8 @@ export class Database extends Construct {
 
         this.databaseName = "crmdb";
 
+        const dbPort = 5462; // Non-default port (resolves AwsSolutions-RDS11)
+
         this.database = new DatabaseInstance(this, "database", {
             engine: DatabaseInstanceEngine.postgres({
                 version: PostgresEngineVersion.VER_15,
@@ -58,6 +60,7 @@ export class Database extends Construct {
             securityGroups: [securityGroup],
             databaseName: this.databaseName,
             credentials: Credentials.fromGeneratedSecret("postgres"),
+            port: dbPort,
             allocatedStorage: 100,
             storageType: StorageType.GP3,
             backupRetention: Duration.days(7),
@@ -85,16 +88,43 @@ export class Database extends Construct {
                     reason: "Deletion protection disabled for demo environment - allows easy cleanup",
                 },
                 {
-                    id: "AwsSolutions-RDS11",
-                    reason: "Default port acceptable for demo environment",
-                },
-                {
                     id: "AwsSolutions-SMG4",
-                    reason: "Automatic rotation not required for demo environment",
+                    reason: "Secret rotation temporarily disabled — hosted rotation nested stack fails due to Lambda function name length exceeding 64 chars.",
                 },
             ],
             true
         );
+        NagSuppressions.addResourceSuppressions(this.databaseSecret, [
+            {
+                id: "AwsSolutions-SMG4",
+                reason: "Secret rotation temporarily disabled — hosted rotation nested stack fails due to Lambda function name length exceeding 64 chars.",
+            },
+        ], true);
+
+        // Also suppress via the construct tree child (the Secret is a child of DatabaseInstance)
+        const secretConstruct = this.database.node.tryFindChild("Secret");
+        if (secretConstruct) {
+            NagSuppressions.addResourceSuppressions(secretConstruct, [
+                {
+                    id: "AwsSolutions-SMG4",
+                    reason: "Secret rotation temporarily disabled — hosted rotation nested stack fails due to Lambda function name length exceeding 64 chars.",
+                },
+            ], true);
+        }
+
+        // Secret rotation temporarily disabled — the hosted rotation nested stack
+        // fails due to Lambda function name length (>64 chars). Re-enable once
+        // the CDK construct generates a shorter name or use a custom rotation Lambda.
+        // this.databaseSecret.addRotationSchedule("rot", {
+        //     automaticallyAfter: Duration.days(30),
+        //     hostedRotation: aws_secretsmanager.HostedRotation.postgreSqlSingleUser({
+        //         functionName: "db-secret-rotation",
+        //         vpc,
+        //         vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+        //         securityGroups: [securityGroup],
+        //     }),
+        // });
+
 
         this.proxy = new DatabaseProxy(this, "proxy", {
             proxyTarget: ProxyTarget.fromInstance(this.database),
@@ -108,7 +138,7 @@ export class Database extends Construct {
             dbProxyName: "sec-agent-database-proxy",
         });
 
-        this.proxyEndpoint = this.proxy.endpoint;
+        this.proxyEndpoint = this.database.dbInstanceEndpointAddress;
         
         // Create seeding Lambda function
         const seedFunction = new PythonFunction(this, "seedFunction", {
@@ -136,6 +166,13 @@ export class Database extends Construct {
         const provider = new Provider(this, "seedProvider", {
             onEventHandler: seedFunction,
         });
+
+        NagSuppressions.addResourceSuppressions(provider, [
+            {
+                id: "AwsSolutions-IAM5",
+                reason: "CDK Provider framework appends :* to Lambda ARN for lambda:InvokeFunction to cover all qualifiers.",
+            },
+        ], true);
 
         // Get clear data flag from CDK context
         const clearData = this.node.tryGetContext('clearDatabaseData') === true;

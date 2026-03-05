@@ -12,7 +12,7 @@
 - **Self Sign-Up**: Disabled (admin-created accounts only)
 
 ### Login Page Security
-- Demo credentials password is masked (displayed as `••••••••••`) — copy-to-clipboard still provides the actual value
+- Demo credentials have been removed from the login page — no credentials are displayed or embedded in the UI
 - Password input field enforces `-webkit-text-security: disc` to prevent browser autofill from revealing the password in plain text
 - Browser autofill styling overrides prevent credential leakage through CSS background color changes
 
@@ -55,7 +55,7 @@
 - CloudFront distribution includes an `/api/*` behavior that proxies requests to the API Gateway origin
 - A CloudFront Function rewrites `/api/*` paths to `/prod/*` (the API Gateway stage prefix)
 - Caching is disabled for API proxy requests; all viewer headers are forwarded (except `Host`)
-- This allows the pen-test scanner to reach backend security demo endpoints through the same verified custom domain as the frontend (e.g., `https://secagentdemo.jossai.people.aws.dev/api/security-profile/1`)
+- This allows the pen-test scanner to reach backend security demo endpoints through the same verified custom domain as the frontend (e.g., `https://app.secagent.ai.demo.aws/api/security-profile/1`)
 
 ## Data Protection
 
@@ -271,8 +271,8 @@ The `/security-*` API endpoints contain intentional vulnerabilities for educatio
 13. **Command Injection (CSV Export)**: The CRM's Team Performance page includes an Export CSV feature whose filename parameter is vulnerable to injection
 
 ### Credential Display Security
-- Login page demo credentials section masks the password with bullet characters (`••••••••••`) rather than displaying in plain text
-- Copy-to-clipboard functionality still provides the actual password value when the copy button is clicked
+- Login page no longer displays demo credentials — the demo credentials section has been fully removed from the login UI
+- No credentials are embedded in the login page HTML or JavaScript
 - Browser autofill styling is overridden via CSS (`:-webkit-autofill`) to prevent credential exposure through autofill background color changes
 - Password input fields enforce `-webkit-text-security: disc` to ensure masking regardless of browser behavior
 

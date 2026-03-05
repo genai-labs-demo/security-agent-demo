@@ -27,28 +27,21 @@ const CRMNavigation = ({ activeHref: propActiveHref }: CRMNavigationProps) => {
     return (
         <SideNavigation
             header={{
-                text: "AnyCompany CRM",
+                text: "AWS Security Agent Demo",
                 href: "/crm"
             }}
             activeHref={activeHref}
             onFollow={handleNavigationChange}
             items={[
                 {
-                    type: "section" as const,
-                    text: "Security",
-                    defaultExpanded: true,
-                    items: [
-                        {
-                            type: "link" as const,
-                            text: "Security Demo",
-                            href: "/crm",
-                        }
-                    ]
+                    type: "link" as const,
+                    text: "Home",
+                    href: "/crm",
                 },
                 { type: "divider" as const },
                 {
                     type: "section" as const,
-                    text: "App",
+                    text: "AnyCompany CRM App",
                     items: [
                         {
                             type: "link" as const,
@@ -69,6 +62,33 @@ const CRMNavigation = ({ activeHref: propActiveHref }: CRMNavigationProps) => {
                             type: "link" as const,
                             text: "Team Performance",
                             href: "/crm/team",
+                        }
+                    ]
+                },
+                { type: "divider" as const },
+                {
+                    type: "section" as const,
+                    text: "Design Docs",
+                    items: [
+                        {
+                            type: "link" as const,
+                            text: "Architecture Overview",
+                            href: "/crm/docs/architecture-overview",
+                        },
+                        {
+                            type: "link" as const,
+                            text: "Data Flow",
+                            href: "/crm/docs/data-flow",
+                        },
+                        {
+                            type: "link" as const,
+                            text: "Security Controls",
+                            href: "/crm/docs/security-controls",
+                        },
+                        {
+                            type: "link" as const,
+                            text: "Threat Model",
+                            href: "/crm/docs/threat-model",
                         }
                     ]
                 }

@@ -2,6 +2,7 @@ import { Stack } from "aws-cdk-lib";
 import {
     FlowLogTrafficType,
     GatewayVpcEndpointAwsService,
+    InterfaceVpcEndpointAwsService,
     IpAddresses,
     Peer,
     Port,
@@ -81,8 +82,13 @@ export class Networking extends Construct {
         
         securityGroup.addIngressRule(
             securityGroup,
+            Port.tcp(5462),
+            "Allow PostgreSQL access from within security group on non-default port"
+        );
+        securityGroup.addIngressRule(
+            securityGroup,
             Port.tcp(5432),
-            "Allow PostgreSQL access from within security group"
+            "Allow RDS Proxy access from within security group on default PostgreSQL port"
         );
         NagSuppressions.addResourceSuppressions(securityGroup, [
             {

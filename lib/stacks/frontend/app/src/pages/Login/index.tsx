@@ -81,10 +81,6 @@ const Login = () => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     useParticles(canvasRef);
 
-    const copy = (text: string) => {
-        navigator.clipboard.writeText(text);
-    };
-
     return (
         <div className="login-page">
             <canvas ref={canvasRef} className="login-particles" />
@@ -122,29 +118,7 @@ const Login = () => {
                                     </div>
                                 </div>
                             ),
-                            Footer: () => (
-                                <div style={{ padding: "8px 0 0", width: "100%", boxSizing: "border-box" }}>
-                                    <div className="demo-creds">
-                                        <div className="demo-creds-title">Demo Credentials</div>
-                                        <div className="demo-creds-row">
-                                            <span className="demo-creds-text">
-                                                <strong>User:</strong> user_test@example.com
-                                            </span>
-                                            <button type="button" className="demo-copy-btn" onClick={() => copy("user_test@example.com")} title="Copy username" aria-label="Copy username">
-                                                📋
-                                            </button>
-                                        </div>
-                                        <div className="demo-creds-row">
-                                            <span className="demo-creds-text">
-                                                <strong>Pass:</strong> ••••••••••
-                                            </span>
-                                            <button type="button" className="demo-copy-btn" onClick={() => copy("AWS123xyz!")} title="Copy password" aria-label="Copy password">
-                                                📋
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                            ),
+                            Footer: () => null,
                         },
                     }}
                 />

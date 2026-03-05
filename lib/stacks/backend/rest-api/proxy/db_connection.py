@@ -68,7 +68,7 @@ def _get_database_credentials() -> dict:
             'username': secret_dict.get('username'),
             'password': secret_dict.get('password'),
             'host': database_proxy_endpoint,
-            'port': secret_dict.get('port', 5432),
+            'port': int(os.environ.get('DATABASE_PORT', secret_dict.get('port', 5432))),
             'dbname': database_name
         }
         

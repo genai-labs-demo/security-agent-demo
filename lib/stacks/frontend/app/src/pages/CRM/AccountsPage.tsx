@@ -35,6 +35,7 @@ import { mockOpportunities } from './data/mockOpportunities';
 import { Account, Industry } from './types';
 import { LoadingSpinner, ErrorAlert } from '../../common/components';
 import { useDebounce } from './hooks/useDebounce';
+import SQLInjectionLab from './components/security/SQLInjectionLab';
 
 /**
  * AccountsPage Component
@@ -70,6 +71,9 @@ export const AccountsPage: React.FC = () => {
   // Sorting state for table view
   const [sortingColumn, setSortingColumn] = useState<string>('name');
   const [sortingDescending, setSortingDescending] = useState(false);
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
 
   // Modal state for viewing account details
   const [selectedAccount, setSelectedAccount] = useState<Account | null>(null);
@@ -110,6 +114,8 @@ export const AccountsPage: React.FC = () => {
     }
 
     console.timeEnd('filterAccounts');
+    // Reset to page 1 when filters change
+    setCurrentPage(1);
     return filtered;
   }, [selectedIndustry, debouncedSearchQuery]);
 
@@ -269,6 +275,9 @@ export const AccountsPage: React.FC = () => {
         }
       >
         <SpaceBetween size="l">
+          {/* SQL Injection Security Lab */}
+          <SQLInjectionLab />
+
           {/* Filters */}
           <Container>
             <SpaceBetween size="m">
@@ -324,6 +333,9 @@ export const AccountsPage: React.FC = () => {
             sortingColumn={sortingColumn}
             sortingDescending={sortingDescending}
             onSortingChange={handleSortingChange}
+            pageSize={10}
+            currentPage={currentPage}
+            onPageChange={setCurrentPage}
           />
 
           {/* Empty State */}

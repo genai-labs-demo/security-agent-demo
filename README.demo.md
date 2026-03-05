@@ -18,7 +18,6 @@ This application serves as a demonstration environment for:
 
 - � **[Detailed Documentation](./README.demo.md)** - Complete CRM documentation
 - 🎯 **[Setup Guide](./lib/stacks/frontend/app/DEMO-PREPARATION.md)** - Deployment checklist and guide
-- 🖼️ **[Image Generation](./tools/README-crm-assets.md)** - Generate CRM assets with Bedrock
 
 ## Features
 
@@ -206,7 +205,6 @@ The application includes generated fictitious data for demo purposes:
 ### Main Documentation
 - **[Detailed README](./README.demo.md)** - Complete CRM documentation
 - **[CRM Application](./lib/stacks/frontend/app/README-CRM.md)** - Frontend app docs
-- **[Image Generation](./tools/README-crm-assets.md)** - Asset generation guide
 
 ### Starter Kit Documentation
 - **[Machine Setup](./docs/kit/machine-setup.md)** - Developer machine setup

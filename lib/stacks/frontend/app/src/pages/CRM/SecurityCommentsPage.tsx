@@ -42,7 +42,8 @@ const SecurityCommentsPage = () => {
             if (data.success) {
                 setComments(data.data || []);
             } else {
-                setLoadError(data.error || "Failed to load comments");
+                const errMsg = typeof data.error === 'object' ? data.error.message : (data.error || "Failed to load comments");
+                setLoadError(errMsg);
             }
         } catch (err: any) {
             console.error("Failed to load comments:", err);
@@ -50,15 +51,16 @@ const SecurityCommentsPage = () => {
         }
     }, []);
 
-    const postComment = async () => {
-        if (!commentInput.trim()) return;
+    const postComment = async (overrideContent?: string) => {
+        const content = overrideContent ?? commentInput;
+        if (!content.trim()) return;
         setLoading(true);
         setPostResult(null);
         try {
             const res = await fetch(`${API_BASE}/security-comments`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ user_id: 1, content: commentInput }),
+                body: JSON.stringify({ user_id: 1, content }),
             });
             const data = await res.json();
             setPostResult(data);
@@ -74,15 +76,16 @@ const SecurityCommentsPage = () => {
         }
     };
 
-    const searchComments = async () => {
-        if (!searchInput.trim()) return;
+    const searchComments = async (override?: string) => {
+        const q = override ?? searchInput;
+        if (!q.trim()) return;
         setSearchLoading(true);
         setSearchResults(null);
         try {
             const res = await fetch(`${API_BASE}/security-search`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ q: searchInput }),
+                body: JSON.stringify({ q }),
             });
             const data = await res.json();
             setSearchResults(data);
@@ -109,23 +112,28 @@ const SecurityCommentsPage = () => {
                             <li><strong>Reflected XSS:</strong> Malicious script is reflected from the server in the response (demonstrated in search)</li>
                             <li><strong>DOM-based XSS:</strong> Malicious script manipulates the DOM directly in the browser</li>
                         </ul>
-                        <Box variant="h4">How to Fix It</Box>
-                        <pre style={{ background: "rgba(255,255,255,0.05)", padding: "15px", borderRadius: "6px", fontSize: "13px", overflow: "auto" }}>{`// ❌ VULNERABLE (no encoding)
-element.innerHTML = userInput;
 
-// ✅ SECURE (use textContent or encode)
-element.textContent = userInput;`}</pre>
                     </SpaceBetween>
                 </Container>
 
                 {/* Stored XSS Demo */}
                 <Container header={<Header variant="h2">Try It Yourself: Comment System (Stored XSS)</Header>}>
                     <SpaceBetween size="m">
+                        {postResult?.educational && (
+                            <Alert type="info" header={`🚨 ${postResult.educational.vulnerability}`}>
+                                <SpaceBetween size="s">
+                                    <Box><Box variant="strong">What Happened:</Box> {postResult.educational.what_happened}</Box>
+                                    <Box><Box variant="strong">How AWS Security Agent Detects This:</Box> {postResult.educational.how_agent_detects}</Box>
+                                    <Box><Box variant="strong">Other Payloads to Try:</Box></Box>
+                                    <ul>{postResult.educational.sample_payloads?.map((p: string, i: number) => <li key={i}><code>{p}</code></li>)}</ul>
+                                </SpaceBetween>
+                            </Alert>
+                        )}
                         <Box color="text-body-secondary">Post a comment with XSS payloads. The malicious script will be stored and executed when anyone views the comments!</Box>
                         <Textarea value={commentInput} onChange={({ detail }) => setCommentInput(detail.value)} placeholder="Enter your comment (try XSS payloads!)" rows={3} />
-                        <Button variant="primary" onClick={postComment} loading={loading}>Post Comment</Button>
+                        <Button variant="primary" onClick={() => postComment()} loading={loading}>Post Comment</Button>
                         {postResult && !postResult.success && (
-                            <Alert type="error" header="Failed to post comment">{postResult.error}</Alert>
+                            <Alert type="error" header="Failed to post comment">{typeof postResult.error === 'object' ? JSON.stringify(postResult.error) : postResult.error}</Alert>
                         )}
                         {postResult && postResult.success && (
                             <Alert type="success" header="Comment posted">
@@ -137,7 +145,7 @@ element.textContent = userInput;`}</pre>
                             <Box color="text-body-secondary" margin={{ bottom: "s" }}>Click any payload below to try it:</Box>
                             <SpaceBetween size="xs">
                                 {XSS_PAYLOADS.map((payload) => (
-                                    <Button key={payload} variant="inline-link" onClick={() => setCommentInput(payload)}>
+                                    <Button key={payload} variant="inline-link" onClick={() => { setCommentInput(payload); postComment(payload); }}>
                                         <code>{payload}</code>
                                     </Button>
                                 ))}
@@ -149,9 +157,19 @@ element.textContent = userInput;`}</pre>
                 {/* Reflected XSS Demo */}
                 <Container header={<Header variant="h2">Try It Yourself: Search (Reflected XSS)</Header>}>
                     <SpaceBetween size="m">
+                        {searchResults?.educational && (
+                            <Alert type="info" header={`🚨 ${searchResults.educational.vulnerability}`}>
+                                <SpaceBetween size="s">
+                                    <Box><Box variant="strong">What Happened:</Box> {searchResults.educational.what_happened}</Box>
+                                    <Box><Box variant="strong">How AWS Security Agent Detects This:</Box> {searchResults.educational.how_agent_detects}</Box>
+                                    <Box><Box variant="strong">Other Payloads to Try:</Box></Box>
+                                    <ul>{searchResults.educational.sample_payloads?.map((p: string, i: number) => <li key={i}><code>{p}</code></li>)}</ul>
+                                </SpaceBetween>
+                            </Alert>
+                        )}
                         <Box color="text-body-secondary">Search for comments. Your search query will be reflected in the response without sanitization!</Box>
                         <Input value={searchInput} onChange={({ detail }) => setSearchInput(detail.value)} placeholder="Enter search query (try XSS payloads!)" onKeyDown={({ detail }) => { if (detail.key === "Enter") searchComments(); }} />
-                        <Button variant="primary" onClick={searchComments} loading={searchLoading}>Search</Button>
+                        <div><Button variant="primary" onClick={searchComments} loading={searchLoading}>Search</Button></div>
 
                         {searchResults && (
                             <Container header={<Header variant="h3">Search Results</Header>}>
@@ -167,7 +185,7 @@ element.textContent = userInput;`}</pre>
                                             </Container>
                                         )) : <Box color="text-body-secondary">No comments found.</Box>}
                                     </SpaceBetween>
-                                ) : <Alert type="error">{searchResults.error}</Alert>}
+                                ) : <Alert type="error">{typeof searchResults.error === 'object' ? JSON.stringify(searchResults.error) : searchResults.error}</Alert>}
                             </Container>
                         )}
                     </SpaceBetween>
@@ -203,18 +221,6 @@ element.textContent = userInput;`}</pre>
                         </SpaceBetween>
                     </Container>
                 </div>
-
-                {/* Educational Message */}
-                {(postResult?.educational || searchResults?.educational) && (
-                    <Alert type="info" header={`🚨 ${(postResult?.educational || searchResults?.educational)?.vulnerability}`}>
-                        <SpaceBetween size="s">
-                            <Box><Box variant="strong">What Happened:</Box> {(postResult?.educational || searchResults?.educational)?.what_happened}</Box>
-                            <Box><Box variant="strong">How AWS Security Agent Detects This:</Box> {(postResult?.educational || searchResults?.educational)?.how_agent_detects}</Box>
-                            <Box><Box variant="strong">Other Payloads to Try:</Box></Box>
-                            <ul>{(postResult?.educational || searchResults?.educational)?.sample_payloads?.map((p: string, i: number) => <li key={i}><code>{p}</code></li>)}</ul>
-                        </SpaceBetween>
-                    </Alert>
-                )}
 
                 <Button variant="link" onClick={() => { navigate("/crm/security"); setTimeout(() => document.getElementById("vuln-demos")?.scrollIntoView({ behavior:"smooth" }), 100); }}>← Back to Security Dashboard</Button>
             </SpaceBetween>

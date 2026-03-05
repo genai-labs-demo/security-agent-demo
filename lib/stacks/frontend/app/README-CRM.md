@@ -2,13 +2,13 @@
 
 ## Overview
 
-AnyCompany CRM is a modern, enterprise-grade sales opportunity management platform built with React, TypeScript, and AWS Cloudscape Design System. This platform represents the **"before BigWeaver"** state - a fully functional CRM system that is intentionally missing email automation features.
+AnyCompany CRM is a modern, enterprise-grade sales opportunity management platform built with React, TypeScript, and AWS Cloudscape Design System. This platform is a fully functional CRM that serves as the target application for the AWS Security Agent demo.
 
 ## Purpose
 
-This platform serves as the base application for demonstrating SuperAgents capabilities, specifically showcasing **BigWeaver's ability to add cross-repository features**. The platform is production-ready and feature-complete, except for email automation functionality that BigWeaver will add across multiple repositories.
+This platform serves as the target application for the AWS Security Agent demo, providing a realistic web application with intentional vulnerabilities for automated penetration testing.
 
-## Current Features (Before BigWeaver)
+## Current Features
 
 ### ✅ Pipeline Dashboard
 - **Stage Metrics**: Visual cards showing Open Pipeline, New, Won, Lost, Overdue opportunities
@@ -49,41 +49,6 @@ This platform serves as the base application for demonstrating SuperAgents capab
 - **Instant Filtering**: < 500ms filter response
 - **Memoized Calculations**: Optimized re-renders
 - **Debounced Search**: Smooth search experience
-
-## Missing Features (BigWeaver Will Add)
-
-### ❌ Email Automation
-The following features are **intentionally missing** to demonstrate BigWeaver's cross-repo capabilities:
-
-1. **Email Templates** (Web Frontend Repo)
-   - Template management UI
-   - Template editor with variables
-   - Template preview functionality
-
-2. **Email Sending** (Email Service Repo)
-   - Send emails from opportunities
-   - Automated follow-up emails based on stage
-   - Email scheduling and queuing
-
-3. **Email Tracking** (Notification Service Repo)
-   - Email open tracking
-   - Click tracking
-   - Activity timeline integration
-
-4. **Email Analytics** (Analytics Engine Repo)
-   - Email performance metrics
-   - Response rate tracking
-   - A/B testing results
-
-5. **Email Reminders** (Notification Service Repo)
-   - Automated reminder emails
-   - Overdue opportunity alerts
-   - Follow-up scheduling
-
-6. **Shared Email Components** (Shared UI Components Repo)
-   - Email composer widget
-   - Email activity feed
-   - Email template selector
 
 ## Technology Stack
 
@@ -221,51 +186,11 @@ See [DEMO-PREPARATION.md](./DEMO-PREPARATION.md) for comprehensive demo preparat
 2. **Accounts Page**: Demonstrate health tracking and industry filtering
 3. **My Opportunities**: Highlight quota attainment and overdue alerts
 4. **Team Performance**: Show team metrics and performance charts
-5. **Transition**: "Now let's see BigWeaver add email automation across 3 repos..."
-
-## BigWeaver Integration Points
-
-When BigWeaver adds email automation, it will modify these areas:
-
-### Web Frontend (This Repo)
-- Add email template management UI
-- Add email composer component
-- Add email activity timeline
-- Add email settings page
-
-### Email Service (New Repo)
-- Create email sending service
-- Implement template rendering
-- Add email queue management
-- Implement delivery tracking
-
-### Notification Service (New Repo)
-- Create reminder scheduling
-- Implement email triggers
-- Add activity logging
-- Create notification preferences
-
-### API Gateway (Existing Repo)
-- Add email endpoints
-- Implement authentication
-- Add rate limiting
-- Create webhook handlers
-
-### Analytics Engine (New Repo)
-- Track email opens/clicks
-- Calculate response rates
-- Generate email reports
-- A/B test tracking
-
-### Shared UI Components (New Repo)
-- Email composer widget
-- Email activity feed
-- Email template selector
-- Email preview component
+5. **Security Dashboard**: Demonstrate vulnerability scanning with the AWS Security Agent
 
 ## Architecture
 
-### Current Architecture (Before BigWeaver)
+### Current Architecture
 ```
 ┌─────────────────────────────────────┐
 │     AnyCompany CRM Web App          │
@@ -279,25 +204,6 @@ When BigWeaver adds email automation, it will modify these areas:
 ├─────────────────────────────────────┤
 │      Data Management Layer          │
 │   (Mock Data, State, Utils)         │
-└─────────────────────────────────────┘
-```
-
-### Future Architecture (After BigWeaver)
-```
-┌─────────────────────────────────────┐
-│     AnyCompany CRM Web App          │
-│   + Email Template UI               │
-├─────────────────────────────────────┤
-│         API Gateway                 │
-│   + Email Endpoints                 │
-├─────────────────────────────────────┤
-│  ┌──────────┐  ┌──────────────┐    │
-│  │  Email   │  │ Notification │    │
-│  │ Service  │  │   Service    │    │
-│  └──────────┘  └──────────────┘    │
-├─────────────────────────────────────┤
-│      Analytics Engine               │
-│   + Email Tracking                  │
 └─────────────────────────────────────┘
 ```
 
@@ -347,4 +253,4 @@ For questions or issues, contact the AWS Technical Product Marketing team.
 
 ---
 
-**Remember**: This platform is intentionally missing email automation features. That's the whole point - to demonstrate BigWeaver's ability to add cross-repository features!
+**Note**: This platform includes intentional security vulnerabilities for AWS Security Agent pen testing demonstrations.

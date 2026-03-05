@@ -20,7 +20,7 @@ export class ApplicationStage extends Stage {
 
         // Proxy API requests through CloudFront so the pen test scanner
         // can reach backend endpoints via the verified frontend domain.
-        // e.g. https://secagentdemo.jossai.people.aws.dev/api/security-profile/1
+        // e.g. https://app.secagent.ai.demo.aws/api/security-profile/1
         //   -> https://isznznfp27.execute-api.us-east-1.amazonaws.com/prod/security-profile/1
         // Note: domain is hardcoded to avoid a circular stack dependency
         // (frontend needs backend.restApi, backend needs frontend.urls)
@@ -46,11 +46,14 @@ export class ApplicationStage extends Stage {
                 },
                 {
                     id: "AwsSolutions-IAM5",
-                    reason: "High-level constructs can require wildcards for dynamic resource creation and management.",
+                    reason: "CDK high-level constructs generate wildcard permissions for custom resource providers, bucket notifications, and auto-delete handlers.",
+                    appliesTo: [
+                        "Resource::*",
+                    ],
                 },
                 {
                     id: "AwsSolutions-L1",
-                    reason: "High-level constructs can set their own runtimes.",
+                    reason: "CDK custom resource providers and auto-delete handlers manage their own Lambda runtimes.",
                 },
             ],
             true
