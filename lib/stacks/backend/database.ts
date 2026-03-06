@@ -138,7 +138,7 @@ export class Database extends Construct {
             dbProxyName: "sec-agent-database-proxy",
         });
 
-        this.proxyEndpoint = this.database.dbInstanceEndpointAddress;
+        this.proxyEndpoint = this.proxy.endpoint;
         
         // Create seeding Lambda function
         const seedFunction = new PythonFunction(this, "seedFunction", {
@@ -152,7 +152,8 @@ export class Database extends Construct {
             },
             securityGroups: [securityGroup],
             environment: {
-                DB_PROXY_ENDPOINT: this.proxyEndpoint,
+                DB_PROXY_ENDPOINT: this.databaseEndpoint,
+                DB_PORT: String(dbPort),
                 DB_NAME: this.databaseName,
                 DB_USERNAME: "postgres",
                 DB_PASSWORD: this.databaseSecret.secretValueFromJson("password").unsafeUnwrap(),

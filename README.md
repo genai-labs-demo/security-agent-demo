@@ -45,7 +45,7 @@ All other CRM endpoints (`/accounts`, `/opportunities`, `/team-members`, etc.) a
 **Frontend:** React 18 + TypeScript, Cloudscape Design System, hosted on S3 + CloudFront with WAF
 **Backend:** API Gateway + Lambda (Python), RDS PostgreSQL with RDS Proxy, VPC with private subnets
 **Auth:** Amazon Cognito (User Pool + Identity Pool), WAF with managed rule groups
-**Security:** CDK Nag (AWS Solutions checks), VPC flow logs, encrypted storage, secret rotation
+**Security:** VPC flow logs, encrypted storage, secret rotation
 
 
 ```
@@ -93,9 +93,8 @@ Despite the intentional vulnerabilities on demo endpoints, the infrastructure fo
 - RDS encryption at rest, non-default port, secret rotation
 - S3 bucket encryption, SSL enforcement, access logging
 - CloudFront TLS 1.2, OAC for S3 origin
-- CDK Nag (AwsSolutions) with zero non-compliant findings
 
-See **[Security Controls](./docs/design-review/security-controls.md)** and **[CDK Nag Report](./docs/design-review/cdk-nag-report.pdf)** for details.
+See **[Security Controls](./docs/design-review/security-controls.md)** for details.
 
 ## Getting Started
 
@@ -138,7 +137,7 @@ The User Pool ID is in the CDK output or the frontend `.env` file (`VITE_USER_PO
 
 1. Open the AWS Security Agent console
 2. Create a new penetration test
-3. Set target URL: `https://app.secagent.ai.demo.aws/api/`
+3. Set target URL: `https://<your-custom-domain>/api/` (replace with the custom domain you configured for your deployment)
 4. Add credentials (email/password from the Cognito user above)
 5. Add accessible URLs (Cognito, API Gateway, CDNs) — see **[Pen Test Guide](./docs/pentest-guide.md)**
 6. Run the scan
@@ -182,7 +181,6 @@ After cloning, configure for your environment:
 |---|---|
 | [Pen Test Guide](./docs/pentest-guide.md) | Vulnerability endpoints and scanner configuration |
 | [Security Controls](./docs/design-review/security-controls.md) | Infrastructure security measures |
-| [CDK Nag Report](./docs/design-review/cdk-nag-report.pdf) | AwsSolutions compliance report |
 | [Architecture Overview](./docs/design-review/architecture-overview.md) | System architecture and data flow |
 | [Threat Model](./docs/design-review/threat-model.md) | Threat analysis |
 | [CRM App Details](./README.demo.md) | CRM application documentation |
@@ -280,7 +278,6 @@ Before deploying, configure these for your environment:
 
 Despite the intentional vulnerabilities, the infrastructure follows AWS security best practices:
 
-- **CDK Nag** — AWS Solutions checks enabled with zero non-compliant findings (see [cdk-nag-report.pdf](./docs/design-review/cdk-nag-report.pdf))
 - **WAF** — CloudFront and API Gateway protected with AWS managed rule groups (Common, Bot Control, Known Bad Inputs, SQLi, Unix)
 - **VPC** — Database in private isolated subnets, Lambda in private subnets with NAT egress, flow logs enabled
 - **Encryption** — RDS storage encrypted, Secrets Manager with automatic 30-day rotation, S3 bucket encryption
@@ -295,7 +292,6 @@ The vulnerable endpoints are isolated to the `/security-*` path and are clearly 
 - [Security Controls](./docs/design-review/security-controls.md)
 - [Data Flow](./docs/design-review/data-flow.md)
 - [Threat Model](./docs/design-review/threat-model.md)
-- [CDK Nag Report](./docs/design-review/cdk-nag-report.pdf)
 - [Pen Test Guide](./docs/pentest-guide.md)
 
 ## Estimated Cost

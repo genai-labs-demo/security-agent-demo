@@ -71,14 +71,16 @@ def get_database_connection():
     db_name = os.environ['DB_NAME']
     db_username = os.environ['DB_USERNAME']
     db_password = os.environ['DB_PASSWORD']
+    db_port = int(os.environ.get('DB_PORT', '5432'))
     
-    print(f"Connecting to {db_endpoint}/{db_name}...")
+    print(f"Connecting to {db_endpoint}:{db_port}/{db_name}...")
     
     conn = psycopg2.connect(
         host=db_endpoint,
         database=db_name,
         user=db_username,
         password=db_password,
+        port=db_port,
         connect_timeout=30
     )
     

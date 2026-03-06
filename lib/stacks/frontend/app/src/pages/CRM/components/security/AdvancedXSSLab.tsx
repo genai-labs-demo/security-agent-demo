@@ -40,7 +40,7 @@ const AdvancedXSSLab = () => {
       const lower = n.toLowerCase();
       setDetected(["<script", "onerror", "onload", "javascript:", "alert("].some(p => lower.includes(p)));
     } catch (e: any) { setErr(e?.message || "Request failed"); }
-    finally { setBusy(false); }
+    finally { setBusy(false); setTimeout(() => ref.current?.scrollIntoView({ behavior: "smooth" }), 100); }
   };
 
   return (

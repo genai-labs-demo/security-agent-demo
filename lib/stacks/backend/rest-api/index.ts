@@ -96,7 +96,7 @@ export class RestApi extends Construct {
         // Add CRM database environment variables if resources are provided
         if (databaseProxyEndpoint) {
             environment.DATABASE_PROXY_ENDPOINT = databaseProxyEndpoint;
-            environment.DATABASE_PORT = "5462";
+            environment.DATABASE_PORT = "5432";
         }
         if (databaseName) {
             environment.DATABASE_NAME = databaseName;

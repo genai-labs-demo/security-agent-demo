@@ -33,6 +33,7 @@ const SecurityCommentsPage = () => {
     const [loadError, setLoadError] = useState<string | null>(null);
     const [currentPage, setCurrentPage] = useState(1);
     const commentsRef = useRef<HTMLDivElement>(null);
+    const postResultRef = useRef<HTMLDivElement>(null);
 
     const loadComments = useCallback(async () => {
         setLoadError(null);
@@ -73,6 +74,7 @@ const SecurityCommentsPage = () => {
             setPostResult({ success: false, error: err?.message || String(err) || "Failed to post comment" });
         } finally {
             setLoading(false);
+            setTimeout(() => postResultRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
         }
     };
 
@@ -132,6 +134,7 @@ const SecurityCommentsPage = () => {
                         <Box color="text-body-secondary">Post a comment with XSS payloads. The malicious script will be stored and executed when anyone views the comments!</Box>
                         <Textarea value={commentInput} onChange={({ detail }) => setCommentInput(detail.value)} placeholder="Enter your comment (try XSS payloads!)" rows={3} />
                         <Button variant="primary" onClick={() => postComment()} loading={loading}>Post Comment</Button>
+                        <div ref={postResultRef}>
                         {postResult && !postResult.success && (
                             <Alert type="error" header="Failed to post comment">{typeof postResult.error === 'object' ? JSON.stringify(postResult.error) : postResult.error}</Alert>
                         )}
@@ -140,6 +143,7 @@ const SecurityCommentsPage = () => {
                                 {postResult.message || "Comment created successfully"}
                             </Alert>
                         )}
+                        </div>
 
                         <Container header={<Header variant="h3">📝 Sample XSS Payloads</Header>}>
                             <Box color="text-body-secondary" margin={{ bottom: "s" }}>Click any payload below to try it:</Box>
@@ -169,7 +173,7 @@ const SecurityCommentsPage = () => {
                         )}
                         <Box color="text-body-secondary">Search for comments. Your search query will be reflected in the response without sanitization!</Box>
                         <Input value={searchInput} onChange={({ detail }) => setSearchInput(detail.value)} placeholder="Enter search query (try XSS payloads!)" onKeyDown={({ detail }) => { if (detail.key === "Enter") searchComments(); }} />
-                        <div><Button variant="primary" onClick={searchComments} loading={searchLoading}>Search</Button></div>
+                        <div><Button variant="primary" onClick={() => searchComments()} loading={searchLoading}>Search</Button></div>
 
                         {searchResults && (
                             <Container header={<Header variant="h3">Search Results</Header>}>

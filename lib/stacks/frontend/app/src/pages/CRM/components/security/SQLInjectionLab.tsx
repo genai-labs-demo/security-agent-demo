@@ -46,7 +46,7 @@ const SQLInjectionLab = () => {
       });
       setRes(await r.json());
     } catch (e: any) { setErr(e?.message || "Request failed"); }
-    finally { setBusy(false); }
+    finally { setBusy(false); setTimeout(() => ref.current?.scrollIntoView({ behavior: "smooth" }), 100); }
   };
 
   return (
