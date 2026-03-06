@@ -55,7 +55,7 @@
 - CloudFront distribution includes an `/api/*` behavior that proxies requests to the API Gateway origin
 - A CloudFront Function rewrites `/api/*` paths to `/prod/*` (the API Gateway stage prefix)
 - Caching is disabled for API proxy requests; all viewer headers are forwarded (except `Host`)
-- This allows the pen-test scanner to reach backend security demo endpoints through the same verified custom domain as the frontend (e.g., `https://app.secagent.ai.demo.aws/api/security-profile/1`)
+- This allows the pen-test scanner to reach backend security demo endpoints through the same verified custom domain as the frontend (e.g., `https://<your-domain>/api/security-profile/1`)
 
 ## Data Protection
 
@@ -174,7 +174,6 @@
 - CDK Nag suppressions (`AwsSolutions-APIG4`, `AwsSolutions-COG4`) are applied to security demo resources with documented justification
 
 ### Cross-Account Access Controls
-- The DNS role stack creates a cross-account IAM role for NovaDomainService (account `791674550530`) with permissions scoped exclusively to Route 53 actions (`route53:CreateHostedZone`, `route53:ChangeResourceRecordSets`, etc.)
 - No broad `sts:AssumeRole` permissions are granted to application roles
 
 ### CDK Nag Compliance

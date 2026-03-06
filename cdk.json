@@ -16,23 +16,15 @@
         ]
     },
     "context": {
-        "@export": { "deleteLines": 25 },
         "stage": "dev",
         "projectId": "security-agent-demo",
         "clearDatabaseData": true,
         "accounts": {
             "dev": {
-                "number": "946486897599",
-                "region": "us-east-1",
-                "midway": true
+                "number": "YOUR_AWS_ACCOUNT_ID",
+                "region": "us-east-1"
             }
         },
-        "gitlab": {
-            "group": "genai-labs/demo-assets",
-            "project": "security-agent-demo"
-        },
-        "customDomain": "app.secagent.ai.demo.aws",
-        "hostedZoneName": "secagent.ai.demo.aws",
         "@aws-cdk/aws-lambda:recognizeLayerVersion": true,
         "@aws-cdk/core:checkSecretUsage": true,
         "@aws-cdk/core:target-partitions": ["aws", "aws-cn"],

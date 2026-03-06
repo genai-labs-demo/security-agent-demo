@@ -7,22 +7,13 @@
 |  Browser   |------------------------->|  Cognito        |
 |  (React)   |<------------------------|  Hosted UI      |
 +-----+------+    2. JWT Tokens         +--------+--------+
-      |                                          |
-      |           3. Midway SSO (Optional)       |
-      |           <------------------------------+
-      |           |
-      |           v
-      |      +---------------+
-      |      |  OIDC IdP     |
-      |      |  (Federate)   |
-      |      +---------------+
       |
-      |    4. API Request + Bearer Token
+      |    3. API Request + Bearer Token
       v
 +-------------+    5. Validate JWT    +-----------------+
 | API Gateway |--------------------->|  Cognito        |
 |             |<---------------------|  Authorizer     |
-+------+------+    6. Allow/Deny      +-----------------+
++------+------+    4. Allow/Deny      +-----------------+
        |
        |    7. Invoke Lambda
        v

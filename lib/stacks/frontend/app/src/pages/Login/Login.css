@@ -390,7 +390,7 @@ body:has(.login-page) {
   display: none !important;
 }
 
-/* Non-primary buttons (e.g. Midway SSO) */
+/* Non-primary buttons */
 .login-card .amplify-button:not(.amplify-button--primary):not(.amplify-button--link) {
   color: #e2e8f0 !important;
   border-color: rgba(255, 255, 255, 0.15) !important;

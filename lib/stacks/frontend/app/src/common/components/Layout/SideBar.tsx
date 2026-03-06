@@ -51,8 +51,8 @@ const SideBar = () => {
                 { type: "divider" as const },
                 {
                     type: "link" as const,
-                    text: "GitLab",
-                    href: "https://gitlab.aws.dev/genai-labs/templates/demo-starter-kit",
+                    text: "GitHub",
+                    href: "#",
                     external: true,
                 },
             ]}

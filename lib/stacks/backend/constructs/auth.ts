@@ -14,8 +14,6 @@ import { Function } from "aws-cdk-lib/aws-lambda";
 import { CfnWebACL, CfnWebACLAssociation } from "aws-cdk-lib/aws-wafv2";
 import { NagSuppressions } from "cdk-nag";
 import { Construct } from "constructs";
-// @export {"deleteLines": 1}
-import { FederateUserPool, FederateUserPoolClient } from "../../../common/constructs/federate";
 import { createManagedRules } from "../../../common/utilities";
 
 interface AuthProps {
@@ -35,10 +33,8 @@ export class Auth extends Construct {
 
         const { urls, hydrationFunction } = props;
 
-        // @export {"replace": "FederateUserPool", "with": "UserPool"}
-        const userPool = new FederateUserPool(this, "userPool", {
-            // @export {"replace": "false,", "with": "true,"}
-            selfSignUpEnabled: false,
+        const userPool = new UserPool(this, "userPool", {
+            selfSignUpEnabled: true,
             signInAliases: {
                 email: true,
             },
@@ -86,8 +82,7 @@ export class Auth extends Construct {
         });
 
         const tokenValidity = Duration.hours(8);
-        // @export {"replace": "FederateUserPoolClient", "with": "UserPoolClient"}
-        const userPoolClient = new FederateUserPoolClient(this, "userPoolClient", {
+        const userPoolClient = new UserPoolClient(this, "userPoolClient", {
             userPool,
             generateSecret: false,
             refreshTokenValidity: tokenValidity,
@@ -201,7 +196,6 @@ export class Auth extends Construct {
         });
 
         this.userPool = userPool;
-        // @export {"deleteLines": 1}
         this.userPoolDomain = userPool.addDomain("userPoolDomain");
         this.userPoolClient = userPoolClient;
         this.identityPool = identityPool;

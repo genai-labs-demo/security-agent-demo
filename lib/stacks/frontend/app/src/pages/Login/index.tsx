@@ -1,7 +1,5 @@
-import { Authenticator, Button } from "@aws-amplify/ui-react";
-import { signInWithRedirect } from "aws-amplify/auth";
+import { Authenticator } from "@aws-amplify/ui-react";
 import { useEffect, useRef } from "react";
-import Amazicon from "./amazicon.svg";
 import "./Login.css";
 
 /** Lightweight particle system drawn on a background canvas */
@@ -103,17 +101,9 @@ const Login = () => {
                                         <p>Educational Vulnerability Testing Platform</p>
                                     </div>
 
-                                    <Button
-                                        onClick={() => signInWithRedirect()}
-                                        gap="0.75rem"
-                                        isFullWidth
-                                    >
-                                        <img src={Amazicon} alt="Amazon icon" style={{ width: "15px", flexShrink: 0, filter: "brightness(0) invert(1)" }} />
-                                        Sign in with Midway
-                                    </Button>
                                     <div className="login-divider">
                                         <span className="login-divider-line" />
-                                        <span className="login-divider-text">or</span>
+                                        <span className="login-divider-text">sign in</span>
                                         <span className="login-divider-line" />
                                     </div>
                                 </div>

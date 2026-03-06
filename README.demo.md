@@ -144,7 +144,7 @@ See [tools/README-crm-assets.md](./tools/README-crm-assets.md) for details.
 │   ├── generate-crm-assets.sh
 │   └── README-crm-assets.md
 └── docs/                     # Documentation
-    └── kit/                  # Starter kit docs
+    └── design-review/        # Architecture, security, threat model
 ```
 
 ## Fictitious Data
@@ -202,15 +202,9 @@ The application includes generated fictitious data for demo purposes:
 
 ## Documentation
 
-### Main Documentation
-- **[Detailed README](./README.demo.md)** - Complete CRM documentation
 - **[CRM Application](./lib/stacks/frontend/app/README-CRM.md)** - Frontend app docs
-
-### Starter Kit Documentation
-- **[Machine Setup](./docs/kit/machine-setup.md)** - Developer machine setup
-- **[Demo Creation](./docs/kit/demo-creation.md)** - Creating new demos
-- **[Demo Setup](./docs/kit/demo-setup.md)** - Setting up existing demos
-- **[Design Documentation](./docs/kit/design.md)** - Starter kit architecture
+- **[Pen Test Guide](./docs/pentest-guide.md)** - Vulnerability endpoints and scanner config
+- **[Security Controls](./docs/design-review/security-controls.md)** - Infrastructure security measures
 
 ## Troubleshooting
 
@@ -227,10 +221,10 @@ npm install
 aws sts get-caller-identity
 
 # Bootstrap CDK (first time only)
-npm run kit -- bootstrap dev
+npx aws-cdk@2.1105.0 bootstrap aws://YOUR_ACCOUNT_ID/us-east-1
 
-# Deploy with kit CLI
-npm run kit -- deploy dev --all
+# Deploy all stacks
+npx aws-cdk@2.1105.0 deploy "dev/*" --require-approval never
 ```
 
 ### Frontend Issues
@@ -248,21 +242,14 @@ npm run -w frontend build
 To remove all AWS resources:
 
 ```bash
-# Delete all stacks using kit CLI
-npm run kit
-# Select your account, then choose "Destroy CDK Stack(s)"
-
-# Or use CDK directly
-npm run cdk destroy "*/**"
+npx aws-cdk@2.1105.0 destroy "dev/*"
 ```
 
-**Note**: S3 buckets may need to be emptied before deletion.
+**Note**: S3 buckets with `autoDeleteObjects: true` will be emptied automatically during stack deletion.
 
 ## Support
 
-For questions about this demo application:
-1. Review the documentation in this repository
-2. Contact your AWS support team
+For questions about this demo application, review the documentation in this repository or open a GitHub issue.
 
 ## Note
 

@@ -2,7 +2,6 @@ import { Aspects, Stage, StageProps } from "aws-cdk-lib";
 import { AwsSolutionsChecks, NagSuppressions } from "cdk-nag";
 import { Construct } from "constructs";
 import { Backend } from "./stacks/backend";
-import { DnsRoleStack } from "./stacks/dns";
 import { Frontend, FrontendDeployment } from "./stacks/frontend";
 
 export class ApplicationStage extends Stage {
@@ -11,20 +10,18 @@ export class ApplicationStage extends Stage {
 
         const frontend = new Frontend(this, "frontend");
 
-        // IAM role for NovaDomainService (people.aws.dev domain management)
-        new DnsRoleStack(this, "dns");
-
         const backend = new Backend(this, "backend", {
             urls: frontend.urls,
         });
 
         // Proxy API requests through CloudFront so the pen test scanner
         // can reach backend endpoints via the verified frontend domain.
-        // e.g. https://app.secagent.ai.demo.aws/api/security-profile/1
-        //   -> https://isznznfp27.execute-api.us-east-1.amazonaws.com/prod/security-profile/1
+        // e.g. https://<your-domain>/api/security-profile/1
+        //   -> https://<api-id>.execute-api.<region>.amazonaws.com/prod/security-profile/1
         // Note: domain is hardcoded to avoid a circular stack dependency
         // (frontend needs backend.restApi, backend needs frontend.urls)
-        frontend.addApiProxy("isznznfp27.execute-api.us-east-1.amazonaws.com");
+        // After first deploy, replace with your API Gateway domain from the CDK output.
+        frontend.addApiProxy("YOUR_API_GATEWAY_DOMAIN"); // e.g. "abc123.execute-api.us-east-1.amazonaws.com"
 
         // this stack must be named frontendDeployment
         new FrontendDeployment(this, "frontendDeployment", {

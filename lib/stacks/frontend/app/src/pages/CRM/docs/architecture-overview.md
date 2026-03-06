@@ -11,7 +11,7 @@ AnyCompany CRM is a full-stack web application built on AWS, providing customer 
 - **Database**: Amazon RDS PostgreSQL 15 with RDS Proxy
 - **Authentication**: Amazon Cognito (User Pool + Identity Pool) with Essentials feature plan
 - **Infrastructure**: AWS CDK (TypeScript)
-- **Custom Domain**: app.secagent.ai.demo.aws (Route 53 + ACM)
+- **Custom Domain**: Configured via `lib/stacks/frontend/index.ts` (Route 53 + ACM)
 
 ## Architecture Diagram
 
@@ -70,7 +70,7 @@ A visual architecture diagram is available at `docs/SecurityAgentDiagram.png` an
 
 ## CloudFront Configuration
 
-- **Custom Domain**: app.secagent.ai.demo.aws with ACM certificate (DNS-validated)
+- **Custom Domain**: Your custom domain with ACM certificate (DNS-validated)
 - **Route 53**: A-record alias pointing to CloudFront distribution
 - **Default Behavior**: S3 origin (static React app) with HTTPS redirect
 - **API Proxy Behavior**: `/api/*` routes rewritten to `/prod/*` via CloudFront Function, forwarded to API Gateway origin (caching disabled, all viewer headers forwarded)

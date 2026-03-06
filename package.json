@@ -1,10 +1,10 @@
 {
     "name": "security-agent-demo",
-    "description": "project description",
+    "description": "A deliberately vulnerable CRM application for testing the AWS Security Agent",
     "version": "4.0.0",
     "author": "AWS Technical Product Marketing",
     "license": "Apache License Version 2.0",
-    "private": true,
+    "private": false,
     "bin": {
         "app": "bin/app.js"
     },
@@ -17,10 +17,6 @@
         "prepare": "husky",
         "format": "prettier --write . && ruff format .",
         "lint": "eslint . && ruff check .",
-        "kit": "npx tsx tools/cli.ts",
-        "export": "npx tsx tools/export.ts",
-        "consolidate:analyze": "npx tsx tools/consolidation-analyzer.ts",
-        "consolidate:cli": "npx tsx tools/consolidation-cli.ts",
         "stage": "npx generate-changelog && git add -A",
         "commit": "npx cz",
         "build": "tsc",

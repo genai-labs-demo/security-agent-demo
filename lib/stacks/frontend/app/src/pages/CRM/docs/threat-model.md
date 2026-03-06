@@ -88,7 +88,7 @@ This threat model covers the AnyCompany CRM application including its frontend, 
 ### Frontend to CloudFront
 - **Transport**: HTTPS enforced via CloudFront (TLS 1.2 minimum, 2021 policy)
 - **WAF**: CloudFront WAF with Common Rule Set, IP Reputation List, Bot Control (block mode); Security Agent allowlisted at priority 0
-- **Custom Domain**: app.secagent.ai.demo.aws with ACM certificate
+- **Custom Domain**: Your custom domain with ACM certificate
 
 ### CloudFront to API Gateway (API Proxy)
 - **Path Rewrite**: CloudFront Function rewrites `/api/*` to `/prod/*`
