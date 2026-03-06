@@ -67,3 +67,66 @@ aws cognito-idp admin-create-user \
 2. Create a penetration test with target URL `https://<your-domain>/api/`
 3. Add the Cognito credentials from above
 4. Run the scan — see [docs/pentest-guide.md](./docs/pentest-guide.md) for details
+
+
+## Architecture
+
+```
+CloudFront ──► S3 (React App)
+    │
+    │ /api/*
+    ▼
+API Gateway ◄── Cognito (JWT auth on CRM endpoints)
+    │               No auth on /security-* endpoints
+    ▼
+Lambda (Python) ──► Secrets Manager
+    │
+    ▼
+RDS Proxy ──► PostgreSQL (private subnet)
+```
+
+| Layer | Stack |
+|---|---|
+| Frontend | React 18 + TypeScript, Cloudscape, S3 + CloudFront + WAF |
+| Backend | API Gateway + Lambda (Python), RDS PostgreSQL 15, RDS Proxy |
+| Auth | Amazon Cognito (User Pool + Identity Pool) |
+| Infra | VPC with private subnets, NAT, encrypted storage |
+
+## Project Structure
+
+```
+lib/stacks/
+├── frontend/           # CloudFront + S3 + WAF, React app
+│   └── app/            # CRM application source
+├── backend/
+│   ├── rest-api/proxy/handlers/
+│   │   └── security_handler.py  ← intentional vulns
+│   ├── database.ts     # RDS PostgreSQL
+│   ├── networking.ts   # VPC, subnets
+│   └── constructs/auth.ts  # Cognito + WAF
+docs/
+├── pentest-guide.md    # Vuln endpoints + scanner config
+└── design-review/      # Architecture, security, threat model
+```
+
+## Estimated Cost
+
+~$110 – $325/month. Primary drivers: RDS ($50–150), NAT Gateway ($30–45), WAF ($10–30). See [AWS Pricing Calculator](https://calculator.aws/) for details.
+
+## Clean Up
+
+```bash
+npx aws-cdk@2.1105.0 destroy "dev/*"
+```
+
+## Documentation
+
+- [Pen Test Guide](./docs/pentest-guide.md) — vulnerability endpoints and scanner config
+- [Security Controls](./docs/design-review/security-controls.md) — infrastructure security
+- [Architecture Overview](./docs/design-review/architecture-overview.md) — system design
+- [Threat Model](./docs/design-review/threat-model.md) — threat analysis
+- [CRM App Details](./README.demo.md) — frontend application docs
+
+## License
+
+[Apache License Version 2.0](./LICENSE)
