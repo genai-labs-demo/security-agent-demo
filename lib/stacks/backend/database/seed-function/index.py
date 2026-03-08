@@ -200,6 +200,28 @@ def initialize_schema(conn):
     ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE;
     CREATE INDEX IF NOT EXISTS idx_accounts_deleted_at ON accounts(deleted_at);
     CREATE INDEX IF NOT EXISTS idx_opportunities_deleted_at ON opportunities(deleted_at);
+
+    -- Audit trail for opportunity field changes (especially ownership transfers)
+    CREATE TABLE IF NOT EXISTS opportunity_audit (
+        id SERIAL PRIMARY KEY,
+        opportunity_id VARCHAR(50) NOT NULL,
+        field_name VARCHAR(100) NOT NULL,
+        old_value TEXT,
+        new_value TEXT,
+        changed_by VARCHAR(255),
+        changed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        change_reason TEXT,
+        CONSTRAINT fk_opportunity_audit_opportunity 
+            FOREIGN KEY (opportunity_id) 
+            REFERENCES opportunities(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_opportunity_audit_opportunity_id 
+        ON opportunity_audit(opportunity_id);
+    CREATE INDEX IF NOT EXISTS idx_opportunity_audit_changed_at 
+        ON opportunity_audit(changed_at);
+    CREATE INDEX IF NOT EXISTS idx_opportunity_audit_field_name 
+        ON opportunity_audit(field_name);
     """
     
     cursor = conn.cursor()
