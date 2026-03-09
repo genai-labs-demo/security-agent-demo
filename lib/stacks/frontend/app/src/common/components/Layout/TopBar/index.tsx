@@ -88,7 +88,7 @@ const TopBar = () => {
                         onItemClick: async ({ detail }) => {
                             if (detail.id === "signout") {
                                 try {
-                                    await signOut({ global: false });
+                                    await signOut({ global: true });
                                     window.location.href = "/";
                                 } catch (error) {
                                     console.log("Failed to sign out: ", error);
