@@ -48,6 +48,8 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Map camelCase API fields to snake_case database columns.
     
+    Note: accountName and ownerName are intentionally excluded from mapping
+    as they must be populated server-side from related tables.
     Args:
         api_data: API request data with camelCase field names
     
@@ -60,7 +62,7 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
     field_mapping = {
         'name': 'name',
         'accountId': 'account_id',
-        'accountName': 'account_name',
+        # 'accountName' excluded - populated server-side from accounts table
         'amount': 'amount',
         'closeDate': 'close_date',
         'stage': 'stage',
@@ -69,7 +71,7 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
         'recentActivityDate': 'recent_activity_date',
         'forecastCategory': 'forecast_category',
         'ownerId': 'owner_id',
-        'ownerName': 'owner_name',
+        # 'ownerName' excluded - populated server-side from team_members table
         'probability': 'probability',
         'createdDate': 'created_date',
         'lastModifiedDate': 'last_modified_date'
@@ -80,6 +82,40 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
             db_data[db_field] = api_data[api_field]
     
     return db_data
+
+
+def _populate_denormalized_fields(connection, db_data: Dict[str, Any]) -> None:
+    """
+    Populate denormalized fields (account_name, owner_name) by looking up
+    the related entities from accounts and team_members tables.
+    This ensures data integrity and prevents users from setting arbitrary names.
+    
+    Args:
+        connection: Database connection object
+        db_data: Dictionary with database field names (snake_case)
+    
+    Note: This function modifies db_data in place
+    """
+    cursor = connection.cursor(cursor_factory=RealDictCursor)
+    
+    try:
+        # Populate account_name from accounts table if account_id is present
+        if 'account_id' in db_data and db_data['account_id']:
+            cursor.execute("SELECT name FROM accounts WHERE id = %s", (db_data['account_id'],))
+            account_record = cursor.fetchone()
+            if account_record:
+                db_data['account_name'] = account_record['name']
+                logger.info(f"Populated account_name: {db_data['account_name']}")
+        
+        # Populate owner_name from team_members table if owner_id is present
+        if 'owner_id' in db_data and db_data['owner_id']:
+            cursor.execute("SELECT name FROM team_members WHERE id = %s", (db_data['owner_id'],))
+            owner_record = cursor.fetchone()
+            if owner_record:
+                db_data['owner_name'] = owner_record['name']
+                logger.info(f"Populated owner_name: {db_data['owner_name']}")
+    finally:
+        cursor.close()
 
 
 def _recalculate_account_aggregates(connection, account_id: str) -> None:
@@ -443,9 +479,12 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         if 'last_modified_date' not in db_data:
             db_data['last_modified_date'] = datetime.utcnow()
         
+        # Populate denormalized fields from related tables
+        _populate_denormalized_fields(connection, db_data)
+        
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
-        # Validate account_id exists
+        # Validate account_id exists (after population, for better error messages)
         if 'account_id' in db_data and db_data['account_id']:
             cursor.execute("SELECT id FROM accounts WHERE id = %s", (db_data['account_id'],))
             if not cursor.fetchone():
@@ -547,9 +586,12 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
             # Return current opportunity
             return get_opportunity(connection, opportunity_id)
         
+        # Populate denormalized fields from related tables if account_id or owner_id are being updated
+        _populate_denormalized_fields(connection, db_data)
+        
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
-        # Validate account_id exists if being updated
+        # Validate account_id exists if being updated (after population, for better error messages)
         if 'account_id' in db_data and db_data['account_id']:
             cursor.execute("SELECT id FROM accounts WHERE id = %s", (db_data['account_id'],))
             if not cursor.fetchone():
