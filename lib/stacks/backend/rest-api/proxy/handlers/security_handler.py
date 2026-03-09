@@ -107,12 +107,12 @@ def get_security_profile(connection, user_id):
     """
     cursor = connection.cursor()
     try:
-        # VULNERABILITY: SQL Injection - string concatenation instead of parameterized query
-        # Cast id to TEXT so string-based payloads (e.g. admin' --) work without type errors
-        query = f"SELECT id, username, email, role, bio, created_at FROM security_users WHERE id::text = '{user_id}'"
-        logger.info(f"[VULNERABLE] Executing SQL query: {query}")
-
-        cursor.execute(query)
+        # FIXED: Use parameterized query to prevent SQL injection
+        # Cast id to TEXT to allow string input while preventing injection
+        query = "SELECT id, username, email, role, bio, created_at FROM security_users WHERE id::text = %s"
+        logger.info(f"[SECURE] Executing parameterized SQL query with user_id: {user_id}")
+        
+        cursor.execute(query, (user_id,))
         columns = [desc[0] for desc in cursor.description]
         rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
 
