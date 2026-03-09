@@ -195,10 +195,11 @@ def create_team_member(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
-        # Validate email uniqueness
+        # Validate email uniqueness with row-level locking to prevent race conditions
         if 'email' in db_data and db_data['email']:
             cursor.execute(
-                "SELECT id FROM team_members WHERE email = %s",
+                # Use SELECT FOR UPDATE to lock the row and prevent TOCTOU race conditions
+                "SELECT id FROM team_members WHERE email = %s FOR UPDATE",
                 (db_data['email'],)
             )
             if cursor.fetchone():
@@ -281,10 +282,11 @@ def update_team_member(connection, member_id: str, data: Dict[str, Any]) -> Opti
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
-        # Validate email uniqueness if being updated
+        # Validate email uniqueness with row-level locking to prevent race conditions
         if 'email' in db_data and db_data['email']:
             cursor.execute(
-                "SELECT id FROM team_members WHERE email = %s AND id != %s",
+                # Use SELECT FOR UPDATE to lock the row and prevent TOCTOU race conditions
+                "SELECT id FROM team_members WHERE email = %s AND id != %s FOR UPDATE",
                 (db_data['email'], member_id)
             )
             if cursor.fetchone():
