@@ -8,10 +8,35 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 import psycopg2
 from psycopg2.extras import RealDictCursor
+import html
 
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+
+def _sanitize_html(value: Any) -> Any:
+    """
+    Sanitize string input by escaping HTML special characters to prevent XSS.
+    
+    This function provides defense-in-depth against stored XSS by ensuring that
+    user-controlled input cannot contain executable HTML or JavaScript when stored
+    in the database. HTML special characters are converted to their entity equivalents:
+    - < becomes &lt;
+    - > becomes &gt;
+    - & becomes &amp;
+    - " becomes &quot;
+    - ' becomes &#x27;
+    
+    Args:
+        value: Input value to sanitize (typically a string from user input)
+    
+    Returns:
+        Sanitized string with HTML entities escaped, or original value if not a string
+    """
+    if isinstance(value, str):
+        return html.escape(value, quote=True)
+    return value
 
 
 def _map_opportunity_to_api_format(db_record: Dict[str, Any]) -> Dict[str, Any]:
@@ -47,7 +72,10 @@ def _map_opportunity_to_api_format(db_record: Dict[str, Any]) -> Dict[str, Any]:
 def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Map camelCase API fields to snake_case database columns.
+    Map camelCase API fields to snake_case database columns and sanitize text inputs.
     
+    This function applies HTML entity encoding to all user-controllable text fields
+    to prevent stored XSS vulnerabilities (CWE-79).
     Args:
         api_data: API request data with camelCase field names
     
@@ -57,6 +85,12 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
     db_data = {}
     
     # Map fields if they exist in the input
+    # Define which fields should be sanitized (user-controllable text fields)
+    text_fields_to_sanitize = {
+        'name', 'accountName', 'nextStep', 'recentActivity', 
+        'stage', 'forecastCategory', 'ownerName'
+    }
+    
     field_mapping = {
         'name': 'name',
         'accountId': 'account_id',
@@ -78,7 +112,11 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
     for api_field, db_field in field_mapping.items():
         if api_field in api_data:
             db_data[db_field] = api_data[api_field]
-    
+            # Sanitize text fields to prevent stored XSS
+            if api_field in text_fields_to_sanitize:
+                db_data[db_field] = _sanitize_html(api_data[api_field])
+            else:
+                db_data[db_field] = api_data[api_field]
     return db_data
 
 
