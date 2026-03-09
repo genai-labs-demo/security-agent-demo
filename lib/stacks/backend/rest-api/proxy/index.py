@@ -23,6 +23,7 @@ from s3_integration import enhance_with_images
 from cors_handler import process_cors
 from error_handler import (
     handle_validation_error,
+    handle_forbidden_error,
     handle_not_found_error,
     handle_conflict_error,
     handle_database_error,
@@ -85,7 +86,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             start_time = time.time()
             
             # Route to appropriate handler and execute operation
-            result = execute_operation(connection, route_info, operation)
+            result = execute_operation(connection, route_info, operation, event)
             
             # Calculate and publish search latency metrics
             elapsed_time = (time.time() - start_time) * 1000  # Convert to milliseconds
@@ -139,6 +140,12 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Check if it's a custom error message from handlers
         error_str = str(e)
         
+        # Forbidden/Authorization errors (403)
+        if "forbidden:" in error_str.lower():
+            logger.warning(f"Authorization denied in request {request_id}: {str(e)}")
+            response = handle_forbidden_error(str(e))
+            return process_cors(event, response)
+        
         # Not found errors (404)
         if "not found" in error_str.lower():
             resource_type = route_info.resource_type if 'route_info' in locals() else "Resource"
@@ -162,7 +169,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         return process_cors(event, response)
 
 
-def execute_operation(connection, route_info, operation: str) -> Any:
+def execute_operation(connection, route_info, operation: str, event: Dict[str, Any]) -> Any:
     """
     Execute the appropriate CRUD operation based on route information.
     
@@ -170,6 +177,7 @@ def execute_operation(connection, route_info, operation: str) -> Any:
         connection: Database connection object
         route_info: Parsed route information
         operation: Operation type ('list', 'get', 'create', 'update', 'delete')
+        event: API Gateway event (for authorization context)
         
     Returns:
         Operation result (record, list of records, or boolean)
@@ -250,7 +258,7 @@ def execute_operation(connection, route_info, operation: str) -> Any:
         elif operation == 'create':
             return team_members_handler.create_team_member(connection, body)
         elif operation == 'update':
-            result = team_members_handler.update_team_member(connection, resource_id, body)
+            result = team_members_handler.update_team_member(connection, resource_id, body, event)
             if result is None:
                 raise ValueError(f"Team member with id {resource_id} not found")
             return result
