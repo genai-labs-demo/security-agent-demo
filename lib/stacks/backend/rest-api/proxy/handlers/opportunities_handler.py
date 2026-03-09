@@ -5,6 +5,7 @@ Handles database operations and field mapping between snake_case and camelCase.
 
 import logging
 from typing import Dict, Any, List, Optional
+import re
 from datetime import datetime
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -13,6 +14,42 @@ from psycopg2.extras import RealDictCursor
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
+# Pattern to detect potentially dangerous HTML/JavaScript content
+# This regex looks for common XSS patterns that should not be in text fields
+DANGEROUS_PATTERN = re.compile(
+    r'<[^>]*>|'  # HTML tags (any opening or closing tag)
+    r'javascript:|'  # javascript: protocol
+    r'on\w+\s*=|'  # Event handlers (onclick, onerror, onload, etc.)
+    r'&lt;|&gt;|&quot;|&#|'  # HTML entities that could be used to bypass filters
+    r'<script|</script|'  # Script tags (case insensitive handled by IGNORECASE flag)
+    r'expression\s*\(|'  # CSS expression (IE-specific XSS)
+    r'vbscript:|'  # VBScript protocol
+    r'data:text/html',  # Data URI with HTML
+    re.IGNORECASE
+)
+
+
+def _validate_text_field(value: Any, field_name: str) -> None:
+    """
+    Validate that a text field does not contain HTML/JavaScript content.
+    This prevents stored XSS vulnerabilities by rejecting dangerous input patterns.
+    
+    Args:
+        value: The field value to validate
+        field_name: Name of the field (for error messages)
+    
+    Raises:
+        ValueError: If the field contains HTML/JavaScript patterns
+    """
+    if value is None or value == '':
+        return
+    
+    value_str = str(value)
+    if DANGEROUS_PATTERN.search(value_str):
+        raise ValueError(
+            f"Invalid {field_name}: HTML and JavaScript content is not allowed. "
+            f"Please use plain text only."
+        )
 
 def _map_opportunity_to_api_format(db_record: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -428,6 +465,10 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         # Validate amount bounds
         _validate_amount(db_data.get('amount'))
         
+        # Validate text fields for HTML/JavaScript content
+        _validate_text_field(db_data.get('name'), 'name')
+        _validate_text_field(db_data.get('recent_activity'), 'recentActivity')
+        
         # Generate ID if not provided
         if 'id' not in data:
             import uuid
@@ -535,6 +576,12 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         # Validate amount bounds if being updated
         if 'amount' in db_data:
             _validate_amount(db_data.get('amount'))
+        
+        # Validate text fields for HTML/JavaScript content if being updated
+        if 'name' in db_data:
+            _validate_text_field(db_data.get('name'), 'name')
+        if 'recent_activity' in db_data:
+            _validate_text_field(db_data.get('recent_activity'), 'recentActivity')
         
         # Remove id if present (shouldn't be updated)
         db_data.pop('id', None)
