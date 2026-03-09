@@ -1,4 +1,4 @@
-import { aws_apigateway as apigateway, aws_iam, Duration, RemovalPolicy } from "aws-cdk-lib";
+import { aws_apigateway as apigateway, aws_iam, aws_dynamodb as dynamodb, Duration, RemovalPolicy } from "aws-cdk-lib";
 import {
     AuthorizationType,
     CognitoUserPoolsAuthorizer,
@@ -64,6 +64,9 @@ export class RestApi extends Construct {
                 allowMethods: Cors.ALL_METHODS,
                 allowHeaders: Cors.DEFAULT_HEADERS,
             },
+            // Enable API Gateway throttling for rate limiting protection
+            // These limits apply to all methods unless overridden at method level
+            throttle: { rateLimit: 1000, burstLimit: 2000 },
             deployOptions: {
                 accessLogDestination: new LogGroupLogDestination(
                     new LogGroup(this, "restApiLogGroup", {
@@ -74,6 +77,9 @@ export class RestApi extends Construct {
                 loggingLevel: MethodLoggingLevel.ERROR,
                 metricsEnabled: true,
                 dataTraceEnabled: false,
+                // API Gateway throttling limits for DDoS and rate limiting protection
+                throttlingRateLimit: 1000,
+                throttlingBurstLimit: 2000,
             },
             cloudWatchRole: true,
             cloudWatchRoleRemovalPolicy: RemovalPolicy.DESTROY,
@@ -108,6 +114,16 @@ export class RestApi extends Construct {
             environment.CRM_IMAGES_BUCKET = crmImagesBucket.bucketName;
         }
 
+        // Create DynamoDB table for application-level rate limiting
+        const rateLimitTable = new dynamodb.Table(this, "rateLimitTable", {
+            partitionKey: { name: "client_id", type: dynamodb.AttributeType.STRING },
+            sortKey: { name: "endpoint", type: dynamodb.AttributeType.STRING },
+            timeToLiveAttribute: "ttl",
+            billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+            removalPolicy: RemovalPolicy.DESTROY,
+        });
+        environment.RATE_LIMIT_TABLE_NAME = rateLimitTable.tableName;
+
         const proxyFunction = new CommonPythonFunction(this, "proxyFunction", {
             entry: path.join(__dirname, "proxy"),
             index: "index.py",
@@ -132,6 +148,9 @@ export class RestApi extends Construct {
             crmImagesBucket.grantRead(proxyFunction);
         }
 
+        // Grant DynamoDB permissions for rate limiting
+        rateLimitTable.grantReadWriteData(proxyFunction);
+
         // Grant CloudWatch metrics permissions for database monitoring
         if (databaseProxyEndpoint) {
             proxyFunction.addToRolePolicy(new aws_iam.PolicyStatement({
@@ -144,7 +163,7 @@ export class RestApi extends Construct {
         NagSuppressions.addResourceSuppressions(proxyFunction, [
             {
                 id: "AwsSolutions-IAM5",
-                reason: "S3 grantRead generates scoped wildcard actions (s3:GetObject*, s3:GetBucket*, s3:List*) on the CRM images bucket ARN. CloudWatch PutMetricData requires Resource::* per AWS API design.",
+                reason: "S3 grantRead generates scoped wildcard actions (s3:GetObject*, s3:GetBucket*, s3:List*) on the CRM images bucket ARN. CloudWatch PutMetricData requires Resource::* per AWS API design. DynamoDB grantReadWriteData generates scoped wildcard actions on the rate limit table ARN.",
             },
         ], true);
 
@@ -153,37 +172,44 @@ export class RestApi extends Construct {
         const lambdaInteg = new LambdaIntegration(proxyFunction);
         const noAuth = { authorizationType: AuthorizationType.NONE };
 
+        // More restrictive throttling for unauthenticated security endpoints
+        // to prevent abuse of intentionally vulnerable endpoints
+        const securityThrottle = {
+            authorizationType: AuthorizationType.NONE,
+            throttle: { rateLimit: 100, burstLimit: 200 }
+        };
+
         const secProfile = restApi.root.addResource("security-profile");
-        secProfile.addMethod("GET", lambdaInteg, noAuth);
-        secProfile.addMethod("POST", lambdaInteg, noAuth);
+        secProfile.addMethod("GET", lambdaInteg, securityThrottle);
+        secProfile.addMethod("POST", lambdaInteg, securityThrottle);
         const secProfileId = secProfile.addResource("{id}");
-        secProfileId.addMethod("GET", lambdaInteg, noAuth);
+        secProfileId.addMethod("GET", lambdaInteg, securityThrottle);
 
         const secComments = restApi.root.addResource("security-comments");
-        secComments.addMethod("GET", lambdaInteg, noAuth);
-        secComments.addMethod("POST", lambdaInteg, noAuth);
+        secComments.addMethod("GET", lambdaInteg, securityThrottle);
+        secComments.addMethod("POST", lambdaInteg, securityThrottle);
 
         const secSearch = restApi.root.addResource("security-search");
-        secSearch.addMethod("GET", lambdaInteg, noAuth);
-        secSearch.addMethod("POST", lambdaInteg, noAuth);
+        secSearch.addMethod("GET", lambdaInteg, securityThrottle);
+        secSearch.addMethod("POST", lambdaInteg, securityThrottle);
 
         const secTools = restApi.root.addResource("security-tools");
         const secPing = secTools.addResource("ping");
-        secPing.addMethod("POST", lambdaInteg, noAuth);
+        secPing.addMethod("POST", lambdaInteg, securityThrottle);
         const secNslookup = secTools.addResource("nslookup");
-        secNslookup.addMethod("POST", lambdaInteg, noAuth);
+        secNslookup.addMethod("POST", lambdaInteg, securityThrottle);
 
         const secHealth = restApi.root.addResource("security-health");
-        secHealth.addMethod("GET", lambdaInteg, noAuth);
+        secHealth.addMethod("GET", lambdaInteg, securityThrottle);
 
         const secXssPage = restApi.root.addResource("security-xss-page");
-        secXssPage.addMethod("GET", lambdaInteg, noAuth);
+        secXssPage.addMethod("GET", lambdaInteg, securityThrottle);
 
         const secXssComments = restApi.root.addResource("security-xss-comments");
-        secXssComments.addMethod("GET", lambdaInteg, noAuth);
+        secXssComments.addMethod("GET", lambdaInteg, securityThrottle);
 
         const secXssSearch = restApi.root.addResource("security-xss-search");
-        secXssSearch.addMethod("GET", lambdaInteg, noAuth);
+        secXssSearch.addMethod("GET", lambdaInteg, securityThrottle);
 
         // Suppress cdk-nag authorization warnings for intentionally vulnerable security demo endpoints.
         // These endpoints are deliberately unauthenticated to allow pen test scanners to discover
