@@ -129,6 +129,97 @@ def list_accounts(connection) -> List[Dict[str, Any]]:
 COMPUTED_FIELDS = {'health_status', 'health_score', 'opportunity_count', 'total_opportunity_value'}
 
 
+def _recalculate_health(connection, account_id: str) -> None:
+    """
+    Recalculate and update the health score and status for an account based on
+    opportunity metrics (count and total value).
+    
+    Health scoring algorithm:
+    - Base score from opportunity count: min(opportunity_count * 2, 50)
+    - Value score from total opportunity value: min(total_value / 1_000_000 * 10, 50)
+    - Final score is capped at 100
+    
+    Health status thresholds:
+    - Green: 70-100 (healthy account with good opportunity pipeline)
+    - Yellow: 40-69 (moderate health, needs attention)
+    - Red: 0-39 (at-risk account, requires immediate action)
+    
+    Args:
+        connection: Database connection object
+        account_id: Account ID whose health metrics need recalculation
+    
+    Raises:
+        Exception: If database query or update fails
+    """
+    if not account_id:
+        logger.warning("Cannot recalculate health: account_id is empty")
+        return
+    
+    try:
+        logger.info(f"Recalculating health metrics for account: {account_id}")
+        
+        cursor = connection.cursor(cursor_factory=RealDictCursor)
+        
+        # Query current opportunity metrics
+        query = """
+            SELECT 
+                opportunity_count,
+                total_opportunity_value
+            FROM accounts
+            WHERE id = %s
+        """
+        
+        cursor.execute(query, (account_id,))
+        record = cursor.fetchone()
+        
+        if not record:
+            cursor.close()
+            logger.warning(f"Account not found for health recalculation: {account_id}")
+            return
+        
+        opportunity_count = record.get('opportunity_count') or 0
+        total_opportunity_value = float(record.get('total_opportunity_value') or 0)
+        
+        # Calculate health score based on opportunity metrics
+        # Opportunity count contributes up to 50 points (2 points per opportunity, capped at 50)
+        count_score = min(opportunity_count * 2, 50)
+        
+        # Total value contributes up to 50 points (10 points per $1M, capped at 50)
+        value_score = min(total_opportunity_value / 1_000_000 * 10, 50)
+        
+        health_score = int(min(count_score + value_score, 100))
+        
+        # Determine health status based on score
+        if health_score >= 70:
+            health_status = 'Green'
+        elif health_score >= 40:
+            health_status = 'Yellow'
+        else:
+            health_status = 'Red'
+        
+        # Update the account with calculated health metrics
+        update_query = """
+            UPDATE accounts
+            SET health_score = %s,
+                health_status = %s
+            WHERE id = %s
+        """
+        
+        cursor.execute(update_query, (health_score, health_status, account_id))
+        connection.commit()
+        cursor.close()
+        
+        logger.info(f"Updated health for account {account_id}: score={health_score}, status={health_status}")
+        
+    except psycopg2.Error as e:
+        logger.error(f"Database error recalculating health for account {account_id}: {str(e)}")
+        # Don't rollback here — let the caller handle transaction management
+        raise Exception(f"Failed to recalculate account health: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error recalculating health for account {account_id}: {str(e)}")
+        raise
+
+
 
 def get_account(connection, account_id: str) -> Optional[Dict[str, Any]]:
     """
