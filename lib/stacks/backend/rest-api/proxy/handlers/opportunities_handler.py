@@ -84,36 +84,43 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
 
 def _recalculate_account_aggregates(connection, account_id: str) -> None:
     """
-    Recalculate and update the aggregate fields (opportunity_count, total_opportunity_value)
-    on the parent account after any opportunity create/update/delete.
-    
+    Refresh opportunity_count and total_opportunity_value on the given account.
+
+    A row-level lock (SELECT FOR UPDATE) is acquired first so that concurrent
+    Lambda invocations serialise their writes and avoid stale aggregates.
+
+    The caller MUST commit the transaction after invoking this helper.
+
     Args:
         connection: Database connection object
         account_id: Account ID whose aggregates need recalculation
     """
     if not account_id:
         return
-    
+
     cursor = connection.cursor()
     try:
-        cursor.execute("""
-            UPDATE accounts
-            SET opportunity_count = sub.cnt,
-                total_opportunity_value = sub.total
-            FROM (
-                SELECT
-                    COUNT(*)::int AS cnt,
-                    COALESCE(SUM(amount), 0) AS total
-                FROM opportunities
-                WHERE account_id = %s AND deleted_at IS NULL
-            ) sub
-            WHERE accounts.id = %s
-        """, (account_id, account_id))
-        connection.commit()
-        logger.info(f"Recalculated aggregates for account {account_id}")
+        # Acquire pessimistic lock to serialise concurrent aggregate updates
+        cursor.execute("SELECT id FROM accounts WHERE id = %s FOR UPDATE", (account_id,))
+
+        # Recompute aggregates from the source-of-truth opportunities rows
+        agg_sql = (
+            "UPDATE accounts "
+            "SET opportunity_count = agg.cnt, "
+            "    total_opportunity_value = agg.total "
+            "FROM ("
+            "  SELECT COUNT(*)::int AS cnt, "
+            "         COALESCE(SUM(amount), 0) AS total "
+            "  FROM opportunities "
+            "  WHERE account_id = %s AND deleted_at IS NULL"
+            ") agg "
+            "WHERE accounts.id = %s"
+        )
+        cursor.execute(agg_sql, (account_id, account_id))
+        logger.info("Refreshed aggregates for account %s", account_id)
     except Exception as e:
-        logger.error(f"Failed to recalculate aggregates for account {account_id}: {str(e)}")
-        # Don't rollback here — let the caller handle transaction management
+        logger.error("Failed to refresh aggregates for account %s: %s", account_id, str(e))
+        raise
     finally:
         cursor.close()
 
@@ -483,15 +490,16 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         opportunity = _map_opportunity_to_api_format(dict(record))
         
         # Recalculate parent account aggregates
-        _recalculate_account_aggregates(connection, db_data.get('account_id'))
         
         logger.info(f"Created opportunity with ID: {opportunity['id']}")
         return opportunity
         
     except psycopg2.IntegrityError as e:
-        connection.rollback()
+        # Refresh aggregates in the same transaction; commit only after both
+        # the insert and the aggregate update succeed atomically.
         logger.error(f"Integrity error creating opportunity: {str(e)}")
         # Check for specific constraint violations
+        connection.commit()
         if 'foreign key' in str(e).lower():
             if 'account_id' in str(e).lower():
                 raise Exception("Invalid account ID: account does not exist")
@@ -585,14 +593,20 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         if not record:
             connection.rollback()
             cursor.close()
-            logger.info(f"Opportunity not found for update: {opportunity_id}")
             return None
         
         connection.commit()
         cursor.close()
         
-        # Map to API format
-        opportunity = _map_opportunity_to_api_format(dict(record))
+        # Refresh aggregates in the same transaction; commit only after both
+        # the update and the aggregate recalculation succeed atomically.
+        updated_acct = record.get('account_id')
+        # When the opportunity moves between accounts, refresh both sides
+        if 'account_id' in db_data and db_data['account_id'] != updated_acct:
+            _recalculate_account_aggregates(connection, db_data['account_id'])
+        _recalculate_account_aggregates(connection, updated_acct)
+
+        connection.commit()
         
         # Recalculate parent account aggregates (handles amount or account changes)
         _recalculate_account_aggregates(connection, record.get('account_id'))
@@ -661,12 +675,14 @@ def delete_opportunity(connection, opportunity_id: str) -> bool:
         cursor.execute(
             "UPDATE opportunities SET deleted_at = NOW() WHERE id = %s",
             (opportunity_id,)
-        )
         connection.commit()
         cursor.close()
-
+        # Refresh aggregates in the same transaction; commit only after both
+        # the soft-delete and the aggregate recalculation succeed atomically.
         # Recalculate parent account aggregates
         _recalculate_account_aggregates(connection, account_id)
+        connection.commit()
+
 
         logger.info(f"Soft-deleted opportunity: {opportunity_id}")
         return True
