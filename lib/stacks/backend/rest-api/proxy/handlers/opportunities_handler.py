@@ -87,6 +87,9 @@ def _recalculate_account_aggregates(connection, account_id: str) -> None:
     Recalculate and update the aggregate fields (opportunity_count, total_opportunity_value)
     on the parent account after any opportunity create/update/delete.
     
+    Uses row-level locking (SELECT FOR UPDATE) to prevent race conditions during concurrent
+    aggregate recalculations on the same account.
+    
     Args:
         connection: Database connection object
         account_id: Account ID whose aggregates need recalculation
@@ -96,19 +99,36 @@ def _recalculate_account_aggregates(connection, account_id: str) -> None:
     
     cursor = connection.cursor()
     try:
+        # Step 1: Acquire exclusive row-level lock on the account to prevent concurrent
+        # aggregate updates. This ensures that only one thread can recalculate aggregates
+        # for this account at a time, preventing lost update anomalies.
         cursor.execute("""
-            UPDATE accounts
-            SET opportunity_count = sub.cnt,
-                total_opportunity_value = sub.total
-            FROM (
-                SELECT
-                    COUNT(*)::int AS cnt,
-                    COALESCE(SUM(amount), 0) AS total
-                FROM opportunities
-                WHERE account_id = %s AND deleted_at IS NULL
-            ) sub
-            WHERE accounts.id = %s
-        """, (account_id, account_id))
+            SELECT id FROM accounts WHERE id = %s FOR UPDATE
+        """, (account_id,))
+        
+        if not cursor.fetchone():
+            logger.warning(f"Account {account_id} not found for aggregate recalculation")
+            return
+        
+        # Step 2: Calculate aggregates while holding the lock
+        cursor.execute("""
+            SELECT COUNT(*)::int AS cnt, COALESCE(SUM(amount), 0) AS total
+            FROM opportunities
+            WHERE account_id = %s AND deleted_at IS NULL
+        """, (account_id,))
+        
+        result = cursor.fetchone()
+        if result:
+            cnt, total = result
+            
+            # Step 3: Update the account with calculated values
+            cursor.execute("""
+                UPDATE accounts
+                SET opportunity_count = %s,
+                    total_opportunity_value = %s
+                WHERE id = %s
+            """, (cnt, total, account_id))
+        
         connection.commit()
         logger.info(f"Recalculated aggregates for account {account_id}")
     except Exception as e:
