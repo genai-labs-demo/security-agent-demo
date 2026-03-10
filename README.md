@@ -24,7 +24,11 @@ This repo deploys a fictitious CRM app ("AnyCompany CRM") with intentional secur
 | SQL Injection | `/api/security-profile/{id}` | String concatenation in SQL queries |
 | Stored XSS | `/api/security-comments` | Unsanitized user input stored and returned |
 | Reflected XSS | `/api/security-xss-page?name=` | User input reflected in HTML |
-| Command Injection | `/api/security-tools/ping` | `shell=True` with user-supplied input |
+| Command Injection | `/api/security-tools/ping` | ~~`shell=True` with user-supplied input~~ **REMEDIATED** |
+
+> **Note**: The Command Injection vulnerability in `/api/security-tools/ping` and `/api/security-tools/nslookup` has been remediated. These endpoints now validate input and use `shell=False` to prevent arbitrary command execution. This demonstrates proper security remediation techniques while maintaining the educational value of the repository.
+
+See [lib/stacks/backend/rest-api/proxy/handlers/security_handler.py](./lib/stacks/backend/rest-api/proxy/handlers/security_handler.py) for the secure implementation.
 
 These endpoints are unauthenticated (`AuthorizationType.NONE`). All other CRM endpoints are protected by Cognito.
 
