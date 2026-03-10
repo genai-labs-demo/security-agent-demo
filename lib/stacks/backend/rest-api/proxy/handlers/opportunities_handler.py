@@ -447,7 +447,7 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         
         # Validate account_id exists
         if 'account_id' in db_data and db_data['account_id']:
-            cursor.execute("SELECT id FROM accounts WHERE id = %s", (db_data['account_id'],))
+            cursor.execute("SELECT id FROM accounts WHERE id = %s AND deleted_at IS NULL", (db_data['account_id'],))
             if not cursor.fetchone():
                 cursor.close()
                 raise Exception(f"Invalid account ID: account does not exist")
@@ -551,7 +551,7 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         
         # Validate account_id exists if being updated
         if 'account_id' in db_data and db_data['account_id']:
-            cursor.execute("SELECT id FROM accounts WHERE id = %s", (db_data['account_id'],))
+            cursor.execute("SELECT id FROM accounts WHERE id = %s AND deleted_at IS NULL", (db_data['account_id'],))
             if not cursor.fetchone():
                 cursor.close()
                 raise Exception(f"Invalid account ID: account does not exist")
