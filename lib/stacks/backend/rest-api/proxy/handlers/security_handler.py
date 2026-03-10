@@ -18,6 +18,8 @@ Vulnerability inventory (matches pen-test target set):
 import json
 import logging
 import subprocess
+import re
+import socket
 from datetime import datetime
 
 logger = logging.getLogger()
@@ -482,48 +484,98 @@ def render_xss_search_page(connection, query):
 # ============================================================
 # 5 & 6. Command Injection — Ping endpoint (two vectors)
 # ============================================================
+def _validate_hostname_or_ip(host):
+    """
+    Validate that the host parameter is a legitimate hostname or IP address.
+    Blocks command injection patterns and only allows safe characters.
+    
+    Returns: (is_valid, error_message)
+    """
+    if not host or not isinstance(host, str):
+        return False, "Host parameter must be a non-empty string"
+    
+    # Maximum length check
+    if len(host) > 255:
+        return False, "Host parameter exceeds maximum length of 255 characters"
+    
+    # Block command injection characters
+    dangerous_chars = [';', '|', '&', '`', '$', '(', ')', '\n', '\r', '<', '>', '*', '?', '[', ']', '{', '}', ' ', '\t', '\\', '"', "'"]
+    for char in dangerous_chars:
+        if char in host:
+            return False, f"Host parameter contains invalid character: {char}"
+    
+    # Validate format: must be either a valid hostname or IPv4 address
+    # Hostname pattern: alphanumeric, dots, hyphens only
+    hostname_pattern = r'^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$'
+    # IPv4 pattern
+    ipv4_pattern = r'^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$'
+    
+    if re.match(hostname_pattern, host):
+        return True, None
+    elif re.match(ipv4_pattern, host):
+        # Validate IPv4 octets are in valid range (0-255)
+        parts = host.split('.')
+        for part in parts:
+            if int(part) > 255:
+                return False, "Invalid IPv4 address: octet exceeds 255"
+        return True, None
+    else:
+        return False, "Host parameter must be a valid hostname or IPv4 address"
+
+def _safe_dns_lookup(host):
+    """
+    Perform safe DNS lookup using Python socket library instead of shell commands.
+    This prevents command injection entirely.
+    """
+    try:
+        # Use socket.getaddrinfo for DNS resolution (safer than subprocess)
+        result = socket.getaddrinfo(host, None, socket.AF_INET)
+        if result:
+            addresses = [addr[4][0] for addr in result]
+            output = f"Name:    {host}\n"
+            for addr in addresses:
+                output += f"Address: {addr}\n"
+            return True, output
+        else:
+            return False, f"DNS lookup failed: no addresses found for {host}"
+    except socket.gaierror as e:
+        return False, f"DNS lookup failed: {str(e)}"
+    except Exception as e:
+        return False, f"DNS lookup error: {str(e)}"
+
 
 def execute_ping(body):
     """
-    POST /security-tools/ping
-    VULNERABILITY 5: Command Injection — passes user input directly to shell.
+    FIXED: Command injection vulnerability remediated.
+    - Removed 'command' parameter (direct command execution vector)
+    - Implemented strict input validation
+    - Using Python socket library instead of subprocess with shell=True
     VULNERABILITY 6: Second vector — also supports 'command' field for direct execution.
     """
-    host = body.get("host", "")
-    # VULNERABILITY 6: Second command injection vector — direct command field
-    custom_command = body.get("command", "")
-
+    
+    if not host:
     if not host and not custom_command:
-        return {"success": False, "error": "Host parameter is required"}
+    
+    # SECURITY FIX: Validate input to prevent command injection
+    is_valid, error_message = _validate_hostname_or_ip(host)
+    if not is_valid:
+        logger.warning(f"[SECURITY] Invalid host parameter rejected: {host} - {error_message}")
+        return {"success": False, "error": "Invalid host parameter", "message": error_message}
+    
 
-    try:
-        if custom_command:
-            # VULNERABILITY: Direct command execution from user input
-            command = custom_command
+        # SECURITY FIX: Use Python socket library instead of shell commands
+        logger.info(f"[SECURE] Performing DNS lookup for: {host}")
+        success, output = _safe_dns_lookup(host)
+        
+        if success:
+            return {"success": True, "output": output, "message": f"DNS lookup completed for {host}"}
             logger.info(f"[VULNERABLE] Executing custom command: {command}")
-        else:
-            # VULNERABILITY: Command Injection — unsanitized input to shell
-            # nslookup is reliably available in Lambda (ping is not)
-            command = f"nslookup {host}"
-            logger.info(f"[VULNERABLE] Executing command: {command}")
-
-        result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=10)
-        output = result.stdout or result.stderr
-
-        is_injection = _detect_command_injection(host or custom_command, output)
-        if is_injection:
-            return {
-                "success": True,
-                "message": "Command Injection Detected",
-                "educational": _get_educational_content("command_injection"),
-                "output": output,
-            }
-        return {"success": True, "output": output}
-
-    except subprocess.TimeoutExpired:
+            return {"success": False, "error": output}
+    except socket.timeout:
+        return {"success": False, "error": "DNS lookup timed out"}
         return {"success": False, "error": "Command timed out", "output": ""}
-    except Exception as e:
-        logger.error(f"[VULNERABLE] Command execution error: {str(e)}")
+        logger.error(f"[SECURE] DNS lookup error: {str(e)}")
+        return {"success": False, "error": "DNS lookup failed", "message": str(e)}
         return {"success": False, "error": "Command execution failed", "message": str(e)}
 
 
@@ -533,33 +585,32 @@ def execute_ping(body):
 
 def execute_nslookup(body):
     """
-    POST /security-tools/nslookup
+    FIXED: Command injection vulnerability remediated.
+    - Implemented strict input validation
+    - Using Python socket library instead of subprocess with shell=True
     VULNERABILITY: Command Injection — second distinct endpoint with shell=True.
     """
     host = body.get("host", "")
     if not host:
-        return {"success": False, "error": "Host parameter is required"}
+    
+    # SECURITY FIX: Validate input to prevent command injection
+    is_valid, error_message = _validate_hostname_or_ip(host)
+    if not is_valid:
+        logger.warning(f"[SECURITY] Invalid host parameter rejected: {host} - {error_message}")
+        return {"success": False, "error": "Invalid host parameter", "message": error_message}
+    
 
-    try:
-        # VULNERABILITY: Command Injection — unsanitized input to shell
-        command = f"nslookup {host}"
-        logger.info(f"[VULNERABLE] Executing nslookup command: {command}")
-
-        result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=10)
-        output = result.stdout or result.stderr
-
-        is_injection = _detect_command_injection(host, output)
-        if is_injection:
-            return {
-                "success": True,
-                "message": "Command Injection Detected",
-                "educational": _get_educational_content("command_injection"),
-                "output": output,
-            }
-        return {"success": True, "output": output}
-
-    except subprocess.TimeoutExpired:
+        # SECURITY FIX: Use Python socket library instead of shell commands
+        logger.info(f"[SECURE] Performing DNS lookup for: {host}")
+        success, output = _safe_dns_lookup(host)
+        
+        if success:
+            return {"success": True, "output": output, "message": f"DNS lookup completed for {host}"}
+        else:
+            return {"success": False, "error": output}
+    except socket.timeout:
+        return {"success": False, "error": "DNS lookup timed out"}
         return {"success": False, "error": "Command timed out", "output": ""}
-    except Exception as e:
-        logger.error(f"[VULNERABLE] Command execution error: {str(e)}")
+        logger.error(f"[SECURE] DNS lookup error: {str(e)}")
+        return {"success": False, "error": "DNS lookup failed", "message": str(e)}
         return {"success": False, "error": "Command execution failed", "message": str(e)}
