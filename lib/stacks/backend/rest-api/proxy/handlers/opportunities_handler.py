@@ -625,22 +625,21 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
 
 def delete_opportunity(connection, opportunity_id: str) -> bool:
     """
-    Soft-delete an opportunity record by marking it as deleted.
-    The record is retained in the database for recovery purposes.
+    Delete an opportunity record from the database.
     Recalculates parent account aggregates after deletion.
 
     Args:
         connection: Database connection object
-        opportunity_id: Opportunity ID to soft-delete
+        opportunity_id: Opportunity ID to delete
 
     Returns:
-        True if opportunity was soft-deleted, False if not found
+        True if opportunity was deleted, False if not found
 
     Raises:
         Exception: If database update fails
     """
     try:
-        logger.info(f"Soft-deleting opportunity: {opportunity_id}")
+        logger.info(f"Deleting opportunity: {opportunity_id}")
 
         cursor = connection.cursor()
 
@@ -657,9 +656,9 @@ def delete_opportunity(connection, opportunity_id: str) -> bool:
 
         account_id = row[1]
 
-        # Soft-delete: set deleted_at timestamp instead of removing the row
+        # Hard delete: permanently remove the record from the database
         cursor.execute(
-            "UPDATE opportunities SET deleted_at = NOW() WHERE id = %s",
+            "DELETE FROM opportunities WHERE id = %s",
             (opportunity_id,)
         )
         connection.commit()
@@ -668,14 +667,14 @@ def delete_opportunity(connection, opportunity_id: str) -> bool:
         # Recalculate parent account aggregates
         _recalculate_account_aggregates(connection, account_id)
 
-        logger.info(f"Soft-deleted opportunity: {opportunity_id}")
+        logger.info(f"Deleted opportunity: {opportunity_id}")
         return True
 
     except psycopg2.Error as e:
         connection.rollback()
-        logger.error(f"Database error soft-deleting opportunity {opportunity_id}: {str(e)}")
+        logger.error(f"Database error deleting opportunity {opportunity_id}: {str(e)}")
         raise Exception(f"Failed to delete opportunity: {str(e)}")
     except Exception as e:
         connection.rollback()
-        logger.error(f"Unexpected error soft-deleting opportunity {opportunity_id}: {str(e)}")
+        logger.error(f"Unexpected error deleting opportunity {opportunity_id}: {str(e)}")
         raise

@@ -365,22 +365,21 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
 
 def delete_account(connection, account_id: str) -> bool:
     """
-    Soft-delete an account record by marking it as deleted.
-    The record is retained in the database for recovery purposes.
+    Delete an account record from the database.
     Checks for active (non-deleted) opportunities before allowing deletion.
 
     Args:
         connection: Database connection object
-        account_id: Account ID to soft-delete
+        account_id: Account ID to delete
 
     Returns:
-        True if account was soft-deleted, False if not found
+        True if account was deleted, False if not found
 
     Raises:
         Exception: If account has active opportunities or database update fails
     """
     try:
-        logger.info(f"Soft-deleting account: {account_id}")
+        logger.info(f"Deleting account: {account_id}")
 
         cursor = connection.cursor()
 
@@ -410,29 +409,29 @@ def delete_account(connection, account_id: str) -> bool:
                 f"Delete or archive the opportunities first."
             )
 
-        # Soft-delete: set deleted_at timestamp instead of removing the row
+        # Hard delete: permanently remove the record from the database
         cursor.execute(
-            "UPDATE accounts SET deleted_at = NOW() WHERE id = %s",
+            "DELETE FROM accounts WHERE id = %s",
             (account_id,)
         )
         connection.commit()
         cursor.close()
 
-        logger.info(f"Soft-deleted account: {account_id}")
+        logger.info(f"Deleted account: {account_id}")
         return True
 
     except psycopg2.IntegrityError as e:
         connection.rollback()
-        logger.error(f"Integrity error soft-deleting account {account_id}: {str(e)}")
+        logger.error(f"Integrity error deleting account {account_id}: {str(e)}")
         raise Exception(f"Cannot delete account: has associated records")
     except psycopg2.Error as e:
         connection.rollback()
-        logger.error(f"Database error soft-deleting account {account_id}: {str(e)}")
+        logger.error(f"Database error deleting account {account_id}: {str(e)}")
         raise Exception(f"Failed to delete account: {str(e)}")
     except Exception as e:
         connection.rollback()
         # Re-raise if it's already our custom exception
         if "Cannot delete account" in str(e):
             raise
-        logger.error(f"Unexpected error soft-deleting account {account_id}: {str(e)}")
+        logger.error(f"Unexpected error deleting account {account_id}: {str(e)}")
         raise
