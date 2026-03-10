@@ -129,6 +129,91 @@ def list_accounts(connection) -> List[Dict[str, Any]]:
 COMPUTED_FIELDS = {'health_status', 'health_score', 'opportunity_count', 'total_opportunity_value'}
 
 
+def _recalculate_health(connection, account_id: str) -> None:
+    """
+    Recalculate and update the health_score and health_status fields on the
+    given account based on its associated opportunities.
+
+    Health score (0-100) is computed as a weighted average of:
+      - Win rate contribution (40%): ratio of Closed Won to total closed opps
+      - Active pipeline contribution (35%): weighted probability of open opps
+      - Engagement recency contribution (25%): whether recent activity exists
+
+    Health status mapping:
+      - Green : score >= 75
+      - Yellow: score >= 50
+      - Red   : score < 50
+
+    For accounts with no opportunities the fields are set to NULL so they
+    reflect the absence of data rather than a misleading zero.
+
+    Args:
+        connection: Database connection object
+        account_id: Account ID whose health metrics need recalculation
+    """
+    if not account_id:
+        return
+
+    cursor = connection.cursor()
+    try:
+        cursor.execute("""
+            UPDATE accounts
+            SET health_score = sub.score,
+                health_status = CASE
+                    WHEN sub.score IS NULL THEN NULL
+                    WHEN sub.score >= 75 THEN 'Green'::health_status_enum
+                    WHEN sub.score >= 50 THEN 'Yellow'::health_status_enum
+                    ELSE 'Red'::health_status_enum
+                END
+            FROM (
+                SELECT
+                    CASE WHEN COUNT(*) = 0 THEN NULL
+                    ELSE LEAST(100, GREATEST(0,
+                        -- Win-rate component (40 points max)
+                        CASE WHEN COUNT(*) FILTER (
+                            WHERE stage IN ('Closed Won', 'Closed Lost')
+                        ) > 0
+                        THEN (
+                            COUNT(*) FILTER (WHERE stage = 'Closed Won')::numeric
+                            / COUNT(*) FILTER (
+                                WHERE stage IN ('Closed Won', 'Closed Lost')
+                            ) * 40
+                        )
+                        ELSE 20  -- neutral when no closed deals yet
+                        END
+                        -- Active-pipeline component (35 points max)
+                        + CASE WHEN COUNT(*) FILTER (
+                            WHERE stage NOT IN ('Closed Won', 'Closed Lost')
+                        ) > 0
+                        THEN (
+                            AVG(probability) FILTER (
+                                WHERE stage NOT IN ('Closed Won', 'Closed Lost')
+                            ) / 100.0 * 35
+                        )
+                        ELSE 0
+                        END
+                        -- Engagement-recency component (25 points max)
+                        + CASE WHEN MAX(recent_activity_date) >= NOW() - INTERVAL '30 days'
+                            THEN 25
+                          WHEN MAX(recent_activity_date) >= NOW() - INTERVAL '90 days'
+                            THEN 15
+                          ELSE 5
+                          END
+                    ))::int
+                    END AS score
+                FROM opportunities
+                WHERE account_id = %s AND deleted_at IS NULL
+            ) sub
+            WHERE accounts.id = %s
+        """, (account_id, account_id))
+        connection.commit()
+        logger.info(f"Recalculated health for account {account_id}")
+    except Exception as e:
+        logger.error(f"Failed to recalculate health for account {account_id}: {str(e)}")
+        # Non-fatal: don't let health recalculation failure block the operation
+    finally:
+        cursor.close()
+
 
 def get_account(connection, account_id: str) -> Optional[Dict[str, Any]]:
     """
