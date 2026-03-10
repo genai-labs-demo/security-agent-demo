@@ -10,6 +10,7 @@ Requirements: 1.1, 1.2, 2.1, 3.1, 4.1, 5.1, 6.1, 7.1, 8.1, 9.1, 10.1
 
 import json
 import logging
+import os
 import time
 from typing import Dict, Any
 import boto3
@@ -36,6 +37,115 @@ cloudwatch = boto3.client('cloudwatch')
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+# ---- Per-user rate limiting (mitigates CWE-770) ----
+# These module-level variables persist across warm invocations of the same
+# Lambda container, giving effective per-container, per-user throttling.
+
+_RL_GENERAL_LIMIT = int(os.environ.get("RATE_LIMIT_GENERAL_RPM", "100"))
+_RL_SEARCH_LIMIT = int(os.environ.get("RATE_LIMIT_SEARCH_RPM", "20"))
+_RL_WINDOW = int(os.environ.get("RATE_LIMIT_WINDOW_SEC", "60"))
+_RL_MAX_USERS = 10_000
+
+# {user_sub: {"general": [count, window_start], "search": [count, window_start]}}
+_rl_store: Dict[str, Dict[str, list]] = {}
+
+
+def _extract_user_sub(event: Dict[str, Any]):
+    """Return the Cognito 'sub' claim from the authorizer context, or None."""
+    try:
+        ctx = event.get("requestContext") or {}
+        auth = ctx.get("authorizer") or {}
+        claims = auth.get("claims") or {}
+        return claims.get("sub")
+    except Exception:
+        return None
+
+
+def _rl_maybe_evict(now: float):
+    """If the store grew past the cap, drop entries whose window has elapsed."""
+    if len(_rl_store) <= _RL_MAX_USERS:
+        return
+    expired = [
+        uid for uid, bkts in _rl_store.items()
+        if all(now - e[1] >= _RL_WINDOW for e in bkts.values())
+    ]
+    for uid in expired:
+        del _rl_store[uid]
+
+
+def _rl_check(user_sub: str, bucket_name: str, max_requests: int):
+    """
+    Fixed-window counter rate-limit check.
+
+    Returns (is_allowed, requests_remaining, window_reset_epoch).
+    """
+    now = time.time()
+    _rl_maybe_evict(now)
+
+    user_entry = _rl_store.setdefault(user_sub, {})
+    if bucket_name not in user_entry:
+        user_entry[bucket_name] = [0, now]
+
+    entry = user_entry[bucket_name]
+    count, win_start = entry[0], entry[1]
+
+    # Reset window when it expires
+    if now - win_start >= _RL_WINDOW:
+        count = 0
+        win_start = now
+        entry[0] = 0
+        entry[1] = now
+
+    reset_epoch = int(win_start + _RL_WINDOW)
+
+    if count >= max_requests:
+        return False, 0, reset_epoch
+
+    entry[0] = count + 1
+    return True, max(0, max_requests - count - 1), reset_epoch
+
+
+def _rl_429_response(limit: int, reset_epoch: int, event: Dict[str, Any]):
+    """Build an HTTP 429 response with standard rate-limit headers."""
+    retry_after = max(1, reset_epoch - int(time.time()))
+    resp = {
+        "statusCode": 429,
+        "headers": {
+            "Content-Type": "application/json",
+            "Retry-After": str(retry_after),
+            "X-RateLimit-Limit": str(limit),
+            "X-RateLimit-Remaining": "0",
+            "X-RateLimit-Reset": str(reset_epoch),
+        },
+        "body": json.dumps({
+            "error": {
+                "code": "RATE_LIMITED",
+                "message": "Too many requests. Please wait and retry.",
+                "retryAfter": retry_after,
+            }
+        }),
+    }
+    return process_cors(event, resp)
+
+
+def _is_search_like(event: Dict[str, Any]) -> bool:
+    """Return True when the request targets an expensive search operation."""
+    pth = event.get("path") or ""
+    qs = event.get("queryStringParameters") or {}
+    if "search" in pth:
+        return True
+    if qs.get("search") is not None or qs.get("q") is not None:
+        return True
+    return False
+
+
+def _rl_add_headers(response: Dict[str, Any], limit: int, remaining: int, reset_epoch: int):
+    """Inject rate-limit informational headers into a successful response."""
+    hdrs = response.setdefault("headers", {})
+    hdrs["X-RateLimit-Limit"] = str(limit)
+    hdrs["X-RateLimit-Remaining"] = str(remaining)
+    hdrs["X-RateLimit-Reset"] = str(reset_epoch)
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -67,6 +177,30 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Handle CORS preflight requests
         if event.get('httpMethod') == 'OPTIONS':
             return process_cors(event)
+        # ---- Per-user rate limiting (CWE-770) ----
+        user_sub = _extract_user_sub(event)
+        search_req = _is_search_like(event)
+        rl_remaining = None
+        rl_reset = None
+        rl_limit_used = _RL_GENERAL_LIMIT
+
+        if user_sub:
+            ok, remaining, reset_ep = _rl_check(user_sub, "general", _RL_GENERAL_LIMIT)
+            if not ok:
+                logger.warning("Rate-limit hit for user %s (general)", user_sub)
+                return _rl_429_response(_RL_GENERAL_LIMIT, reset_ep, event)
+            rl_remaining = remaining
+            rl_reset = reset_ep
+
+            if search_req:
+                ok_s, rem_s, reset_s = _rl_check(user_sub, "search", _RL_SEARCH_LIMIT)
+                if not ok_s:
+                    logger.warning("Rate-limit hit for user %s (search)", user_sub)
+                    return _rl_429_response(_RL_SEARCH_LIMIT, reset_s, event)
+                rl_remaining = rem_s
+                rl_reset = reset_s
+                rl_limit_used = _RL_SEARCH_LIMIT
+
         
         # Parse API Gateway event to extract route information
         route_info = parse_api_gateway_event(event)
@@ -126,6 +260,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Apply CORS headers
         response = process_cors(event, response)
         
+        # Attach informational rate-limit headers for authenticated users
+        if user_sub and rl_remaining is not None:
+            _rl_add_headers(response, rl_limit_used, rl_remaining, rl_reset)
+
         logger.info(f"Request {request_id} completed successfully with status {response['statusCode']}")
         return response
         
