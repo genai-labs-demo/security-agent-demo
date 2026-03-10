@@ -200,6 +200,28 @@ def initialize_schema(conn):
     ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE;
     CREATE INDEX IF NOT EXISTS idx_accounts_deleted_at ON accounts(deleted_at);
     CREATE INDEX IF NOT EXISTS idx_opportunities_deleted_at ON opportunities(deleted_at);
+
+    -- Audit log table for tracking data modifications
+    CREATE TABLE IF NOT EXISTS audit_log (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        entity_type VARCHAR(50) NOT NULL,
+        entity_id VARCHAR(50) NOT NULL,
+        action VARCHAR(20) NOT NULL,
+        user_id VARCHAR(255),
+        user_email VARCHAR(255),
+        timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        old_values JSONB,
+        new_values JSONB,
+        changes_summary TEXT,
+        ip_address VARCHAR(45),
+        user_agent TEXT
+    );
+
+    -- Indexes for efficient audit log queries
+    CREATE INDEX IF NOT EXISTS idx_audit_log_entity ON audit_log(entity_type, entity_id);
+    CREATE INDEX IF NOT EXISTS idx_audit_log_user ON audit_log(user_id);
+    CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp ON audit_log(timestamp DESC);
+    CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log(action);
     """
     
     cursor = conn.cursor()

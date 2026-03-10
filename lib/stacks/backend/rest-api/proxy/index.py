@@ -63,6 +63,19 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     request_id = context.aws_request_id if context else "unknown"
     logger.info(f"Processing request {request_id}: {event.get('httpMethod')} {event.get('path')}")
     
+    # Extract user context from Cognito authorizer claims
+    user_context = None
+    try:
+        authorizer = event.get('requestContext', {}).get('authorizer', {})
+        claims = authorizer.get('claims', {})
+        if claims:
+            user_context = {
+                'user_id': claims.get('sub'),
+                'user_email': claims.get('email')
+            }
+    except Exception as e:
+        logger.warning(f"Failed to extract user context: {e}")
+    
     try:
         # Handle CORS preflight requests
         if event.get('httpMethod') == 'OPTIONS':
@@ -85,7 +98,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             start_time = time.time()
             
             # Route to appropriate handler and execute operation
-            result = execute_operation(connection, route_info, operation)
+            result = execute_operation(connection, route_info, operation, user_context)
             
             # Calculate and publish search latency metrics
             elapsed_time = (time.time() - start_time) * 1000  # Convert to milliseconds
@@ -163,7 +176,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
 
 def execute_operation(connection, route_info, operation: str) -> Any:
-    """
+def execute_operation(connection, route_info, operation: str, user_context: Optional[Dict[str, Any]] = None) -> Any:
     Execute the appropriate CRUD operation based on route information.
     
     Args:
@@ -171,6 +184,7 @@ def execute_operation(connection, route_info, operation: str) -> Any:
         route_info: Parsed route information
         operation: Operation type ('list', 'get', 'create', 'update', 'delete')
         
+        user_context: User context from Cognito authorizer (optional)
     Returns:
         Operation result (record, list of records, or boolean)
         
@@ -194,14 +208,14 @@ def execute_operation(connection, route_info, operation: str) -> Any:
                 raise ValueError(f"Account with id {resource_id} not found")
             return result
         elif operation == 'create':
-            return accounts_handler.create_account(connection, body)
+            return accounts_handler.create_account(connection, body, user_context)
         elif operation == 'update':
-            result = accounts_handler.update_account(connection, resource_id, body)
+            result = accounts_handler.update_account(connection, resource_id, body, user_context)
             if result is None:
                 raise ValueError(f"Account with id {resource_id} not found")
             return result
         elif operation == 'delete':
-            success = accounts_handler.delete_account(connection, resource_id)
+            success = accounts_handler.delete_account(connection, resource_id, user_context)
             if not success:
                 raise ValueError(f"Account with id {resource_id} not found")
             return None
@@ -227,14 +241,14 @@ def execute_operation(connection, route_info, operation: str) -> Any:
             return result
         elif operation == 'create':
             return opportunities_handler.create_opportunity(connection, body)
-        elif operation == 'update':
+            return opportunities_handler.create_opportunity(connection, body, user_context)
             result = opportunities_handler.update_opportunity(connection, resource_id, body)
-            if result is None:
+            result = opportunities_handler.update_opportunity(connection, resource_id, body, user_context)
                 raise ValueError(f"Opportunity with id {resource_id} not found")
             return result
         elif operation == 'delete':
             success = opportunities_handler.delete_opportunity(connection, resource_id)
-            if not success:
+            success = opportunities_handler.delete_opportunity(connection, resource_id, user_context)
                 raise ValueError(f"Opportunity with id {resource_id} not found")
             return None
     
@@ -249,14 +263,14 @@ def execute_operation(connection, route_info, operation: str) -> Any:
             return result
         elif operation == 'create':
             return team_members_handler.create_team_member(connection, body)
-        elif operation == 'update':
+            return team_members_handler.create_team_member(connection, body, user_context)
             result = team_members_handler.update_team_member(connection, resource_id, body)
-            if result is None:
+            result = team_members_handler.update_team_member(connection, resource_id, body, user_context)
                 raise ValueError(f"Team member with id {resource_id} not found")
             return result
         elif operation == 'delete':
             success = team_members_handler.delete_team_member(connection, resource_id)
-            if not success:
+            success = team_members_handler.delete_team_member(connection, resource_id, user_context)
                 raise ValueError(f"Team member with id {resource_id} not found")
             return None
     

@@ -274,7 +274,7 @@ def create_account(connection, data: Dict[str, Any]) -> Dict[str, Any]:
 def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     Update an existing account record in the database.
-    
+def update_account(connection, account_id: str, data: Dict[str, Any], user_context: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
     Args:
         connection: Database connection object
         account_id: Account ID to update
@@ -290,6 +290,9 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
         logger.info(f"Updating account: {account_id}")
         
         # Map API format to database format
+        # Capture old values before update for audit trail
+        old_account = get_account(connection, account_id)
+        
         db_data = _map_api_to_db_format(data)
         
         # Remove id if present (shouldn't be updated)
@@ -341,6 +344,10 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
         account = get_account(connection, account_id)
         
         logger.info(f"Updated account: {account_id}")
+        # Log audit trail for UPDATE operation
+        if old_account and account:
+            write_audit_trail(connection, 'accounts', account_id, 'UPDATE', user_context, old_account, account)
+        
         return account
         
     except psycopg2.IntegrityError as e:
