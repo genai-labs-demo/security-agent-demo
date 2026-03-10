@@ -100,19 +100,13 @@ def _get_educational_content(vuln_type):
 # ============================================================
 
 def get_security_profile(connection, user_id):
-    """
-    GET /security-profile/{userId}
-    VULNERABILITY 1: SQL Injection via string concatenation.
-    VULNERABILITY 2: IDOR — any sequential ID returns data, no auth check.
-    """
+    """GET /security-profile/{userId} - Retrieve user profile by ID."""
     cursor = connection.cursor()
     try:
-        # VULNERABILITY: SQL Injection - string concatenation instead of parameterized query
-        # Cast id to TEXT so string-based payloads (e.g. admin' --) work without type errors
-        query = f"SELECT id, username, email, role, bio, created_at FROM security_users WHERE id::text = '{user_id}'"
-        logger.info(f"[VULNERABLE] Executing SQL query: {query}")
-
-        cursor.execute(query)
+        # Parameterized query prevents SQL injection (CWE-89)
+        query = "SELECT id, username, email, role, bio, created_at FROM security_users WHERE id::text = %s"
+        logger.info("Executing parameterized security profile query")
+        cursor.execute(query, (user_id,))
         columns = [desc[0] for desc in cursor.description]
         rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
 
@@ -121,28 +115,18 @@ def get_security_profile(connection, user_id):
                 if isinstance(val, datetime):
                     row[key] = val.isoformat()
 
-        is_injection = _detect_sql_injection(user_id, rows)
-
-        if is_injection:
-            return {
-                "success": True,
-                "message": "SQL Injection Detected",
-                "educational": _get_educational_content("sql_injection"),
-                "data": rows if len(rows) != 1 else rows[0],
-            }
-        elif len(rows) == 0:
+        if len(rows) == 0:
             return {"success": False, "error": "User not found"}
         else:
-            # VULNERABILITY: IDOR — returns full user record for any ID without auth
             return {"success": True, "data": rows[0]}
 
     except Exception as e:
-        logger.error(f"[VULNERABLE] Database error: {str(e)}")
+        logger.error(f"Database error in get_security_profile: {str(e)}")
         connection.rollback()
         return {
             "success": False,
             "error": "Database error",
-            "message": str(e),
+            "message": "An unexpected error occurred. Please try again later.",
         }
     finally:
         cursor.close()
