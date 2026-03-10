@@ -299,6 +299,67 @@ def _validate_amount(amount) -> None:
         )
 
 
+def _validate_forecast_alignment(stage: str = None, forecast_category: str = None, probability: int = None) -> None:
+    """
+    Enforce business logic for forecast category and probability based on stage.
+    Prevents illogical combinations that violate sales methodology.
+    """
+    # Skip if any required field is missing
+    if stage is None or forecast_category is None or probability is None:
+        return
+    
+    normalized_stage = stage.lower().strip()
+    normalized_category = forecast_category.lower().strip()
+    
+    # Convert and validate probability
+    try:
+        prob_value = int(probability)
+    except (TypeError, ValueError):
+        raise ValueError("Probability field must be a valid integer")
+    
+    if prob_value < 0 or prob_value > 100:
+        raise ValueError("Probability must be in range 0 to 100")
+    
+    # Business rules mapping
+    stage_rules = {
+        'closed won': {'closed': (100, 100)},
+        'closed lost': {'omitted': (0, 0), 'closed': (0, 0)},
+        'negotiation/review': {'commit': (75, 95), 'best case': (60, 90)},
+        'proposal/price quote': {'commit': (65, 90), 'best case': (50, 85)},
+        'qualification': {'best case': (40, 70), 'pipeline': (30, 60)},
+        'needs analysis': {'pipeline': (25, 60), 'best case': (30, 65)},
+        'prospecting': {'pipeline': (5, 30)},
+        'id. decision makers': {'pipeline': (10, 40)},
+        'perception analysis': {'pipeline': (15, 50)},
+        'value proposition': {'pipeline': (20, 55), 'best case': (30, 60)}
+    }
+    
+    # Check if stage has defined rules
+    if normalized_stage not in stage_rules:
+        logger.warning(f"Stage '{stage}' has no validation rules defined")
+        return
+    
+    category_ranges = stage_rules[normalized_stage]
+    
+    # Validate category is allowed for this stage
+    if normalized_category not in category_ranges:
+        valid_categories = ', '.join([f"'{cat.title()}'" for cat in category_ranges.keys()])
+        raise ValueError(
+            f"Forecast category '{forecast_category}' is incompatible with stage '{stage}'. "
+            f"Valid categories: {valid_categories}"
+        )
+    
+    # Validate probability is in expected range
+    min_probability, max_probability = category_ranges[normalized_category]
+    
+    if prob_value < min_probability or prob_value > max_probability:
+        range_desc = f"{min_probability}%" if min_probability == max_probability else f"{min_probability}-{max_probability}%"
+        raise ValueError(
+            f"Probability {prob_value}% is incompatible with stage '{stage}' "
+            f"and forecast category '{forecast_category}'. Expected range: {range_desc}"
+        )
+
+
 def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Query opportunities from the database with optional account filter.
@@ -428,6 +489,11 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         # Validate amount bounds
         _validate_amount(db_data.get('amount'))
         
+        # Validate forecast category and probability alignment with stage
+        _validate_forecast_alignment(
+            db_data.get('stage'),
+            db_data.get('forecast_category'),
+            db_data.get('probability'))
         # Generate ID if not provided
         if 'id' not in data:
             import uuid
@@ -535,6 +601,29 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         # Validate amount bounds if being updated
         if 'amount' in db_data:
             _validate_amount(db_data.get('amount'))
+        
+        # Validate forecast alignment when any related field changes
+        forecast_fields = ['stage', 'forecast_category', 'probability']
+        if any(field in db_data for field in forecast_fields):
+            # Retrieve current values
+            temp_cursor = connection.cursor(cursor_factory=RealDictCursor)
+            temp_cursor.execute(
+                "SELECT stage, forecast_category, probability FROM opportunities WHERE id = %s AND deleted_at IS NULL",
+                (opportunity_id,)
+            )
+            existing_record = temp_cursor.fetchone()
+            temp_cursor.close()
+            
+            if not existing_record:
+                return None
+            
+            # Merge existing with updates
+            merged_stage = db_data.get('stage') if 'stage' in db_data else existing_record['stage']
+            merged_category = db_data.get('forecast_category') if 'forecast_category' in db_data else existing_record['forecast_category']
+            merged_probability = db_data.get('probability') if 'probability' in db_data else existing_record['probability']
+            
+            # Validate merged state
+            _validate_forecast_alignment(merged_stage, merged_category, merged_probability)
         
         # Remove id if present (shouldn't be updated)
         db_data.pop('id', None)
