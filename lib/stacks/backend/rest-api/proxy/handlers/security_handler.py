@@ -18,6 +18,7 @@ Vulnerability inventory (matches pen-test target set):
 import json
 import logging
 import subprocess
+import re
 from datetime import datetime
 
 logger = logging.getLogger()
@@ -531,31 +532,58 @@ def execute_ping(body):
 # Command Injection — Nslookup endpoint (second distinct endpoint)
 # ============================================================
 
+def _validate_hostname(host):
+    """
+    Validate that the host parameter is a valid hostname, domain, or IP address.
+    Returns (is_valid, error_message) tuple.
+    """
+    if not host or not isinstance(host, str):
+        return False, "Host parameter must be a non-empty string"
+    
+    # Remove leading/trailing whitespace
+    host = host.strip()
+    
+    # Check length constraints
+    if len(host) == 0 or len(host) > 253:
+        return False, "Host parameter length must be between 1 and 253 characters"
+    
+    # Validate against hostname/domain/IP pattern (allowlist approach)
+    # Matches: domains (example.com), hostnames (localhost), IPv4 (192.168.1.1), IPv6
+    hostname_pattern = r'^[a-zA-Z0-9]([a-zA-Z0-9\-\.]{0,251}[a-zA-Z0-9])?$'
+    
+    if not re.match(hostname_pattern, host):
+        return False, "Invalid host format. Only alphanumeric characters, hyphens, and dots are allowed"
+    
+    # Additional check: reject common shell metacharacters (defense in depth)
+    dangerous_chars = [';', '|', '&', '$', '`', '\n', '\r', '>', '<', '(', ')', '{', '}', '[', ']', '\\', '"', "'"]
+    if any(char in host for char in dangerous_chars):
+        return False, "Host parameter contains invalid characters"
+    
+    return True, None
+
 def execute_nslookup(body):
     """
     POST /security-tools/nslookup
-    VULNERABILITY: Command Injection — second distinct endpoint with shell=True.
+    FIXED: Command injection vulnerability remediated.
+    - Input validation with strict hostname allowlist
+    - subprocess.run() with argument list (no shell interpretation)
+    - shell=False to prevent shell metacharacter processing
     """
     host = body.get("host", "")
-    if not host:
-        return {"success": False, "error": "Host parameter is required"}
+    
+    # Validate host parameter
+    is_valid, error_message = _validate_hostname(host)
+    if not is_valid:
+        logger.warning(f"[SECURITY] Invalid host parameter rejected: {host}")
+        return {"success": False, "error": error_message}
+    
+    host = host.strip()
 
     try:
-        # VULNERABILITY: Command Injection — unsanitized input to shell
-        command = f"nslookup {host}"
-        logger.info(f"[VULNERABLE] Executing nslookup command: {command}")
-
-        result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=10)
+        # FIXED: Use argument list instead of shell string to prevent command injection
+        logger.info(f"[SECURE] Executing nslookup for validated host: {host}")
+        result = subprocess.run(["nslookup", host], shell=False, capture_output=True, text=True, timeout=10)
         output = result.stdout or result.stderr
-
-        is_injection = _detect_command_injection(host, output)
-        if is_injection:
-            return {
-                "success": True,
-                "message": "Command Injection Detected",
-                "educational": _get_educational_content("command_injection"),
-                "output": output,
-            }
         return {"success": True, "output": output}
 
     except subprocess.TimeoutExpired:
