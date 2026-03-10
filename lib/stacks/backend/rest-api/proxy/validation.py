@@ -193,6 +193,32 @@ def validate_opportunity(data: Dict[str, Any], is_update: bool = False) -> None:
         if not (0 <= data['probability'] <= 100):
             raise ValidationError("Field 'probability' must be between 0 and 100", field='probability')
     
+    # Cross-field validation: Ensure forecastCategory and probability are aligned
+    # Only validate when both fields are present (to support partial updates)
+    if 'forecastCategory' in data and 'probability' in data:
+        forecast_category = data['forecastCategory']
+        probability = data['probability']
+        
+        # Define business rules for forecast category and probability alignment
+        if forecast_category == 'Commit':
+            if not (75 <= probability <= 100):
+                raise ValidationError(
+                    f"Field 'probability' must be between 75 and 100 for forecast category 'Commit', got {probability}",
+                    field='probability'
+                )
+        elif forecast_category == 'Best Case':
+            if not (50 <= probability <= 74):
+                raise ValidationError(
+                    f"Field 'probability' must be between 50 and 74 for forecast category 'Best Case', got {probability}",
+                    field='probability'
+                )
+        elif forecast_category == 'Pipeline':
+            if not (25 <= probability <= 49):
+                raise ValidationError(
+                    f"Field 'probability' must be between 25 and 49 for forecast category 'Pipeline', got {probability}",
+                    field='probability'
+                )
+    
     # Validate optional fields if present
     if 'accountName' in data and data['accountName'] is not None:
         if not isinstance(data['accountName'], str):
