@@ -385,8 +385,9 @@ def delete_account(connection, account_id: str) -> bool:
         cursor = connection.cursor()
 
         # Check if account exists and is not already deleted
+        # Use FOR UPDATE to lock the row and prevent race conditions
         cursor.execute(
-            "SELECT id FROM accounts WHERE id = %s AND (deleted_at IS NULL)",
+            "SELECT id FROM accounts WHERE id = %s AND (deleted_at IS NULL) FOR UPDATE",
             (account_id,)
         )
         if not cursor.fetchone():
