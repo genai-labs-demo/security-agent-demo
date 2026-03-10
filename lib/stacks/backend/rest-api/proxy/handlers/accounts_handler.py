@@ -274,6 +274,13 @@ def create_account(connection, data: Dict[str, Any]) -> Dict[str, Any]:
 def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     Update an existing account record in the database.
+    Supports optimistic locking: if the client includes ``lastActivityDate``
+    in the request payload, the update will only succeed when the current
+    database value matches.  A mismatch (i.e. the record was changed by
+    another user after the client last fetched it) raises an exception that
+    the caller should translate into HTTP 409 Conflict.
+    When ``lastActivityDate`` is **not** supplied the behaviour is unchanged
+    (unconditional update) to preserve backward compatibility.
     
     Args:
         connection: Database connection object
@@ -289,9 +296,18 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
     try:
         logger.info(f"Updating account: {account_id}")
         
-        # Map API format to database format
+        # Extract the client's last-known activity timestamp for optimistic
+        # locking.  Must be popped BEFORE _map_api_to_db_format so the value
+        # is used purely for conflict detection, not written back verbatim.
+        expected_last_activity = data.pop('lastActivityDate', None)
+
+        # Map API format to database format and strip server-managed fields
         db_data = _map_api_to_db_format(data)
-        
+        db_data.pop('last_activity_date', None)  # server-managed; strip if mapped
+
+        # Always update the modification timestamp on every write
+        db_data['last_activity_date'] = datetime.utcnow()
+
         # Remove id if present (shouldn't be updated)
         db_data.pop('id', None)
         
@@ -309,12 +325,20 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
         # Build UPDATE query dynamically based on provided fields
         set_clauses = [f"{col} = %s" for col in db_data.keys()]
         values = list(db_data.values())
-        values.append(account_id)  # For WHERE clause
-        
+        values.append(account_id)  # For WHERE id = %s
+
+        # Optimistic locking: when the client supplies the expected
+        # lastActivityDate, add it to the WHERE clause so that the UPDATE
+        # only matches if no other writer has changed the row in between.
+        where_clause = "id = %s AND deleted_at IS NULL"
+        if expected_last_activity is not None:
+            where_clause += " AND last_activity_date = %s"
+            values.append(datetime.fromisoformat(str(expected_last_activity)))
+
         query = f"""
             UPDATE accounts
             SET {', '.join(set_clauses)}
-            WHERE id = %s
+            WHERE {where_clause}
             RETURNING 
                 id, name, domain, industry_id, annual_revenue, employee_count,
                 owner_id, owner_name, health_status, health_score,
@@ -326,6 +350,21 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
         record = cursor.fetchone()
         
         if not record:
+            # Distinguish between "not found" (404) and "conflict" (409).
+            # If the client sent an expected timestamp and the row still
+            # exists, the mismatch means another user modified the record.
+            if expected_last_activity is not None:
+                cursor.execute(
+                    "SELECT id FROM accounts WHERE id = %s AND deleted_at IS NULL",
+                    (account_id,),
+                )
+                if cursor.fetchone():
+                    connection.rollback()
+                    cursor.close()
+                    raise Exception(
+                        "Account has been modified by another user. "
+                        "Please refresh and try again."
+                    )
             connection.rollback()
             cursor.close()
             logger.info(f"Account not found for update: {account_id}")
@@ -360,6 +399,8 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
     except Exception as e:
         connection.rollback()
         logger.error(f"Unexpected error updating account {account_id}: {str(e)}")
+        if "has been modified" in str(e):
+            raise
         raise
 
 

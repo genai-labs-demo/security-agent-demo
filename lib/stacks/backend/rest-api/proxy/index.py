@@ -147,8 +147,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             return process_cors(event, response)
         
         # Conflict errors (409)
-        if "cannot delete" in error_str.lower() or "already exists" in error_str.lower():
-            response = handle_conflict_error(error_str)
+        if ("cannot delete" in error_str.lower() or "already exists" in error_str.lower()
+                or "has been modified" in error_str.lower()):
+            response = handle_conflict_error(error_str, "VERSION_CONFLICT" if "has been modified" in error_str.lower() else None)
             return process_cors(event, response)
         
         # Database errors (500)

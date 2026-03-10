@@ -514,6 +514,13 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
 def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     Update an existing opportunity record in the database.
+    Supports optimistic locking: if the client includes ``lastModifiedDate``
+    in the request payload, the update will only succeed when the current
+    database value matches.  A mismatch (i.e. the record was changed by
+    another user after the client last fetched it) raises an exception that
+    the caller should translate into HTTP 409 Conflict.
+    When ``lastModifiedDate`` is **not** supplied the behaviour is unchanged
+    (unconditional update) to preserve backward compatibility.
     
     Args:
         connection: Database connection object
@@ -529,8 +536,14 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
     try:
         logger.info(f"Updating opportunity: {opportunity_id}")
         
-        # Map API format to database format
+        # Extract the client's last-known modification timestamp for optimistic
+        # locking.  Must be popped BEFORE _map_api_to_db_format so the client
+        # cannot overwrite the server-managed last_modified_date column.
+        expected_last_modified = data.pop('lastModifiedDate', None)
+
+        # Map API format to database format and strip server-managed fields
         db_data = _map_api_to_db_format(data)
+        db_data.pop('last_modified_date', None)  # server-managed; strip if mapped
         
         # Validate amount bounds if being updated
         if 'amount' in db_data:
@@ -567,11 +580,19 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         set_clauses = [f"{col} = %s" for col in db_data.keys()]
         values = list(db_data.values())
         values.append(opportunity_id)  # For WHERE clause
-        
+
+        # Optimistic locking: when the client supplies the expected
+        # lastModifiedDate, add it to the WHERE clause so that the UPDATE
+        # only matches if no other writer has changed the row in between.
+        where_clause = "id = %s AND deleted_at IS NULL"
+        if expected_last_modified is not None:
+            where_clause += " AND last_modified_date = %s"
+            values.append(datetime.fromisoformat(str(expected_last_modified)))
+
         query = f"""
             UPDATE opportunities
             SET {', '.join(set_clauses)}
-            WHERE id = %s
+            WHERE {where_clause}
             RETURNING 
                 id, name, account_id, account_name, amount, close_date,
                 stage, next_step, recent_activity, recent_activity_date,
@@ -583,6 +604,21 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         record = cursor.fetchone()
         
         if not record:
+            # Distinguish between "not found" (404) and "conflict" (409).
+            # If the client sent an expected timestamp and the row still
+            # exists, the mismatch means another user modified the record.
+            if expected_last_modified is not None:
+                cursor.execute(
+                    "SELECT id FROM opportunities WHERE id = %s AND deleted_at IS NULL",
+                    (opportunity_id,),
+                )
+                if cursor.fetchone():
+                    connection.rollback()
+                    cursor.close()
+                    raise Exception(
+                        "Opportunity has been modified by another user. "
+                        "Please refresh and try again."
+                    )
             connection.rollback()
             cursor.close()
             logger.info(f"Opportunity not found for update: {opportunity_id}")
@@ -617,7 +653,9 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
     except Exception as e:
         connection.rollback()
         # Re-raise if it's already our custom exception
-        if "Invalid account ID" in str(e) or "Invalid owner ID" in str(e) or "Invalid amount" in str(e):
+        if ("Invalid account ID" in str(e) or "Invalid owner ID" in str(e)
+                or "Invalid amount" in str(e)
+                or "has been modified" in str(e)):
             raise
         logger.error(f"Unexpected error updating opportunity {opportunity_id}: {str(e)}")
         raise
