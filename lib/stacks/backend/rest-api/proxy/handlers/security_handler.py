@@ -15,6 +15,7 @@ Vulnerability inventory (matches pen-test target set):
   9. Reflected XSS (HTML)   — GET /security-xss-search?q= (reflects search query in HTML for pen-test detection)
 """
 
+import html
 import json
 import logging
 import subprocess
@@ -459,22 +460,22 @@ def render_xss_search_page(connection, query):
         finally:
             cursor.close()
 
-    # VULNERABILITY: Reflected XSS — query injected directly into HTML without encoding
-    html = f"""<!DOCTYPE html>
+    # Fixed: HTML escape query parameter to prevent XSS (CWE-79)
+    page_html = f"""<!DOCTYPE html>
 <html>
 <head><title>Search Results - Security Demo</title></head>
 <body style="font-family:Arial,sans-serif;max-width:800px;margin:40px auto;padding:0 20px;background:#1a1a2e;color:#e0e0e0;">
 <h1 style="color:#ff6b6b;">Comment Search</h1>
 <form method="GET" action="">
-  <input type="text" name="q" value="{query}" style="padding:8px;width:60%;background:#0f3460;color:#e0e0e0;border:1px solid #533483;border-radius:4px;">
+  <input type="text" name="q" value="{html.escape(query, quote=True)}" style="padding:8px;width:60%;background:#0f3460;color:#e0e0e0;border:1px solid #533483;border-radius:4px;">
   <button type="submit" style="padding:8px 16px;background:#e94560;color:white;border:none;border-radius:4px;cursor:pointer;">Search</button>
 </form>
-<h2 style="color:#ffa07a;">Results for: {query}</h2>
+<h2 style="color:#ffa07a;">Results for: {html.escape(query)}</h2>
 <div id="results">{results_html}</div>
 </body>
 </html>"""
 
-    return {"_html": True, "content": html}
+    return {"_html": True, "content": page_html}
 
 
 
