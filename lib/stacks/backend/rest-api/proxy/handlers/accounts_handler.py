@@ -271,6 +271,39 @@ def create_account(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         raise
 
 
+def _cascade_update_account_name(connection, account_id: str, new_name: str) -> None:
+    """
+    Cascade update the denormalized account_name field in all related opportunity records
+    when the parent account's name changes. This maintains data integrity between the
+    accounts table (source of truth) and the opportunities table (denormalized copy).
+    
+    Args:
+        connection: Database connection object
+        account_id: Account ID whose name was updated
+        new_name: New account name to propagate to opportunities
+    
+    Raises:
+        Exception: If cascade update fails
+    """
+    if not account_id or not new_name:
+        return
+    
+    cursor = connection.cursor()
+    try:
+        cursor.execute("""
+            UPDATE opportunities
+            SET account_name = %s
+            WHERE account_id = %s AND deleted_at IS NULL
+        """, (new_name, account_id))
+        connection.commit()
+        logger.info(f"Cascaded account name update to {cursor.rowcount} opportunities for account {account_id}")
+    except Exception as e:
+        logger.error(f"Failed to cascade account name update for account {account_id}: {str(e)}")
+        raise
+    finally:
+        cursor.close()
+
+
 def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     Update an existing account record in the database.
@@ -288,6 +321,10 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
     """
     try:
         logger.info(f"Updating account: {account_id}")
+        
+        # Check if name is being updated to trigger cascade
+        name_updated = 'name' in data
+        new_name = data.get('name') if name_updated else None
         
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
@@ -333,6 +370,10 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
         
         connection.commit()
         cursor.close()
+        
+        # Cascade account name update to related opportunities if name changed
+        if name_updated and new_name:
+            _cascade_update_account_name(connection, account_id, new_name)
         
         # Recalculate health score from business metrics
         _recalculate_health(connection, account_id)
