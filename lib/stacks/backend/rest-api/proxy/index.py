@@ -21,6 +21,7 @@ from handlers import accounts_handler, opportunities_handler, team_members_handl
 from handlers import security_handler
 from s3_integration import enhance_with_images
 from cors_handler import process_cors
+from validation import validate_account, validate_opportunity, validate_team_member, ValidationError
 from error_handler import (
     handle_validation_error,
     handle_not_found_error,
@@ -134,7 +135,13 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         logger.warning(f"Validation error in request {request_id}: {str(e)}")
         response = handle_validation_error(str(e))
         return process_cors(event, response)
-        
+
+    except ValidationError as e:
+        # Input data validation errors including XSS prevention (400)
+        logger.warning(f"Data validation error in request {request_id}: {str(e)}")
+        response = handle_validation_error(str(e))
+        return process_cors(event, response)
+
     except Exception as e:
         # Check if it's a custom error message from handlers
         error_str = str(e)
@@ -194,8 +201,10 @@ def execute_operation(connection, route_info, operation: str) -> Any:
                 raise ValueError(f"Account with id {resource_id} not found")
             return result
         elif operation == 'create':
+            validate_account(body, is_update=False)
             return accounts_handler.create_account(connection, body)
         elif operation == 'update':
+            validate_account(body, is_update=True)
             result = accounts_handler.update_account(connection, resource_id, body)
             if result is None:
                 raise ValueError(f"Account with id {resource_id} not found")
@@ -226,8 +235,10 @@ def execute_operation(connection, route_info, operation: str) -> Any:
                 raise ValueError(f"Opportunity with id {resource_id} not found")
             return result
         elif operation == 'create':
+            validate_opportunity(body, is_update=False)
             return opportunities_handler.create_opportunity(connection, body)
         elif operation == 'update':
+            validate_opportunity(body, is_update=True)
             result = opportunities_handler.update_opportunity(connection, resource_id, body)
             if result is None:
                 raise ValueError(f"Opportunity with id {resource_id} not found")
@@ -248,8 +259,10 @@ def execute_operation(connection, route_info, operation: str) -> Any:
                 raise ValueError(f"Team member with id {resource_id} not found")
             return result
         elif operation == 'create':
+            validate_team_member(body, is_update=False)
             return team_members_handler.create_team_member(connection, body)
         elif operation == 'update':
+            validate_team_member(body, is_update=True)
             result = team_members_handler.update_team_member(connection, resource_id, body)
             if result is None:
                 raise ValueError(f"Team member with id {resource_id} not found")
