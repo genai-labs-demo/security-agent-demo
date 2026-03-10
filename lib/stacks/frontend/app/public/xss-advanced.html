@@ -58,34 +58,65 @@
     </div>
 
     <script>
-        // VULNERABILITY: DOM-based XSS - innerHTML with user input
+        // Sanitize user input to prevent XSS by escaping HTML special characters
+        function escapeHTML(str) {
+            var div = document.createElement('div');
+            div.appendChild(document.createTextNode(str));
+            return div.innerHTML;
+        }
+
+        // Validate URLs to only allow safe schemes (http, https)
+        function sanitizeURL(url) {
+            var escaped = escapeHTML(url);
+            try {
+                var parsed = new URL(url, window.location.origin);
+                if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+                    return escaped;
+                }
+            } catch (e) {
+                // invalid URL
+            }
+            return '';
+        }
+
+        // FIXED: DOM-based XSS - user input is now escaped before insertion
         function updateGreeting() {
             var name = document.getElementById('name-input').value;
-            document.getElementById('greeting-output').innerHTML = '<p>Hello, ' + name + '! Welcome to the demo.</p>';
+            document.getElementById('greeting-output').innerHTML = '<p>Hello, ' + escapeHTML(name) + '! Welcome to the demo.</p>';
         }
 
-        // VULNERABILITY: Attribute-based XSS - user input in href
+        // FIXED: Attribute-based XSS - URL is validated and input is escaped
         function createLink() {
             var url = document.getElementById('link-input').value;
-            document.getElementById('link-output').innerHTML = '<a href="' + url + '" style="color:#539fe5;">Click here to visit</a>';
+            var safeURL = sanitizeURL(url);
+            if (safeURL) {
+                document.getElementById('link-output').innerHTML = '<a href="' + safeURL + '" style="color:#539fe5;">Click here to visit</a>';
+            } else {
+                document.getElementById('link-output').innerHTML = '<p>Invalid URL. Only http and https URLs are allowed.</p>';
+            }
         }
 
-        // VULNERABILITY: Event handler injection - user input in img src
+        // FIXED: Event handler injection - URL is validated and input is escaped
         function displayImage() {
             var url = document.getElementById('image-input').value;
-            document.getElementById('image-output').innerHTML = '<img src="' + url + '" alt="User image" style="max-width:100%;">';
+            var safeURL = sanitizeURL(url);
+            if (safeURL) {
+                document.getElementById('image-output').innerHTML = '<img src="' + safeURL + '" alt="User image" style="max-width:100%;">';
+            } else {
+                document.getElementById('image-output').innerHTML = '<p>Invalid image URL. Only http and https URLs are allowed.</p>';
+            }
         }
 
-        // VULNERABILITY: Reflected XSS - URL parameter reflected into DOM
+        // FIXED: Reflected XSS - URL parameter is now escaped before insertion
         (function() {
             var params = new URLSearchParams(window.location.search);
             var query = params.get('q');
             if (query) {
-                document.getElementById('search-output').innerHTML = '<p>Search results for: ' + query + '</p>';
+                document.getElementById('search-output').innerHTML = '<p>Search results for: ' + escapeHTML(query) + '</p>';
             }
-            // Also check hash for DOM-based XSS via fragment
+            // Also check hash for fragment display - now escaped
             if (window.location.hash) {
-                document.getElementById('search-output').innerHTML += '<p>Fragment: ' + decodeURIComponent(window.location.hash.substring(1)) + '</p>';
+                document.getElementById('search-output').innerHTML += '<p>Fragment: ' + escapeHTML(decodeURIComponent(window.location.hash.substring(1))) + '</p>';
             }
         })();
     </script>
