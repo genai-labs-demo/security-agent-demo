@@ -511,6 +511,52 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         raise
 
 
+def _audit_ownership_change(connection, opportunity_id: str, old_owner_id: str, new_owner_id: str, changed_by: str = None) -> None:
+    """
+    Record an ownership change in the audit trail.
+    
+    Args:
+        connection: Database connection object
+        opportunity_id: The opportunity being modified
+        old_owner_id: Previous owner ID
+        new_owner_id: New owner ID
+        changed_by: User or system identifier making the change
+    """
+    try:
+        cursor = connection.cursor()
+        
+        # Log the ownership change to audit table
+        cursor.execute("""
+            INSERT INTO opportunity_audit 
+                (opportunity_id, field_name, old_value, new_value, changed_by, changed_at)
+            VALUES (%s, %s, %s, %s, %s, NOW())
+        """, (
+            opportunity_id,
+            'owner_id',
+            old_owner_id,
+            new_owner_id,
+            changed_by or 'system'
+        ))
+        
+        connection.commit()
+        cursor.close()
+        
+        # Structured logging for security monitoring and alerting
+        logger.warning(
+            f"AUDIT: Opportunity ownership changed - "
+            f"opportunity_id={opportunity_id}, "
+            f"old_owner={old_owner_id}, "
+            f"new_owner={new_owner_id}, "
+            f"changed_by={changed_by or 'system'}, "
+            f"timestamp={datetime.utcnow().isoformat()}"
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to record ownership change audit for opportunity {opportunity_id}: {str(e)}")
+        # Don't fail the update operation if audit logging fails, but log the error
+        # In production, you might want to raise this or send to a dead letter queue
+
+
 def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     Update an existing opportunity record in the database.
@@ -528,6 +574,9 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
     """
     try:
         logger.info(f"Updating opportunity: {opportunity_id}")
+        
+        # First, get the current opportunity state for audit trail
+        current_opportunity = get_opportunity(connection, opportunity_id)
         
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
@@ -562,6 +611,15 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
             if not cursor.fetchone():
                 cursor.close()
                 raise Exception(f"Invalid owner ID: team member does not exist")
+        
+        # Check if owner_id is being changed and audit it
+        if 'owner_id' in db_data and current_opportunity:
+            old_owner_id = current_opportunity.get('ownerId')
+            new_owner_id = db_data['owner_id']
+            
+            if old_owner_id != new_owner_id:
+                # Log ownership change to audit trail
+                _audit_ownership_change(connection, opportunity_id, old_owner_id, new_owner_id)
         
         # Build UPDATE query dynamically based on provided fields
         set_clauses = [f"{col} = %s" for col in db_data.keys()]
