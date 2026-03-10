@@ -249,24 +249,114 @@ def create_team_member(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         raise
 
 
-def update_team_member(connection, member_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def _get_authenticated_user_email(event: Dict[str, Any]) -> Optional[str]:
+    """
+    Extract the authenticated user's email from Cognito JWT claims in API Gateway event.
+    
+    Args:
+        event: API Gateway event dictionary containing requestContext
+    
+    Returns:
+        User email from Cognito claims, or None if not found
+    """
+    try:
+        # Extract Cognito claims from API Gateway event
+        request_context = event.get('requestContext', {})
+        authorizer = request_context.get('authorizer', {})
+        claims = authorizer.get('claims', {})
+        email = claims.get('email')
+        
+        if email:
+            logger.info(f"Authenticated user email: {email}")
+            return email
+        else:
+            logger.warning("No email found in Cognito claims")
+            return None
+    except Exception as e:
+        logger.error(f"Failed to extract user email from event: {str(e)}")
+        return None
+
+
+def _get_team_member_id_by_email(connection, email: str) -> Optional[str]:
+    """
+    Look up team member ID by email address.
+    
+    Args:
+        connection: Database connection object
+        email: Email address to look up
+    
+    Returns:
+        Team member ID if found, None otherwise
+    """
+    try:
+        cursor = connection.cursor()
+        cursor.execute("SELECT id FROM team_members WHERE email = %s", (email,))
+        result = cursor.fetchone()
+        cursor.close()
+        
+        if result:
+            return result[0]
+        return None
+    except Exception as e:
+        logger.error(f"Failed to look up team member by email: {str(e)}")
+        return None
+
+
+def update_team_member(connection, member_id: str, data: Dict[str, Any], event: Dict[str, Any] = None) -> Optional[Dict[str, Any]]:
     """
     Update an existing team member record in the database.
-    Validates email uniqueness if email is being updated.
+    Validates email uniqueness if email is being updated. 
+    Enforces authorization: users can only update their own records and cannot modify role field.
     
     Args:
         connection: Database connection object
         member_id: Team member ID to update
         data: Partial team member data in API format (camelCase)
+        event: API Gateway event (required for authorization checks)
     
     Returns:
         Updated team member dictionary in API format, or None if not found
     
     Raises:
-        Exception: If database update fails or validation fails
+        Exception: If database update fails, validation fails, or authorization is denied
     """
     try:
         logger.info(f"Updating team member: {member_id}")
+        
+        # Authorization Check 1: Reject role modifications
+        # The 'role' field is a security-sensitive attribute that controls access privileges
+        # Allowing arbitrary role modifications would enable privilege escalation attacks
+        if 'role' in data:
+            logger.warning(f"Attempted role modification blocked for team member: {member_id}")
+            raise Exception("Forbidden: Role modifications are not allowed")
+        
+        # Authorization Check 2: Verify user is updating their own record
+        # Extract authenticated user's email from Cognito JWT claims
+        if event:
+            user_email = _get_authenticated_user_email(event)
+            if user_email:
+                # Look up the authenticated user's team member ID
+                authenticated_member_id = _get_team_member_id_by_email(connection, user_email)
+                
+                if not authenticated_member_id:
+                    logger.warning(f"Authenticated user {user_email} has no team member record")
+                    raise Exception("Forbidden: User not found in team members")
+                
+                # Verify user is updating their own record (not someone else's)
+                if authenticated_member_id != member_id:
+                    logger.warning(
+                        f"Authorization denied: User {user_email} (ID: {authenticated_member_id}) "
+                        f"attempted to update team member {member_id}"
+                    )
+                    raise Exception("Forbidden: You can only update your own team member record")
+            else:
+                # No user context available - deny the update
+                logger.warning(f"No authentication context provided for team member update: {member_id}")
+                raise Exception("Forbidden: Authentication required")
+        else:
+            # No event provided - deny the update for security
+            logger.warning(f"No event context provided for authorization check: {member_id}")
+            raise Exception("Forbidden: Authorization context required")
         
         # Map API format to database format
         db_data = _map_api_to_db_format(data)

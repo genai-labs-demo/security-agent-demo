@@ -3,6 +3,7 @@ Error handling module for CRM API Gateway Lambda proxy.
 
 Provides consistent error response formatting and handling for various error types:
 - Validation errors (400)
+- Authorization/Forbidden errors (403)
 - Not found errors (404)
 - Conflict errors (409)
 - Database/server errors (500)
@@ -86,6 +87,30 @@ def handle_validation_error(message: str, field: Optional[str] = None, details: 
         error_code="VALIDATION_ERROR",
         message=message,
         details=error_details if error_details else None
+    )
+
+
+def handle_forbidden_error(message: str, details: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Handle authorization/forbidden errors with 403 status.
+    
+    Used when an authenticated user attempts to access a resource or perform an operation
+    they are not authorized for (e.g., modifying another user's data, attempting privilege escalation).
+    
+    Args:
+        message: Human-readable forbidden error message
+        details: Optional additional authorization error details
+        
+    Returns:
+        API Gateway response dictionary
+        
+    Requirements: 9.1
+    """
+    return format_error_response(
+        status_code=403,
+        error_code="FORBIDDEN",
+        message=message,
+        details=details if details else None
     )
 
 
