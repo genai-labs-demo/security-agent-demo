@@ -244,6 +244,15 @@ def parse_database_error(error: Exception) -> Dict[str, Any]:
     # Not null violation
     if "not null" in error_str or "null value" in error_str:
         message = "Required field is missing"
+    
+    # Date/datetime validation errors (defense in depth - should be caught by application validation)
+    if "date" in error_str or "datetime" in error_str or "timestamp" in error_str:
+        if "invalid" in error_str or "out of range" in error_str:
+            message = "Invalid date format. Please provide a valid date in YYYY-MM-DD format with a valid month (01-12) and day for that month."
+            return handle_validation_error(message, field="date")
+        if "value too large" in error_str or "value too small" in error_str:
+            message = "Date value is out of acceptable range"
+            return handle_validation_error(message, field="date")
         return handle_validation_error(message)
     
     # Default to generic database error

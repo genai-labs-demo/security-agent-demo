@@ -299,6 +299,41 @@ def _validate_amount(amount) -> None:
         )
 
 
+def _validate_date(date_string, field_name: str) -> None:
+    """
+    Validate that a date string represents a valid calendar date.
+    
+    This function performs semantic date validation beyond format checking,
+    ensuring that dates like "2024-99-99", "2024-02-30", "2024-13-01", and
+    "2023-02-29" (invalid leap year) are rejected at the application layer
+    rather than relying on database constraints.
+    
+    Args:
+        date_string: The date string to validate (expected format: YYYY-MM-DD)
+        field_name: The name of the field being validated (for error messages)
+    
+    Raises:
+        ValueError: If date_string is not a valid calendar date
+    """
+    if date_string is None or date_string == '':
+        return  # Allow null/empty dates for optional fields
+    
+    try:
+        # Attempt to parse the date string using strict parsing
+        # This validates:
+        # - Month is 1-12
+        # - Day is valid for the given month (e.g., no Feb 30, no June 31)
+        # - Leap year rules (Feb 29 only on leap years)
+        datetime.strptime(str(date_string), '%Y-%m-%d')
+    except ValueError as e:
+        # Extract the error message from datetime parsing
+        error_detail = str(e)
+        raise ValueError(
+            f"Invalid {field_name}: '{date_string}' is not a valid date. "
+            f"Please provide a valid date in YYYY-MM-DD format. {error_detail}"
+        )
+
+
 def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Query opportunities from the database with optional account filter.
@@ -429,6 +464,9 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         _validate_amount(db_data.get('amount'))
         
         # Generate ID if not provided
+        # Validate closeDate is a valid calendar date
+        _validate_date(db_data.get('close_date'), 'closeDate')
+        
         if 'id' not in data:
             import uuid
             db_data['id'] = str(uuid.uuid4())
@@ -537,6 +575,9 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
             _validate_amount(db_data.get('amount'))
         
         # Remove id if present (shouldn't be updated)
+        # Validate recentActivityDate is a valid calendar date if being updated
+        _validate_date(db_data.get('recent_activity_date'), 'recentActivityDate')
+        
         db_data.pop('id', None)
         
         # Update last_modified_date
