@@ -29,6 +29,7 @@ from error_handler import (
     handle_server_error,
     parse_database_error
 )
+import rate_limiter
 
 # CloudWatch client for custom metrics
 cloudwatch = boto3.client('cloudwatch')
@@ -67,6 +68,12 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Handle CORS preflight requests
         if event.get('httpMethod') == 'OPTIONS':
             return process_cors(event)
+        
+        # Check rate limits
+        rate_check = rate_limiter.check_rate_limit(event)
+        if rate_check is not None:
+            logger.warning(f"Request {request_id} rate limited")
+            return process_cors(event, rate_check)
         
         # Parse API Gateway event to extract route information
         route_info = parse_api_gateway_event(event)
@@ -124,6 +131,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             return_database_connection(connection)
         
         # Apply CORS headers
+        response = rate_limiter.add_rate_limit_headers(response, event)
         response = process_cors(event, response)
         
         logger.info(f"Request {request_id} completed successfully with status {response['statusCode']}")
