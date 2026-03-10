@@ -383,6 +383,14 @@ def format_success_response(result: Any, route_info, operation: str) -> Dict[str
                 },
                 'body': result.get('content', ''),
             }
+    elif isinstance(result, dict) and 'data' in result and 'warning' in result:
+        # Wrapped search response with truncation warning metadata
+        enhanced_data = enhance_with_images(result['data'], entity_type)
+        enhanced_result = {
+            'data': enhanced_data,
+            'warning': result['warning'],
+            'metadata': result.get('metadata', {})
+        }
     else:
         enhanced_result = enhance_with_images(result, entity_type)
     
