@@ -138,11 +138,14 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
             return []
         
         keywords = search_query.strip().split()
+        original_keyword_count = len(keywords)
+        truncated = False
         
         # Limit keyword count to prevent resource exhaustion via query explosion
         MAX_KEYWORDS = 10
         if len(keywords) > MAX_KEYWORDS:
-            logger.warning(f"Search query truncated from {len(keywords)} to {MAX_KEYWORDS} keywords")
+            logger.warning(f"Search query truncated from {original_keyword_count} to {MAX_KEYWORDS} keywords")
+            truncated = True
             keywords = keywords[:MAX_KEYWORDS]
         
         logger.info(f"Searching opportunities for keywords: {keywords}")
@@ -259,6 +262,19 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
             opportunities.append(opportunity)
         
         logger.info(f"Found {len(opportunities)} opportunities matching search query")
+
+        # If keywords were truncated, return a wrapped response with warning metadata
+        if truncated:
+            return {
+                "data": opportunities,
+                "warning": f"Search query contained {original_keyword_count} keywords but only the first {MAX_KEYWORDS} were used. Results may not reflect all search terms.",
+                "metadata": {
+                    "requestedKeywordCount": original_keyword_count,
+                    "appliedKeywordCount": MAX_KEYWORDS,
+                    "maxKeywords": MAX_KEYWORDS
+                }
+            }
+
         return opportunities
         
     except psycopg2.Error as e:
