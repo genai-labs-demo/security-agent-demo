@@ -4,6 +4,7 @@ Validates required fields, data types, and enum values for all entity types.
 """
 
 import re
+import html
 from typing import Dict, Any, List, Optional
 
 
@@ -15,6 +16,9 @@ FORECAST_CATEGORY_VALUES = ['Pipeline', 'Best Case', 'Commit', 'Closed']
 # Email validation regex pattern
 EMAIL_PATTERN = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
 
+# Pattern to detect HTML tags in input (used to prevent stored XSS - CWE-79)
+HTML_TAG_PATTERN = re.compile(r'<[a-zA-Z/!][^>]*>')
+
 
 class ValidationError(Exception):
     """Custom exception for validation errors with field-specific details."""
@@ -23,6 +27,23 @@ class ValidationError(Exception):
         self.message = message
         self.field = field
         super().__init__(self.message)
+
+
+def _contains_html(value: str) -> bool:
+    """
+    Check if a string contains HTML tags.
+    Used to prevent stored XSS (CWE-79) by rejecting input with HTML content.
+
+    Args:
+        value: String value to check
+
+    Returns:
+        True if the string contains HTML tags, False otherwise
+    """
+    if not isinstance(value, str):
+        return False
+    # Check for HTML tags like <script>, <img>, <svg>, etc.
+    return bool(HTML_TAG_PATTERN.search(value))
 
 
 def validate_account(data: Dict[str, Any], is_update: bool = False) -> None:
@@ -52,6 +73,8 @@ def validate_account(data: Dict[str, Any], is_update: bool = False) -> None:
             raise ValidationError("Field 'name' must be a non-empty string", field='name')
         if len(data['name']) > 255:
             raise ValidationError("Field 'name' must not exceed 255 characters", field='name')
+        if _contains_html(data['name']):
+            raise ValidationError("Field 'name' must not contain HTML content", field='name')
     
     # Validate domain
     if 'domain' in data:
@@ -59,6 +82,8 @@ def validate_account(data: Dict[str, Any], is_update: bool = False) -> None:
             raise ValidationError("Field 'domain' must be a non-empty string", field='domain')
         if len(data['domain']) > 255:
             raise ValidationError("Field 'domain' must not exceed 255 characters", field='domain')
+        if _contains_html(data['domain']):
+            raise ValidationError("Field 'domain' must not contain HTML content", field='domain')
     
     # Validate industry (industry_id)
     if 'industry' in data:
@@ -93,6 +118,8 @@ def validate_account(data: Dict[str, Any], is_update: bool = False) -> None:
             raise ValidationError("Field 'ownerName' must be a string", field='ownerName')
         if len(data['ownerName']) > 255:
             raise ValidationError("Field 'ownerName' must not exceed 255 characters", field='ownerName')
+        if _contains_html(data['ownerName']):
+            raise ValidationError("Field 'ownerName' must not contain HTML content", field='ownerName')
     
     if 'opportunityCount' in data and data['opportunityCount'] is not None:
         if not isinstance(data['opportunityCount'], int):
@@ -137,6 +164,8 @@ def validate_opportunity(data: Dict[str, Any], is_update: bool = False) -> None:
             raise ValidationError("Field 'name' must be a non-empty string", field='name')
         if len(data['name']) > 255:
             raise ValidationError("Field 'name' must not exceed 255 characters", field='name')
+        if _contains_html(data['name']):
+            raise ValidationError("Field 'name' must not contain HTML content", field='name')
     
     # Validate accountId (foreign key)
     if 'accountId' in data:
@@ -199,10 +228,14 @@ def validate_opportunity(data: Dict[str, Any], is_update: bool = False) -> None:
             raise ValidationError("Field 'accountName' must be a string", field='accountName')
         if len(data['accountName']) > 255:
             raise ValidationError("Field 'accountName' must not exceed 255 characters", field='accountName')
+        if _contains_html(data['accountName']):
+            raise ValidationError("Field 'accountName' must not contain HTML content", field='accountName')
     
     if 'nextStep' in data and data['nextStep'] is not None:
         if not isinstance(data['nextStep'], str):
             raise ValidationError("Field 'nextStep' must be a string", field='nextStep')
+        if _contains_html(data['nextStep']):
+            raise ValidationError("Field 'nextStep' must not contain HTML content", field='nextStep')
     
     if 'recentActivity' in data and data['recentActivity'] is not None:
         if not isinstance(data['recentActivity'], str):
@@ -213,6 +246,8 @@ def validate_opportunity(data: Dict[str, Any], is_update: bool = False) -> None:
             raise ValidationError("Field 'ownerName' must be a string", field='ownerName')
         if len(data['ownerName']) > 255:
             raise ValidationError("Field 'ownerName' must not exceed 255 characters", field='ownerName')
+        if _contains_html(data['ownerName']):
+            raise ValidationError("Field 'ownerName' must not contain HTML content", field='ownerName')
 
 
 def validate_team_member(data: Dict[str, Any], is_update: bool = False) -> None:
@@ -240,6 +275,8 @@ def validate_team_member(data: Dict[str, Any], is_update: bool = False) -> None:
             raise ValidationError("Field 'name' must be a non-empty string", field='name')
         if len(data['name']) > 255:
             raise ValidationError("Field 'name' must not exceed 255 characters", field='name')
+        if _contains_html(data['name']):
+            raise ValidationError("Field 'name' must not contain HTML content", field='name')
     
     # Validate email format
     if 'email' in data:
