@@ -14,6 +14,59 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 
+def resolve_team_member_id(connection, user_sub: str, user_email: str) -> Optional[str]:
+    """
+    Resolve the authenticated user's team member ID by matching their
+    Cognito sub or email against the team_members table.
+
+    This is used for authorization checks to ensure that the requesting
+    user is a recognized team member before granting access to opportunity
+    resources.
+
+    Args:
+        connection: Database connection object
+        user_sub: The sub claim from the Cognito JWT (unique user ID)
+        user_email: The email claim from the Cognito JWT
+
+    Returns:
+        The team member id if found, otherwise None
+    """
+    if not user_sub and not user_email:
+        logger.warning("resolve_team_member_id called with no sub or email")
+        return None
+
+    try:
+        cursor = connection.cursor(cursor_factory=RealDictCursor)
+
+        # First try matching by cognito_sub if available
+        if user_sub:
+            cursor.execute(
+                "SELECT id FROM team_members WHERE cognito_sub = %s LIMIT 1",
+                (user_sub,)
+            )
+            row = cursor.fetchone()
+            if row:
+                cursor.close()
+                return row['id']
+
+        # Fall back to matching by email
+        if user_email:
+            cursor.execute(
+                "SELECT id FROM team_members WHERE email = %s LIMIT 1",
+                (user_email,)
+            )
+            row = cursor.fetchone()
+            if row:
+                cursor.close()
+                return row['id']
+
+        cursor.close()
+        return None
+    except Exception as e:
+        logger.error(f"Error resolving team member ID: {str(e)}")
+        return None
+
+
 def _map_opportunity_to_api_format(db_record: Dict[str, Any]) -> Dict[str, Any]:
     """
     Map database snake_case columns to camelCase API response fields.
@@ -118,7 +171,7 @@ def _recalculate_account_aggregates(connection, account_id: str) -> None:
         cursor.close()
 
 
-def search_opportunities(connection, search_query: str, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
+def search_opportunities(connection, search_query: str, account_id: Optional[str] = None, owner_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Perform full text search on opportunities using multiple keywords.
     
@@ -126,6 +179,7 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
         connection: Database connection object
         search_query: Search string (e.g., "finance software platform")
         account_id: Optional account ID to filter opportunities
+        owner_id: Optional owner (team member) ID to scope results for authorization
     
     Returns:
         List of opportunity dictionaries in API format, ordered by relevance
@@ -222,7 +276,11 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
         # Add account filter if specified
         if account_id:
             query += " AND o.account_id = %s"
-            keyword_params.append(account_id)
+
+        if owner_id:
+            query += " AND o.owner_id = %s"
+            keyword_params.append(owner_id)
+
         
         query += """
             ORDER BY 
@@ -299,13 +357,14 @@ def _validate_amount(amount) -> None:
         )
 
 
-def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
+def list_opportunities(connection, account_id: Optional[str] = None, owner_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
-    Query opportunities from the database with optional account filter.
+    Query opportunities from the database with optional account and owner filters.
     
     Args:
         connection: Database connection object
         account_id: Optional account ID to filter opportunities
+        owner_id: Optional owner (team member) ID to scope results for authorization
     
     Returns:
         List of opportunity dictionaries in API format
@@ -327,14 +386,17 @@ def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dic
             FROM opportunities
             WHERE deleted_at IS NULL
         """
-        
-        params = []
+        filter_params = []
         if account_id:
             query += " AND account_id = %s"
+            filter_params.append(account_id)
+        if owner_id:
+            query += " AND owner_id = %s"
+            filter_params.append(owner_id)
             params.append(account_id)
         
         query += " ORDER BY close_date DESC LIMIT 1000"
-        
+        cursor.execute(query, filter_params)
         cursor.execute(query, params)
         records = cursor.fetchall()
         cursor.close()

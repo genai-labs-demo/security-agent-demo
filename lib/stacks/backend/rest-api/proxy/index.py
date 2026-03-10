@@ -1,6 +1,6 @@
 """
 Main Lambda handler for CRM API Gateway proxy.
-
+    
 This Lambda function serves as the entry point for all CRM API requests.
 It routes requests to appropriate entity handlers, enhances responses with S3 image URLs,
 applies CORS headers, and handles exceptions with proper error formatting.
@@ -37,6 +37,42 @@ cloudwatch = boto3.client('cloudwatch')
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
+class AuthorizationError(Exception):
+    """Raised when a user is not authorized to access a resource."""
+    pass
+
+
+def _extract_user_claims(event: Dict[str, Any]) -> Dict[str, str]:
+    """
+    Extract authenticated user claims from API Gateway Cognito authorizer context.
+
+    Args:
+        event: API Gateway event dictionary
+
+    Returns:
+        Dictionary with user claims (sub, email, etc.) or empty dict for
+        unauthenticated endpoints.
+    """
+    try:
+        claims = (event.get('requestContext', {})
+                       .get('authorizer', {})
+                       .get('claims', {}))
+        if claims:
+            logger.info(f"Extracted user claims for sub: {claims.get('sub', 'unknown')}")
+        return claims or {}
+    except Exception as e:
+        logger.warning(f"Failed to extract user claims: {str(e)}")
+        return {}
+
+
+def _format_forbidden_response() -> Dict[str, Any]:
+    """Return a 403 Forbidden API Gateway response."""
+    return {
+        'statusCode': 403,
+        'headers': {'Content-Type': 'application/json'},
+        'body': json.dumps({'message': 'Forbidden: you do not have permission to access this resource'})
+    }
+
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
@@ -68,6 +104,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         if event.get('httpMethod') == 'OPTIONS':
             return process_cors(event)
         
+        # Extract authenticated user claims from Cognito authorizer
+        user_claims = _extract_user_claims(event)
+
         # Parse API Gateway event to extract route information
         route_info = parse_api_gateway_event(event)
         
@@ -88,7 +127,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             result = execute_operation(connection, route_info, operation)
             
             # Calculate and publish search latency metrics
-            elapsed_time = (time.time() - start_time) * 1000  # Convert to milliseconds
+            result = execute_operation(connection, route_info, operation, user_claims)
             
             # Publish SearchLatency metric for search operations
             is_search_operation = (
@@ -132,6 +171,11 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     except ValueError as e:
         # Validation errors (400)
         logger.warning(f"Validation error in request {request_id}: {str(e)}")
+
+    except AuthorizationError as e:
+        logger.warning(f"Authorization error in request {request_id}: {str(e)}")
+        response = _format_forbidden_response()
+        return process_cors(event, response)
         response = handle_validation_error(str(e))
         return process_cors(event, response)
         
@@ -162,7 +206,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         return process_cors(event, response)
 
 
-def execute_operation(connection, route_info, operation: str) -> Any:
+def execute_operation(connection, route_info, operation: str, user_claims: Dict[str, str] = None) -> Any:
     """
     Execute the appropriate CRUD operation based on route information.
     
@@ -170,6 +214,7 @@ def execute_operation(connection, route_info, operation: str) -> Any:
         connection: Database connection object
         route_info: Parsed route information
         operation: Operation type ('list', 'get', 'create', 'update', 'delete')
+        user_claims: Authenticated user's JWT claims from Cognito
         
     Returns:
         Operation result (record, list of records, or boolean)
@@ -177,6 +222,8 @@ def execute_operation(connection, route_info, operation: str) -> Any:
     Raises:
         ValueError: If resource type or operation is not supported
     """
+    if user_claims is None:
+        user_claims = {}
     resource_type = route_info.resource_type
     resource_id = route_info.resource_id
     query_params = route_info.query_params
@@ -209,26 +256,51 @@ def execute_operation(connection, route_info, operation: str) -> Any:
     # Route to opportunities handler
     elif resource_type == 'opportunities':
         account_id = query_params.get('accountId')
-        search_query = query_params.get('search') or query_params.get('q')  # Support both 'search' and 'q' parameters
-        
-        # Check if this is a search endpoint (/opportunities/search)
+        search_query = query_params.get('search') or query_params.get('q')
+
+        # Authorization: resolve the requesting user's team member ID
+        user_sub = user_claims.get('sub', '')
+        user_email = user_claims.get('email', '')
+        requesting_member_id = opportunities_handler.resolve_team_member_id(
+            connection, user_sub, user_email
+        )
+        if not requesting_member_id:
+            logger.warning(
+                f"Authorization denied: user sub={user_sub} is not a recognized team member"
+            )
+            raise AuthorizationError(
+                "You are not a recognized team member and cannot access opportunities"
+            )
+
         is_search_endpoint = route_info.path.endswith('/search')
-        
+
         if operation == 'list' or is_search_endpoint:
-            # If search query is provided, perform search instead of list
             if search_query:
-                return opportunities_handler.search_opportunities(connection, search_query, account_id)
+                return opportunities_handler.search_opportunities(
+                    connection, search_query, account_id, owner_id=requesting_member_id
+                )
             else:
-                return opportunities_handler.list_opportunities(connection, account_id)
+                return opportunities_handler.list_opportunities(
+                    connection, account_id, owner_id=requesting_member_id
+                )
         elif operation == 'get':
             result = opportunities_handler.get_opportunity(connection, resource_id)
             if result is None:
                 raise ValueError(f"Opportunity with id {resource_id} not found")
+            if result.get('ownerId') != requesting_member_id:
+                raise AuthorizationError("You do not have permission to access this opportunity")
             return result
         elif operation == 'create':
             return opportunities_handler.create_opportunity(connection, body)
         elif operation == 'update':
-            result = opportunities_handler.update_opportunity(connection, resource_id, body)
+            existing = opportunities_handler.get_opportunity(connection, resource_id)
+            if existing is None:
+                raise ValueError(f"Opportunity with id {resource_id} not found")
+            if existing.get('ownerId') != requesting_member_id:
+                raise AuthorizationError("You do not have permission to modify this opportunity")
+            result = opportunities_handler.update_opportunity(
+                connection, resource_id, body
+            )
             if result is None:
                 raise ValueError(f"Opportunity with id {resource_id} not found")
             return result
