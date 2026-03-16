@@ -158,31 +158,31 @@ export class Auth extends Construct {
                     {
                         name: "AWSManagedRulesCommonRuleSet",
                         overrideAction: {
-                            count: {},
+                            none: {},
                         },
                     },
                     {
                         name: "AWSManagedRulesBotControlRuleSet",
                         overrideAction: {
-                            count: {},
+                            none: {},
                         },
                     },
                     {
                         name: "AWSManagedRulesKnownBadInputsRuleSet",
                         overrideAction: {
-                            count: {},
+                            none: {},
                         },
                     },
                     {
                         name: "AWSManagedRulesUnixRuleSet",
                         overrideAction: {
-                            count: {},
+                            none: {},
                         },
                     },
                     {
                         name: "AWSManagedRulesSQLiRuleSet",
                         overrideAction: {
-                            count: {},
+                            none: {},
                         },
                     },
                 ]),
