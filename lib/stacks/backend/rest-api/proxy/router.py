@@ -24,7 +24,8 @@ class RouteInfo:
         resource_id: Optional[str] = None,
         query_params: Optional[Dict[str, str]] = None,
         body: Optional[Dict[str, Any]] = None,
-        path: Optional[str] = None
+        path: Optional[str] = None,
+        user_id: Optional[str] = None
     ):
         self.resource_type = resource_type
         self.http_method = http_method
@@ -32,12 +33,14 @@ class RouteInfo:
         self.query_params = query_params or {}
         self.body = body or {}
         self.path = path or ""
+        self.user_id = user_id
     
     def __repr__(self):
         return (f"RouteInfo(resource_type={self.resource_type}, "
                 f"http_method={self.http_method}, "
                 f"resource_id={self.resource_id}, "
-                f"query_params={self.query_params})")
+                f"query_params={self.query_params}, "
+                f"user_id={self.user_id})")
 
 
 def parse_api_gateway_event(event: Dict[str, Any]) -> RouteInfo:
@@ -50,6 +53,7 @@ def parse_api_gateway_event(event: Dict[str, Any]) -> RouteInfo:
     - Path parameters (entity ID)
     - Query parameters (filters like accountId)
     - Request body (JSON payload)
+    - User identity from JWT claims (for authenticated requests)
     
     Args:
         event: API Gateway event dictionary
@@ -90,13 +94,17 @@ def parse_api_gateway_event(event: Dict[str, Any]) -> RouteInfo:
         # Extract and parse request body
         body = _parse_request_body(event)
         
+        # Extract user identity from JWT claims (if authenticated endpoint)
+        user_id = _extract_user_identity(event, resource_type)
+        
         route_info = RouteInfo(
             resource_type=resource_type,
             http_method=http_method,
             resource_id=resource_id,
             query_params=query_params,
             body=body,
-            path=path
+            path=path,
+            user_id=user_id
         )
         
         logger.info(f"Parsed route: {route_info}")
@@ -105,6 +113,65 @@ def parse_api_gateway_event(event: Dict[str, Any]) -> RouteInfo:
     except Exception as e:
         logger.error(f"Failed to parse API Gateway event: {str(e)}")
         raise ValueError(f"Failed to parse API Gateway event: {str(e)}")
+
+
+def _extract_user_identity(event: Dict[str, Any], resource_type: str) -> Optional[str]:
+    """
+    Extract user identity (sub claim) from API Gateway requestContext.
+    
+    For authenticated endpoints, API Gateway with Cognito authorizer populates
+    requestContext.authorizer.claims with JWT claims including 'sub' (user ID).
+    
+    Security demo endpoints (security-*) are intentionally unauthenticated,
+    so we skip user extraction for those to prevent errors.
+    
+    Args:
+        event: API Gateway event dictionary
+        resource_type: Resource type being accessed
+    
+    Returns:
+        User ID (sub claim) if authenticated, None for unauthenticated endpoints
+    
+    Note:
+        Returns None instead of raising error to support both authenticated
+        and unauthenticated endpoints in the same Lambda function.
+    """
+    # Security demo endpoints are intentionally unauthenticated
+    if resource_type.startswith('security-'):
+        logger.info("Security demo endpoint - skipping user identity extraction")
+        return None
+    
+    try:
+        # Extract requestContext from event
+        request_context = event.get('requestContext', {})
+        if not request_context:
+            logger.warning("No requestContext found in event - possible local testing")
+            return None
+        
+        # Extract authorizer claims
+        authorizer = request_context.get('authorizer', {})
+        if not authorizer:
+            logger.warning("No authorizer found in requestContext")
+            return None
+        
+        claims = authorizer.get('claims', {})
+        if not claims:
+            logger.warning("No claims found in authorizer")
+            return None
+        
+        # Extract sub claim (user ID)
+        user_id = claims.get('sub')
+        if not user_id:
+            logger.warning("No 'sub' claim found in JWT")
+            return None
+        
+        logger.info(f"Extracted user identity: {user_id}")
+        return user_id
+        
+    except Exception as e:
+        logger.error(f"Error extracting user identity: {str(e)}")
+        # Return None instead of raising to allow graceful handling
+        return None
 
 
 def _parse_path(path: str) -> Tuple[str, Optional[str]]:
