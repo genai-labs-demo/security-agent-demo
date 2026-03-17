@@ -271,6 +271,10 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
 # Maximum allowed opportunity amount ($10M) to prevent pipeline inflation
 MAX_OPPORTUNITY_AMOUNT = 10_000_000
 
+# Aggregate validation thresholds to prevent unrealistic pipeline values
+PIPELINE_TO_REVENUE_MAX_RATIO = 3.0
+MAX_OPP_COUNT_PER_ACCOUNT = 100
+
 
 def _validate_amount(amount) -> None:
     """
@@ -298,6 +302,100 @@ def _validate_amount(amount) -> None:
             f"for opportunities above this threshold."
         )
 
+
+def _check_aggregate_pipeline_limits(conn, acct_id, opp_amount, opp_id_to_exclude=None):
+    """
+    Business logic validation to prevent pipeline inflation attacks.
+    
+    Ensures total opportunities don't exceed reasonable multiples of account revenue.
+    
+    Parameters:
+        conn: Active database connection
+        acct_id: Account identifier to check
+        opp_amount: New or updated opportunity amount
+        opp_id_to_exclude: Opportunity ID to exclude from totals (for updates)
+    
+    Raises:
+        ValueError: If business logic constraints violated
+    """
+    if not acct_id or opp_amount is None:
+        return
+    
+    try:
+        check_cursor = conn.cursor()
+        
+        # Get account financial data and current opportunity metrics
+        check_cursor.execute("""
+            SELECT 
+                annual_revenue,
+                total_opportunity_value,
+                opportunity_count
+            FROM accounts
+            WHERE id = %s AND deleted_at IS NULL
+        """, (acct_id,))
+        
+        account_info = check_cursor.fetchone()
+        
+        if not account_info:
+            check_cursor.close()
+            return  # Non-existent account will fail FK check later
+        
+        revenue, current_pipeline, current_count = account_info
+        revenue = revenue or 0
+        current_pipeline = current_pipeline or 0
+        current_count = current_count or 0
+        
+        # Cannot validate without revenue baseline
+        if revenue <= 0:
+            logger.info(f"Skipping aggregate check for {acct_id} - revenue not available")
+            check_cursor.close()
+            return
+        
+        # Calculate what the new pipeline total would be
+        excluded_amount = 0
+        if opp_id_to_exclude:
+            # Updating existing - need to subtract its current value first
+            check_cursor.execute("""
+                SELECT amount
+                FROM opportunities
+                WHERE id = %s AND deleted_at IS NULL
+            """, (opp_id_to_exclude,))
+            excluded_row = check_cursor.fetchone()
+            if excluded_row:
+                excluded_amount = excluded_row[0] or 0
+            calculated_pipeline = current_pipeline - excluded_amount + opp_amount
+            calculated_count = current_count
+        else:
+            # Creating new opportunity
+            calculated_pipeline = current_pipeline + opp_amount
+            calculated_count = current_count + 1
+        
+        check_cursor.close()
+        
+        # Enforce count limit
+        if calculated_count > MAX_OPP_COUNT_PER_ACCOUNT:
+            raise ValueError(
+                f"Cannot exceed {MAX_OPP_COUNT_PER_ACCOUNT} opportunities per account. "
+                f"Account currently has {current_count} opportunities."
+            )
+        
+        # Enforce pipeline-to-revenue ratio
+        pipeline_ratio = calculated_pipeline / revenue
+        if pipeline_ratio > PIPELINE_TO_REVENUE_MAX_RATIO:
+            raise ValueError(
+                f"Pipeline total ${calculated_pipeline:,.2f} exceeds {PIPELINE_TO_REVENUE_MAX_RATIO}x "
+                f"annual revenue ${revenue:,.2f}. Max allowed: ${revenue * PIPELINE_TO_REVENUE_MAX_RATIO:,.2f}."
+            )
+        
+        # Log warning when approaching limit
+        if pipeline_ratio > (PIPELINE_TO_REVENUE_MAX_RATIO * 0.8):
+            logger.warning(f"Account {acct_id} pipeline at {pipeline_ratio:.1f}x revenue")
+    
+    except ValueError:
+        raise  # Propagate validation errors
+    except Exception as ex:
+        # Don't fail operations if validation check itself errors
+        logger.error(f"Pipeline validation check failed for {acct_id}: {str(ex)}")
 
 def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
@@ -428,6 +526,9 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         # Validate amount bounds
         _validate_amount(db_data.get('amount'))
         
+        # Check aggregate pipeline limits to prevent inflation
+        _check_aggregate_pipeline_limits(connection, db_data.get('account_id'), db_data.get('amount'))
+        
         # Generate ID if not provided
         if 'id' not in data:
             import uuid
@@ -536,6 +637,30 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         if 'amount' in db_data:
             _validate_amount(db_data.get('amount'))
         
+            
+            # Check aggregate limits when amount is modified
+            qry_cursor = connection.cursor()
+            qry_cursor.execute(
+                "SELECT account_id FROM opportunities WHERE id = %s AND deleted_at IS NULL",
+                (opportunity_id,)
+            )
+            qry_result = qry_cursor.fetchone()
+            qry_cursor.close()
+            if qry_result:
+                _check_aggregate_pipeline_limits(connection, qry_result[0], db_data.get('amount'), opportunity_id)
+        
+        # Check aggregate limits when moving to different account
+        if 'account_id' in db_data:
+            qry_cursor = connection.cursor()
+            qry_cursor.execute(
+                "SELECT amount FROM opportunities WHERE id = %s AND deleted_at IS NULL",
+                (opportunity_id,)
+            )
+            qry_result = qry_cursor.fetchone()
+            qry_cursor.close()
+            if qry_result:
+                final_amount = db_data.get('amount', qry_result[0] or 0)
+                _check_aggregate_pipeline_limits(connection, db_data.get('account_id'), final_amount, None)
         # Remove id if present (shouldn't be updated)
         db_data.pop('id', None)
         
