@@ -79,21 +79,26 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
     return db_data
 
 
-def list_accounts(connection) -> List[Dict[str, Any]]:
+def list_accounts(connection, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
-    Query all accounts from the database.
+    Query accounts from the database filtered by owner (authenticated user).
     
     Args:
         connection: Database connection object
+        user_id: Authenticated user ID from Cognito (filters by owner_id)
     
     Returns:
-        List of account dictionaries in API format
+        List of account dictionaries in API format owned by the user
     
     Raises:
         Exception: If database query fails
     """
     try:
-        logger.info("Listing all accounts")
+        if not user_id:
+            logger.warning("No user_id provided for list_accounts - returning empty list")
+            return []
+        
+        logger.info(f"Listing accounts for user: {user_id}")
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
@@ -104,11 +109,11 @@ def list_accounts(connection) -> List[Dict[str, Any]]:
                 opportunity_count, total_opportunity_value,
                 last_activity_date, created_date, logo_url
             FROM accounts
-            WHERE deleted_at IS NULL
+            WHERE deleted_at IS NULL AND owner_id = %s
             ORDER BY name ASC
         """
         
-        cursor.execute(query)
+        cursor.execute(query, (user_id,))
         records = cursor.fetchall()
         cursor.close()
         
@@ -130,21 +135,26 @@ COMPUTED_FIELDS = {'health_status', 'health_score', 'opportunity_count', 'total_
 
 
 
-def get_account(connection, account_id: str) -> Optional[Dict[str, Any]]:
+def get_account(connection, account_id: str, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
-    Query a single account by ID from the database.
+    Query a single account by ID from the database, filtered by owner.
     
     Args:
         connection: Database connection object
         account_id: Account ID to retrieve
+        user_id: Authenticated user ID from Cognito (validates ownership)
     
     Returns:
-        Account dictionary in API format, or None if not found
+        Account dictionary in API format, or None if not found or not owned by user
     
     Raises:
         Exception: If database query fails
     """
     try:
+        if not user_id:
+            logger.warning(f"No user_id provided for get_account - access denied")
+            return None
+        
         logger.info(f"Getting account with ID: {account_id}")
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
@@ -156,10 +166,10 @@ def get_account(connection, account_id: str) -> Optional[Dict[str, Any]]:
                 opportunity_count, total_opportunity_value,
                 last_activity_date, created_date, logo_url
             FROM accounts
-            WHERE id = %s AND deleted_at IS NULL
+            WHERE id = %s AND deleted_at IS NULL AND owner_id = %s
         """
         
-        cursor.execute(query, (account_id,))
+        cursor.execute(query, (account_id, user_id))
         record = cursor.fetchone()
         cursor.close()
         
@@ -181,13 +191,14 @@ def get_account(connection, account_id: str) -> Optional[Dict[str, Any]]:
         raise
 
 
-def create_account(connection, data: Dict[str, Any]) -> Dict[str, Any]:
+def create_account(connection, data: Dict[str, Any], user_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Insert a new account record into the database.
     
     Args:
         connection: Database connection object
         data: Account data in API format (camelCase)
+        user_id: Authenticated user ID from Cognito (set as owner_id)
     
     Returns:
         Created account dictionary in API format
@@ -195,6 +206,10 @@ def create_account(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     Raises:
         Exception: If database insert fails or validation fails
     """
+        if not user_id:
+            logger.error("No user_id provided for create_account")
+            raise Exception("Authentication required: cannot create account without user context")
+        
     try:
         logger.info(f"Creating new account: {data.get('name')}")
         
@@ -211,6 +226,10 @@ def create_account(connection, data: Dict[str, Any]) -> Dict[str, Any]:
             db_data['id'] = str(uuid.uuid4())
         else:
             db_data['id'] = data['id']
+        
+        # Set owner_id to authenticated user (enforce ownership)
+        db_data['owner_id'] = user_id
+        logger.info(f"Setting account owner_id to authenticated user: {user_id}")
         
         # Set created_date if not provided
         if 'created_date' not in db_data:
@@ -246,7 +265,7 @@ def create_account(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         _recalculate_health(connection, db_data['id'])
         
         # Re-fetch to include computed fields
-        account = get_account(connection, db_data['id'])
+        account = get_account(connection, db_data['id'], user_id)
         
         logger.info(f"Created account with ID: {db_data['id']}")
         return account
@@ -271,14 +290,15 @@ def create_account(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         raise
 
 
-def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def update_account(connection, account_id: str, data: Dict[str, Any], user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
-    Update an existing account record in the database.
+    Update an existing account record in the database owned by the user.
     
     Args:
         connection: Database connection object
         account_id: Account ID to update
         data: Partial account data in API format (camelCase)
+        user_id: Authenticated user ID from Cognito (validates ownership)
     
     Returns:
         Updated account dictionary in API format, or None if not found
@@ -287,6 +307,10 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
         Exception: If database update fails or validation fails
     """
     try:
+        if not user_id:
+            logger.warning(f"No user_id provided for update_account - access denied")
+            return None
+        
         logger.info(f"Updating account: {account_id}")
         
         # Map API format to database format
@@ -302,7 +326,7 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
         if not db_data:
             logger.warning("No fields to update")
             # Return current account
-            return get_account(connection, account_id)
+            return get_account(connection, account_id, user_id)
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
@@ -310,11 +334,12 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
         set_clauses = [f"{col} = %s" for col in db_data.keys()]
         values = list(db_data.values())
         values.append(account_id)  # For WHERE clause
+        values.append(user_id)  # For owner_id check
         
         query = f"""
             UPDATE accounts
             SET {', '.join(set_clauses)}
-            WHERE id = %s
+            WHERE id = %s AND owner_id = %s
             RETURNING 
                 id, name, domain, industry_id, annual_revenue, employee_count,
                 owner_id, owner_name, health_status, health_score,
@@ -338,7 +363,7 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
         _recalculate_health(connection, account_id)
         
         # Re-fetch to include recomputed fields
-        account = get_account(connection, account_id)
+        account = get_account(connection, account_id, user_id)
         
         logger.info(f"Updated account: {account_id}")
         return account
@@ -363,15 +388,16 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
         raise
 
 
-def delete_account(connection, account_id: str) -> bool:
+def delete_account(connection, account_id: str, user_id: Optional[str] = None) -> bool:
     """
-    Soft-delete an account record by marking it as deleted.
+    Soft-delete an account record by marking it as deleted (owned by user).
     The record is retained in the database for recovery purposes.
     Checks for active (non-deleted) opportunities before allowing deletion.
 
     Args:
         connection: Database connection object
         account_id: Account ID to soft-delete
+        user_id: Authenticated user ID from Cognito (validates ownership)
 
     Returns:
         True if account was soft-deleted, False if not found
@@ -379,14 +405,18 @@ def delete_account(connection, account_id: str) -> bool:
     Raises:
         Exception: If account has active opportunities or database update fails
     """
+        if not user_id:
+            logger.warning(f"No user_id provided for delete_account - access denied")
+            return False
+        
     try:
         logger.info(f"Soft-deleting account: {account_id}")
 
         cursor = connection.cursor()
-
+        # Check if account exists, is not already deleted, and is owned by user
         # Check if account exists and is not already deleted
-        cursor.execute(
-            "SELECT id FROM accounts WHERE id = %s AND (deleted_at IS NULL)",
+            "SELECT id FROM accounts WHERE id = %s AND (deleted_at IS NULL) AND owner_id = %s",
+            (account_id, user_id)
             (account_id,)
         )
         if not cursor.fetchone():
@@ -412,8 +442,8 @@ def delete_account(connection, account_id: str) -> bool:
 
         # Soft-delete: set deleted_at timestamp instead of removing the row
         cursor.execute(
-            "UPDATE accounts SET deleted_at = NOW() WHERE id = %s",
-            (account_id,)
+            "UPDATE accounts SET deleted_at = NOW() WHERE id = %s AND owner_id = %s",
+            (account_id, user_id)
         )
         connection.commit()
         cursor.close()

@@ -24,7 +24,10 @@ class RouteInfo:
         resource_id: Optional[str] = None,
         query_params: Optional[Dict[str, str]] = None,
         body: Optional[Dict[str, Any]] = None,
-        path: Optional[str] = None
+        path: Optional[str] = None,
+        user_id: Optional[str] = None,
+        user_email: Optional[str] = None,
+        user_claims: Optional[Dict[str, Any]] = None
     ):
         self.resource_type = resource_type
         self.http_method = http_method
@@ -32,11 +35,15 @@ class RouteInfo:
         self.query_params = query_params or {}
         self.body = body or {}
         self.path = path or ""
+        self.user_id = user_id
+        self.user_email = user_email
+        self.user_claims = user_claims or {}
     
     def __repr__(self):
         return (f"RouteInfo(resource_type={self.resource_type}, "
                 f"http_method={self.http_method}, "
                 f"resource_id={self.resource_id}, "
+                f"user_id={self.user_id}, "
                 f"query_params={self.query_params})")
 
 
@@ -90,13 +97,35 @@ def parse_api_gateway_event(event: Dict[str, Any]) -> RouteInfo:
         # Extract and parse request body
         body = _parse_request_body(event)
         
+        # Extract user identity from Cognito authorizer claims
+        user_id = None
+        user_email = None
+        user_claims = {}
+        
+        try:
+            request_context = event.get('requestContext', {})
+            authorizer = request_context.get('authorizer', {})
+            claims = authorizer.get('claims', {})
+            
+            if claims:
+                # Extract user ID from Cognito sub claim
+                user_id = claims.get('sub')
+                user_email = claims.get('email')
+                user_claims = claims
+                logger.info(f"Authenticated user: {user_id} ({user_email})")
+        except Exception as e:
+            logger.warning(f"Failed to extract user claims: {str(e)}")
+        
         route_info = RouteInfo(
             resource_type=resource_type,
             http_method=http_method,
             resource_id=resource_id,
             query_params=query_params,
             body=body,
-            path=path
+            path=path,
+            user_id=user_id,
+            user_email=user_email,
+            user_claims=user_claims
         )
         
         logger.info(f"Parsed route: {route_info}")

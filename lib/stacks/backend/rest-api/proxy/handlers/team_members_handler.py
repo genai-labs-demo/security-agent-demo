@@ -116,21 +116,27 @@ def list_team_members(connection) -> List[Dict[str, Any]]:
         raise
 
 
-def get_team_member(connection, member_id: str) -> Optional[Dict[str, Any]]:
+def get_team_member(connection, member_id: str, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
     Query a single team member by ID from the database.
+    Users can only access their own team member profile.
     
     Args:
         connection: Database connection object
         member_id: Team member ID to retrieve
+        user_id: Authenticated user ID from Cognito (must match member_id)
     
     Returns:
-        Team member dictionary in API format, or None if not found
+        Team member dictionary in API format, or None if not found or unauthorized
     
     Raises:
         Exception: If database query fails
     """
     try:
+        if not user_id:
+            logger.warning(f"No user_id provided for get_team_member - access denied")
+            return None
+        
         logger.info(f"Getting team member with ID: {member_id}")
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
@@ -140,10 +146,17 @@ def get_team_member(connection, member_id: str) -> Optional[Dict[str, Any]]:
                 id, name, email, role, quota, pipeline_value, closed_won_value,
                 quota_attainment, win_rate, opportunity_count, avatar_url
             FROM team_members
-            WHERE id = %s
+            WHERE id = %s AND id = %s
         """
         
-        cursor.execute(query, (member_id,))
+        # Authorization check: user can only access their own profile
+        # Both conditions check id = member_id AND id = user_id (must be same)
+        if member_id != user_id:
+            logger.warning(f"User {user_id} attempted to access team member {member_id} - access denied")
+            cursor.close()
+            return None
+        
+        cursor.execute(query, (member_id, user_id))
         record = cursor.fetchone()
         cursor.close()
         
@@ -165,7 +178,7 @@ def get_team_member(connection, member_id: str) -> Optional[Dict[str, Any]]:
         raise
 
 
-def create_team_member(connection, data: Dict[str, Any]) -> Dict[str, Any]:
+def create_team_member(connection, data: Dict[str, Any], user_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Insert a new team member record into the database.
     Validates email uniqueness before insertion.
@@ -173,6 +186,7 @@ def create_team_member(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     Args:
         connection: Database connection object
         data: Team member data in API format (camelCase)
+        user_id: Authenticated user ID from Cognito (set as id for self-registration)
     
     Returns:
         Created team member dictionary in API format
@@ -180,17 +194,19 @@ def create_team_member(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     Raises:
         Exception: If database insert fails or validation fails
     """
+        if not user_id:
+            logger.error("No user_id provided for create_team_member")
+            raise Exception("Authentication required: cannot create team member without user context")
+        
     try:
         logger.info(f"Creating new team member: {data.get('name')}")
         
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
-        
-        # Generate ID if not provided
-        if 'id' not in data:
-            import uuid
-            db_data['id'] = str(uuid.uuid4())
-        else:
+        # Set ID to authenticated user ID (users create their own profile)
+        # This ensures team member ID matches Cognito user ID
+        db_data['id'] = user_id
+        logger.info(f"Setting team member id to authenticated user: {user_id}")
             db_data['id'] = data['id']
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
@@ -249,15 +265,17 @@ def create_team_member(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         raise
 
 
-def update_team_member(connection, member_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def update_team_member(connection, member_id: str, data: Dict[str, Any], user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
     Update an existing team member record in the database.
+    Users can only update their own team member profile.
     Validates email uniqueness if email is being updated.
     
     Args:
         connection: Database connection object
         member_id: Team member ID to update
         data: Partial team member data in API format (camelCase)
+        user_id: Authenticated user ID from Cognito (must match member_id)
     
     Returns:
         Updated team member dictionary in API format, or None if not found
@@ -267,6 +285,15 @@ def update_team_member(connection, member_id: str, data: Dict[str, Any]) -> Opti
     """
     try:
         logger.info(f"Updating team member: {member_id}")
+        if not user_id:
+            logger.warning(f"No user_id provided for update_team_member - access denied")
+            return None
+        
+        # Authorization check: user can only update their own profile
+        if member_id != user_id:
+            logger.warning(f"User {user_id} attempted to update team member {member_id} - access denied")
+            return None
+        
         
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
@@ -277,7 +304,7 @@ def update_team_member(connection, member_id: str, data: Dict[str, Any]) -> Opti
         if not db_data:
             logger.warning("No fields to update")
             # Return current team member
-            return get_team_member(connection, member_id)
+            return get_team_member(connection, member_id, user_id)
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
@@ -343,14 +370,16 @@ def update_team_member(connection, member_id: str, data: Dict[str, Any]) -> Opti
         raise
 
 
-def delete_team_member(connection, member_id: str) -> bool:
+def delete_team_member(connection, member_id: str, user_id: Optional[str] = None) -> bool:
     """
     Delete a team member record from the database.
+    Users can only delete their own team member profile.
     Checks for foreign key constraints (owned accounts/opportunities) before deletion.
     
     Args:
         connection: Database connection object
         member_id: Team member ID to delete
+        user_id: Authenticated user ID from Cognito (must match member_id)
     
     Returns:
         True if team member was deleted, False if not found
@@ -359,6 +388,15 @@ def delete_team_member(connection, member_id: str) -> bool:
         Exception: If team member owns accounts or opportunities, or database delete fails
     """
     try:
+        if not user_id:
+            logger.warning(f"No user_id provided for delete_team_member - access denied")
+            return False
+        
+        # Authorization check: user can only delete their own profile
+        if member_id != user_id:
+            logger.warning(f"User {user_id} attempted to delete team member {member_id} - access denied")
+            return False
+        
         logger.info(f"Deleting team member: {member_id}")
         
         cursor = connection.cursor()

@@ -181,27 +181,28 @@ def execute_operation(connection, route_info, operation: str) -> Any:
     resource_id = route_info.resource_id
     query_params = route_info.query_params
     body = route_info.body
+    user_id = route_info.user_id
     
     logger.info(f"Executing {operation} operation on {resource_type}")
     
     # Route to accounts handler
     if resource_type == 'accounts':
         if operation == 'list':
-            return accounts_handler.list_accounts(connection)
+            return accounts_handler.list_accounts(connection, user_id)
         elif operation == 'get':
-            result = accounts_handler.get_account(connection, resource_id)
+            result = accounts_handler.get_account(connection, resource_id, user_id)
             if result is None:
                 raise ValueError(f"Account with id {resource_id} not found")
             return result
         elif operation == 'create':
-            return accounts_handler.create_account(connection, body)
+            return accounts_handler.create_account(connection, body, user_id)
         elif operation == 'update':
-            result = accounts_handler.update_account(connection, resource_id, body)
+            result = accounts_handler.update_account(connection, resource_id, body, user_id)
             if result is None:
                 raise ValueError(f"Account with id {resource_id} not found")
             return result
         elif operation == 'delete':
-            success = accounts_handler.delete_account(connection, resource_id)
+            success = accounts_handler.delete_account(connection, resource_id, user_id)
             if not success:
                 raise ValueError(f"Account with id {resource_id} not found")
             return None
@@ -217,23 +218,23 @@ def execute_operation(connection, route_info, operation: str) -> Any:
         if operation == 'list' or is_search_endpoint:
             # If search query is provided, perform search instead of list
             if search_query:
-                return opportunities_handler.search_opportunities(connection, search_query, account_id)
+                return opportunities_handler.search_opportunities(connection, search_query, account_id, user_id)
             else:
-                return opportunities_handler.list_opportunities(connection, account_id)
+                return opportunities_handler.list_opportunities(connection, account_id, user_id)
         elif operation == 'get':
-            result = opportunities_handler.get_opportunity(connection, resource_id)
+            result = opportunities_handler.get_opportunity(connection, resource_id, user_id)
             if result is None:
                 raise ValueError(f"Opportunity with id {resource_id} not found")
             return result
         elif operation == 'create':
-            return opportunities_handler.create_opportunity(connection, body)
+            return opportunities_handler.create_opportunity(connection, body, user_id)
         elif operation == 'update':
-            result = opportunities_handler.update_opportunity(connection, resource_id, body)
+            result = opportunities_handler.update_opportunity(connection, resource_id, body, user_id)
             if result is None:
                 raise ValueError(f"Opportunity with id {resource_id} not found")
             return result
         elif operation == 'delete':
-            success = opportunities_handler.delete_opportunity(connection, resource_id)
+            success = opportunities_handler.delete_opportunity(connection, resource_id, user_id)
             if not success:
                 raise ValueError(f"Opportunity with id {resource_id} not found")
             return None
@@ -243,19 +244,19 @@ def execute_operation(connection, route_info, operation: str) -> Any:
         if operation == 'list':
             return team_members_handler.list_team_members(connection)
         elif operation == 'get':
-            result = team_members_handler.get_team_member(connection, resource_id)
+            result = team_members_handler.get_team_member(connection, resource_id, user_id)
             if result is None:
                 raise ValueError(f"Team member with id {resource_id} not found")
             return result
         elif operation == 'create':
-            return team_members_handler.create_team_member(connection, body)
+            return team_members_handler.create_team_member(connection, body, user_id)
         elif operation == 'update':
-            result = team_members_handler.update_team_member(connection, resource_id, body)
+            result = team_members_handler.update_team_member(connection, resource_id, body, user_id)
             if result is None:
                 raise ValueError(f"Team member with id {resource_id} not found")
             return result
         elif operation == 'delete':
-            success = team_members_handler.delete_team_member(connection, resource_id)
+            success = team_members_handler.delete_team_member(connection, resource_id, user_id)
             if not success:
                 raise ValueError(f"Team member with id {resource_id} not found")
             return None
@@ -275,9 +276,9 @@ def execute_operation(connection, route_info, operation: str) -> Any:
     # Route to security profile handler (SQL Injection demo)
     elif resource_type == 'security-profile':
         # Support path parameter, query parameter, or POST body for user ID
-        user_id = resource_id or query_params.get('userId') or body.get('user_id')
-        if user_id:
-            return security_handler.get_security_profile(connection, str(user_id))
+        security_user_id = resource_id or query_params.get('userId') or body.get('user_id')
+        if security_user_id:
+            return security_handler.get_security_profile(connection, str(security_user_id))
         else:
             return security_handler.list_security_profiles(connection)
     
