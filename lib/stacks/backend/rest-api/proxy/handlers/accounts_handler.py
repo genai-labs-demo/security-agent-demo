@@ -331,6 +331,13 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
             logger.info(f"Account not found for update: {account_id}")
             return None
         
+        # Synchronize denormalized account_name in opportunities if name changed
+        if 'name' in db_data:
+            cursor.execute(
+                "UPDATE opportunities SET account_name = %s WHERE account_id = %s",
+                (db_data['name'], account_id)
+            )
+        
         connection.commit()
         cursor.close()
         
