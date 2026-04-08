@@ -145,7 +145,9 @@ def initialize_schema(conn):
         total_opportunity_value NUMERIC(15, 2),
         last_activity_date TIMESTAMP WITH TIME ZONE,
         created_date TIMESTAMP WITH TIME ZONE,
-        logo_url TEXT
+        logo_url TEXT,
+        created_by VARCHAR(255),
+        modified_by VARCHAR(255)
     );
 
     CREATE TABLE IF NOT EXISTS opportunities (
@@ -164,7 +166,9 @@ def initialize_schema(conn):
         owner_name VARCHAR(255),
         probability INTEGER,
         created_date TIMESTAMP WITH TIME ZONE,
-        last_modified_date TIMESTAMP WITH TIME ZONE
+        last_modified_date TIMESTAMP WITH TIME ZONE,
+        created_by VARCHAR(255),
+        modified_by VARCHAR(255)
     );
 
     CREATE INDEX IF NOT EXISTS idx_opportunities_owner_id ON opportunities(owner_id);
@@ -200,6 +204,12 @@ def initialize_schema(conn):
     ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE;
     CREATE INDEX IF NOT EXISTS idx_accounts_deleted_at ON accounts(deleted_at);
     CREATE INDEX IF NOT EXISTS idx_opportunities_deleted_at ON opportunities(deleted_at);
+
+    -- Audit trail support: add user tracking columns
+    ALTER TABLE accounts ADD COLUMN IF NOT EXISTS created_by VARCHAR(255);
+    ALTER TABLE accounts ADD COLUMN IF NOT EXISTS modified_by VARCHAR(255);
+    ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS created_by VARCHAR(255);
+    ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS modified_by VARCHAR(255);
     """
     
     cursor = conn.cursor()
@@ -295,7 +305,7 @@ def seed_data(conn):
         created_date = now - timedelta(days=created_days_ago)
         activity_days_ago = random.randint(0, 60)
         last_activity_date = now - timedelta(days=activity_days_ago)
-        account_with_dates = base_account + (last_activity_date, created_date, None)
+        account_with_dates = base_account + (last_activity_date, created_date, None, 'system', 'system')
         accounts.append(account_with_dates)
     
     for account in accounts:
@@ -304,8 +314,8 @@ def seed_data(conn):
                (id, name, domain, industry_id, annual_revenue, employee_count, 
                 owner_id, owner_name, health_status, health_score, opportunity_count, 
                 total_opportunity_value, last_activity_date, created_date, logo_url)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-               ON CONFLICT DO NOTHING""",
+                total_opportunity_value, last_activity_date, created_date, logo_url, created_by, modified_by)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             account
         )
     
@@ -395,6 +405,8 @@ def seed_data(conn):
                 new_opp[11],  # probability
                 dates['created_date'],  # created_date
                 dates['last_modified_date'],  # last_modified_date
+                'system',  # created_by
+                'system',  # modified_by
             )
             opportunities.append(opp_tuple)
     
@@ -408,8 +420,8 @@ def seed_data(conn):
             """INSERT INTO opportunities 
                (id, name, account_id, account_name, amount, close_date, stage, 
                 next_step, recent_activity, recent_activity_date, forecast_category, 
-                owner_id, owner_name, probability, created_date, last_modified_date)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                owner_id, owner_name, probability, created_date, last_modified_date, created_by, modified_by)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             batch,
             page_size=500
         )

@@ -26,6 +26,7 @@ def _map_opportunity_to_api_format(db_record: Dict[str, Any]) -> Dict[str, Any]:
     """
     return {
         'id': db_record.get('id'),
+        'createdBy': db_record.get('created_by'), 'modifiedBy': db_record.get('modified_by'),
         'name': db_record.get('name'),
         'accountId': db_record.get('account_id'),
         'accountName': db_record.get('account_name'),
@@ -59,6 +60,7 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
     # Map fields if they exist in the input
     field_mapping = {
         'name': 'name',
+        'createdBy': 'created_by', 'modifiedBy': 'modified_by',
         'accountId': 'account_id',
         'accountName': 'account_name',
         'amount': 'amount',
@@ -199,11 +201,11 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
         # Build the search query
         query = f"""
             SELECT 
-                o.id, o.name, o.account_id, o.account_name, o.amount, o.close_date,
+                o.id, o.created_by, o.modified_by, o.name, o.account_id, o.account_name, o.amount, o.close_date,
                 o.stage, o.next_step, o.recent_activity, o.recent_activity_date,
                 o.forecast_category, o.owner_id, o.owner_name, o.probability,
                 o.created_date, o.last_modified_date,
-                -- Calculate relevance score based on keyword matches
+                -- Relevance scoring for search results
                 (
                     {relevance_sql}
                 ) as relevance_score,
@@ -320,7 +322,7 @@ def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dic
         
         query = """
             SELECT 
-                id, name, account_id, account_name, amount, close_date,
+            SELECT 
                 stage, next_step, recent_activity, recent_activity_date,
                 forecast_category, owner_id, owner_name, probability,
                 created_date, last_modified_date
@@ -332,6 +334,7 @@ def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dic
         if account_id:
             query += " AND account_id = %s"
             params.append(account_id)
+        query = query.replace('last_modified_date\n', 'last_modified_date, created_by, modified_by\n')
         
         query += " ORDER BY close_date DESC LIMIT 1000"
         
@@ -374,7 +377,7 @@ def get_opportunity(connection, opportunity_id: str) -> Optional[Dict[str, Any]]
         
         query = """
             SELECT 
-                id, name, account_id, account_name, amount, close_date,
+            SELECT 
                 stage, next_step, recent_activity, recent_activity_date,
                 forecast_category, owner_id, owner_name, probability,
                 created_date, last_modified_date
@@ -383,6 +386,7 @@ def get_opportunity(connection, opportunity_id: str) -> Optional[Dict[str, Any]]
         """
         
         cursor.execute(query, (opportunity_id,))
+        query = query.replace('last_modified_date\n', 'last_modified_date, created_by, modified_by\n')
         record = cursor.fetchone()
         cursor.close()
         
@@ -404,7 +408,7 @@ def get_opportunity(connection, opportunity_id: str) -> Optional[Dict[str, Any]]
         raise
 
 
-def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
+def create_opportunity(connection, data: Dict[str, Any], user_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
     Insert a new opportunity record into the database.
     Validates that account_id and owner_id reference existing records.
@@ -412,6 +416,7 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     Args:
         connection: Database connection object
         data: Opportunity data in API format (camelCase)
+        user_context: Optional dict with user email, sub, or username for audit logging
     
     Returns:
         Created opportunity dictionary in API format
@@ -442,6 +447,14 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         # Set last_modified_date if not provided
         if 'last_modified_date' not in db_data:
             db_data['last_modified_date'] = datetime.utcnow()
+        
+        # Record authenticated user for audit trail (CWE-778 mitigation)
+        if user_context:
+            uid = user_context.get('email') or user_context.get('sub') or user_context.get('username')
+            if uid:
+                if 'created_by' not in db_data: db_data['created_by'] = uid
+                if 'modified_by' not in db_data: db_data['modified_by'] = uid
+                logger.info(f"Audit: create opportunity by {uid}")
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
@@ -474,6 +487,7 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
                 created_date, last_modified_date
         """
         
+        query = query.replace('last_modified_date\n', 'last_modified_date, created_by, modified_by\n')
         cursor.execute(query, values)
         record = cursor.fetchone()
         connection.commit()
@@ -511,7 +525,7 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         raise
 
 
-def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any], user_context: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
     """
     Update an existing opportunity record in the database.
     
@@ -519,6 +533,7 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         connection: Database connection object
         opportunity_id: Opportunity ID to update
         data: Partial opportunity data in API format (camelCase)
+        user_context: Optional dict with user email, sub, or username for audit logging
     
     Returns:
         Updated opportunity dictionary in API format, or None if not found
@@ -541,6 +556,13 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         
         # Update last_modified_date
         db_data['last_modified_date'] = datetime.utcnow()
+        
+        # Record authenticated user for audit trail (CWE-778 mitigation)
+        if user_context:
+            uid = user_context.get('email') or user_context.get('sub') or user_context.get('username')
+            if uid:
+                db_data['modified_by'] = uid
+                logger.info(f"Audit: update opportunity {opportunity_id} by {uid}")
         
         if not db_data or (len(db_data) == 1 and 'last_modified_date' in db_data):
             logger.warning("No fields to update")
@@ -579,6 +601,7 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
                 created_date, last_modified_date
         """
         
+        query = query.replace('last_modified_date\n', 'last_modified_date, created_by, modified_by\n')
         cursor.execute(query, values)
         record = cursor.fetchone()
         

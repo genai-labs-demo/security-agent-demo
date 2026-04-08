@@ -27,6 +27,7 @@ def _map_account_to_api_format(db_record: Dict[str, Any]) -> Dict[str, Any]:
     return {
         'id': db_record.get('id'),
         'name': db_record.get('name'),
+        'createdBy': db_record.get('created_by'), 'modifiedBy': db_record.get('modified_by'),
         'domain': db_record.get('domain'),
         'industry': db_record.get('industry_id'),
         'annualRevenue': float(db_record.get('annual_revenue')) if db_record.get('annual_revenue') is not None else None,
@@ -62,6 +63,7 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
     field_mapping = {
         'name': 'name',
         'domain': 'domain',
+        'createdBy': 'created_by', 'modifiedBy': 'modified_by',
         'industry': 'industry_id',
         'annualRevenue': 'annual_revenue',
         'employeeCount': 'employee_count',
@@ -99,11 +101,11 @@ def list_accounts(connection) -> List[Dict[str, Any]]:
         
         query = """
             SELECT 
-                id, name, domain, industry_id, annual_revenue, employee_count,
+            SELECT 
                 owner_id, owner_name, health_status, health_score,
                 opportunity_count, total_opportunity_value,
                 last_activity_date, created_date, logo_url
-            FROM accounts
+                last_activity_date, created_date, logo_url, created_by, modified_by
             WHERE deleted_at IS NULL
             ORDER BY name ASC
         """
@@ -151,11 +153,11 @@ def get_account(connection, account_id: str) -> Optional[Dict[str, Any]]:
         
         query = """
             SELECT 
-                id, name, domain, industry_id, annual_revenue, employee_count,
+            SELECT 
                 owner_id, owner_name, health_status, health_score,
                 opportunity_count, total_opportunity_value,
                 last_activity_date, created_date, logo_url
-            FROM accounts
+                last_activity_date, created_date, logo_url, created_by, modified_by
             WHERE id = %s AND deleted_at IS NULL
         """
         
@@ -182,13 +184,14 @@ def get_account(connection, account_id: str) -> Optional[Dict[str, Any]]:
 
 
 def create_account(connection, data: Dict[str, Any]) -> Dict[str, Any]:
-    """
+def create_account(connection, data: Dict[str, Any], user_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     Insert a new account record into the database.
     
     Args:
         connection: Database connection object
         data: Account data in API format (camelCase)
     
+        user_context: Optional dict with user email, sub, or username for audit logging
     Returns:
         Created account dictionary in API format
     
@@ -221,6 +224,14 @@ def create_account(connection, data: Dict[str, Any]) -> Dict[str, Any]:
             db_data['last_activity_date'] = datetime.utcnow()
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
+        # Record authenticated user for audit trail (CWE-778 mitigation)
+        if user_context:
+            uid = user_context.get('email') or user_context.get('sub') or user_context.get('username')
+            if uid:
+                if 'created_by' not in db_data: db_data['created_by'] = uid
+                if 'modified_by' not in db_data: db_data['modified_by'] = uid
+                logger.info(f"Audit: create account by {uid}")
+        
         
         # Build INSERT query dynamically based on provided fields
         columns = list(db_data.keys())
@@ -234,7 +245,7 @@ def create_account(connection, data: Dict[str, Any]) -> Dict[str, Any]:
                 id, name, domain, industry_id, annual_revenue, employee_count,
                 owner_id, owner_name, health_status, health_score,
                 opportunity_count, total_opportunity_value,
-                last_activity_date, created_date, logo_url
+                last_activity_date, created_date, logo_url, created_by, modified_by
         """
         
         cursor.execute(query, values)
@@ -272,7 +283,7 @@ def create_account(connection, data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """
+def update_account(connection, account_id: str, data: Dict[str, Any], user_context: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
     Update an existing account record in the database.
     
     Args:
@@ -280,6 +291,7 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
         account_id: Account ID to update
         data: Partial account data in API format (camelCase)
     
+        user_context: Optional dict with user email, sub, or username for audit logging
     Returns:
         Updated account dictionary in API format, or None if not found
     
@@ -301,6 +313,16 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
         
         if not db_data:
             logger.warning("No fields to update")
+            logger.warning("No fields to update")
+        
+        # Record authenticated user for audit trail (CWE-778 mitigation)
+        if user_context:
+            uid = user_context.get('email') or user_context.get('sub') or user_context.get('username')
+            if uid:
+                db_data['modified_by'] = uid
+                logger.info(f"Audit: update account {account_id} by {uid}")
+        
+        if not db_data:
             # Return current account
             return get_account(connection, account_id)
         
@@ -319,7 +341,7 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
                 id, name, domain, industry_id, annual_revenue, employee_count,
                 owner_id, owner_name, health_status, health_score,
                 opportunity_count, total_opportunity_value,
-                last_activity_date, created_date, logo_url
+                last_activity_date, created_date, logo_url, created_by, modified_by
         """
         
         cursor.execute(query, values)

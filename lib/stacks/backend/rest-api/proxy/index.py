@@ -11,7 +11,7 @@ Requirements: 1.1, 1.2, 2.1, 3.1, 4.1, 5.1, 6.1, 7.1, 8.1, 9.1, 10.1
 import json
 import logging
 import time
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import boto3
 
 # Import handler modules
@@ -36,6 +36,29 @@ cloudwatch = boto3.client('cloudwatch')
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+
+def extract_user_context(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    Extract authenticated user information from API Gateway requestContext.
+    User identity comes from Cognito User Pool Authorizer claims.
+    
+    Args:
+        event: API Gateway event dictionary
+    
+    Returns:
+        Dictionary with email, sub, and username, or None if not available
+    """
+    try:
+        request_context = event.get('requestContext', {})
+        authorizer = request_context.get('authorizer', {})
+        claims = authorizer.get('claims', {})
+        if claims:
+            return {'email': claims.get('email'), 'sub': claims.get('sub'), 'username': claims.get('cognito:username')}
+        return None
+    except Exception as e:
+        logger.warning(f"Failed to extract user context: {e}")
+        return None
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -63,6 +86,11 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     request_id = context.aws_request_id if context else "unknown"
     logger.info(f"Processing request {request_id}: {event.get('httpMethod')} {event.get('path')}")
     
+    # Extract authenticated user context for audit trail (CWE-778 mitigation)
+    user_context = extract_user_context(event)
+    if user_context and user_context.get('email'):
+        logger.info(f"Authenticated user: {user_context.get('email')}")
+    
     try:
         # Handle CORS preflight requests
         if event.get('httpMethod') == 'OPTIONS':
@@ -85,7 +113,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             start_time = time.time()
             
             # Route to appropriate handler and execute operation
-            result = execute_operation(connection, route_info, operation)
+            result = execute_operation(connection, route_info, operation, user_context)
             
             # Calculate and publish search latency metrics
             elapsed_time = (time.time() - start_time) * 1000  # Convert to milliseconds
@@ -163,7 +191,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
 
 def execute_operation(connection, route_info, operation: str) -> Any:
-    """
+def execute_operation(connection, route_info, operation: str, user_context: Optional[Dict[str, Any]] = None) -> Any:
     Execute the appropriate CRUD operation based on route information.
     
     Args:
@@ -171,6 +199,7 @@ def execute_operation(connection, route_info, operation: str) -> Any:
         route_info: Parsed route information
         operation: Operation type ('list', 'get', 'create', 'update', 'delete')
         
+        user_context: Optional authenticated user information for audit trail
     Returns:
         Operation result (record, list of records, or boolean)
         
@@ -195,9 +224,9 @@ def execute_operation(connection, route_info, operation: str) -> Any:
             return result
         elif operation == 'create':
             return accounts_handler.create_account(connection, body)
-        elif operation == 'update':
+            return accounts_handler.create_account(connection, body, user_context)
             result = accounts_handler.update_account(connection, resource_id, body)
-            if result is None:
+            result = accounts_handler.update_account(connection, resource_id, body, user_context)
                 raise ValueError(f"Account with id {resource_id} not found")
             return result
         elif operation == 'delete':
@@ -227,9 +256,9 @@ def execute_operation(connection, route_info, operation: str) -> Any:
             return result
         elif operation == 'create':
             return opportunities_handler.create_opportunity(connection, body)
-        elif operation == 'update':
+            return opportunities_handler.create_opportunity(connection, body, user_context)
             result = opportunities_handler.update_opportunity(connection, resource_id, body)
-            if result is None:
+            result = opportunities_handler.update_opportunity(connection, resource_id, body, user_context)
                 raise ValueError(f"Opportunity with id {resource_id} not found")
             return result
         elif operation == 'delete':
