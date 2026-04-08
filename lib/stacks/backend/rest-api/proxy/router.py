@@ -232,6 +232,51 @@ def _parse_request_body(event: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError(f"Invalid JSON in request body: {str(e)}")
 
 
+def get_authenticated_user_id(event: Dict[str, Any]) -> Optional[str]:
+    """
+    Extract authenticated user ID from API Gateway authorizer context.
+    
+    When using Cognito User Pool authorizer, the authenticated user's claims
+    are available in the requestContext.authorizer.claims object.
+    
+    This function extracts the user's unique identifier (Cognito 'sub' claim)
+    to ensure comment authorship is derived from authenticated session rather
+    than client-supplied data.
+    
+    Args:
+        event: API Gateway event dictionary
+    
+    Returns:
+        User ID (Cognito sub claim) if authenticated, None otherwise
+    
+    Example authorizer context:
+        requestContext.authorizer.claims = {
+            'sub': '12345678-1234-1234-1234-123456789012',
+            'email': 'user@example.com',
+            'cognito:username': 'john_doe'
+        }
+    """
+    try:
+        # Extract authorizer context from API Gateway event
+        request_context = event.get('requestContext', {})
+        authorizer = request_context.get('authorizer', {})
+        claims = authorizer.get('claims', {})
+        
+        # Get user ID from Cognito 'sub' claim (unique user identifier)
+        user_id = claims.get('sub')
+        
+        if user_id:
+            logger.info(f"Authenticated user: {user_id}")
+            return user_id
+        else:
+            logger.warning("No authenticated user found in request context")
+            return None
+            
+    except Exception as e:
+        logger.error(f"Error extracting authenticated user ID: {str(e)}")
+        return None
+
+
 def route_request(route_info: RouteInfo) -> str:
     """
     Determine which entity handler should process the request.

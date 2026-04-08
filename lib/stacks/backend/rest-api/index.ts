@@ -159,9 +159,13 @@ export class RestApi extends Construct {
         const secProfileId = secProfile.addResource("{id}");
         secProfileId.addMethod("GET", lambdaInteg, noAuth);
 
+        // SECURITY FIX: Require authentication for POST /security-comments to prevent user impersonation
+        // GET remains unauthenticated to allow reading comments for demo purposes
         const secComments = restApi.root.addResource("security-comments");
         secComments.addMethod("GET", lambdaInteg, noAuth);
-        secComments.addMethod("POST", lambdaInteg, noAuth);
+        // POST method uses default authorization (Cognito) - no noAuth override
+        // This enforces authentication and prevents anonymous comment creation with arbitrary user_id
+        secComments.addMethod("POST", lambdaInteg);
 
         const secSearch = restApi.root.addResource("security-search");
         secSearch.addMethod("GET", lambdaInteg, noAuth);

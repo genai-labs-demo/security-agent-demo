@@ -171,17 +171,23 @@ def list_security_profiles(connection):
 # 3. Stored XSS + 7. Mass Assignment — Comments endpoints
 # ============================================================
 
-def create_security_comment(connection, body):
+def create_security_comment(connection, body, authenticated_user_id):
     """
     POST /security-comments
-    VULNERABILITY 3: Stored XSS — stores unsanitized user input.
-    VULNERABILITY 7: Mass Assignment — accepts author_name and role from body.
+    
+    SECURITY FIX: Now requires authenticated_user_id from Cognito session to prevent
+    user impersonation. The user_id is no longer accepted from the request body.
+    
+    Note: Still contains intentional vulnerabilities for educational purposes:
+    - VULNERABILITY 3: Stored XSS — stores unsanitized user input
+    - VULNERABILITY 7: Mass Assignment — accepts author_name and role from body
     """
-    user_id = body.get("user_id")
+    # SECURITY FIX: Use authenticated user_id from Cognito session, not client input
+    user_id = authenticated_user_id
     content = body.get("content")
 
-    if not user_id or not content:
-        return {"success": False, "error": "user_id and content are required"}
+    if not content:
+        return {"success": False, "error": "content is required"}
 
     # VULNERABILITY: Mass Assignment — accept author_name and role from request body
     author_name = body.get("author_name")
