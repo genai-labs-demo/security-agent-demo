@@ -9,6 +9,7 @@ import {
     FunctionEventType,
     OriginRequestPolicy,
     SecurityPolicyProtocol,
+    ResponseHeadersPolicy,
     SSLMethod,
     ViewerProtocolPolicy,
 } from "aws-cdk-lib/aws-cloudfront";
@@ -34,6 +35,7 @@ const HOSTED_ZONE_NAME = "YOUR_HOSTED_ZONE_NAME"; // e.g. "example.com"
 export class Frontend extends CommonStack {
     public readonly websiteBucket: Bucket;
     public readonly distribution: Distribution;
+    public readonly securityHeadersPolicy: ResponseHeadersPolicy;
     public readonly urls: string[];
 
     constructor(scope: Construct, id: string, props?: StackProps) {
@@ -148,6 +150,58 @@ export class Frontend extends CommonStack {
             validation: CertificateValidation.fromDns(hostedZone),
         });
 
+        // Create a Response Headers Policy with security headers
+        // This addresses the missing security headers finding from testssl.sh scan
+        const securityHeadersPolicy = new ResponseHeadersPolicy(this, "securityHeadersPolicy", {
+            responseHeadersPolicyName: "SecurityHeaders",
+            comment: "Security headers to protect against common web vulnerabilities",
+            securityHeadersBehavior: {
+                contentSecurityPolicy: {
+                    contentSecurityPolicy: [
+                        "default-src 'self'",
+                        "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+                        "style-src 'self' 'unsafe-inline'",
+                        "img-src 'self' data: https:",
+                        "font-src 'self' data:",
+                        "connect-src 'self'",
+                        "frame-ancestors 'none'",
+                        "base-uri 'self'",
+                        "form-action 'self'",
+                    ].join("; "),
+                    override: true,
+                },
+                contentTypeOptions: {
+                    override: true,
+                },
+                frameOptions: {
+                    frameOption: "DENY",
+                    override: true,
+                },
+                referrerPolicy: {
+                    referrerPolicy: "strict-origin-when-cross-origin",
+                    override: true,
+                },
+                strictTransportSecurity: {
+                    accessControlMaxAge: { seconds: 31536000 },
+                    includeSubdomains: true,
+                    preload: true,
+                    override: true,
+                },
+                xssProtection: {
+                    protection: true,
+                    modeBlock: true,
+                    override: true,
+                },
+            },
+        });
+
+        NagSuppressions.addResourceSuppressions(securityHeadersPolicy, [
+            {
+                id: "AwsSolutions-CFR2",
+                reason: "WAF is already configured at the distribution level.",
+            },
+        ]);
+
         const distribution = new Distribution(this, "distribution", {
             defaultRootObject: "index.html",
             domainNames: [CUSTOM_DOMAIN],
@@ -157,6 +211,7 @@ export class Frontend extends CommonStack {
                 viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                 allowedMethods: AllowedMethods.ALLOW_ALL,
                 originRequestPolicy: OriginRequestPolicy.CORS_S3_ORIGIN,
+                responseHeadersPolicy: securityHeadersPolicy,
             },
             additionalBehaviors: {
                 "/assets/*": {
@@ -164,6 +219,7 @@ export class Frontend extends CommonStack {
                     viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                     allowedMethods: AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
                     originRequestPolicy: OriginRequestPolicy.CORS_S3_ORIGIN,
+                    responseHeadersPolicy: securityHeadersPolicy,
                 },
             },
             errorResponses: [
@@ -215,6 +271,7 @@ export class Frontend extends CommonStack {
 
         this.websiteBucket = websiteBucket;
         this.distribution = distribution;
+        this.securityHeadersPolicy = securityHeadersPolicy;
         this.urls = [
             `https://${CUSTOM_DOMAIN}`,
             `https://${distribution.distributionDomainName}`,
@@ -243,6 +300,7 @@ function handler(event) {
         this.distribution.addBehavior("/api/*", new HttpOrigin(apiGatewayDomain), {
             viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
             allowedMethods: AllowedMethods.ALLOW_ALL,
+            responseHeadersPolicy: this.securityHeadersPolicy,
             cachePolicy: CachePolicy.CACHING_DISABLED,
             originRequestPolicy: OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
             functionAssociations: [{
