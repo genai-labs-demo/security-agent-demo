@@ -1,4 +1,565 @@
 """
+Opportunities handler with user-based authorization controls.
+Implements CWE-639 mitigation: ownership validation for all CRUD operations.
+"""
+
+import logging
+import uuid
+from typing import Dict, Any, List, Optional
+from datetime import datetime
+import psycopg2
+from psycopg2.extras import RealDictCursor
+
+# Import authorization module for ownership validation
+from ..authorization import validate_resource_ownership, AuthorizationError
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+
+def _map_opportunity_to_api_format(db_record: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert database snake_case to API camelCase format."""
+    return {
+        'id': db_record.get('id'),
+        'name': db_record.get('name'),
+        'accountId': db_record.get('account_id'),
+        'accountName': db_record.get('account_name'),
+        'amount': float(db_record.get('amount')) if db_record.get('amount') is not None else None,
+        'closeDate': db_record.get('close_date').isoformat() if db_record.get('close_date') else None,
+        'stage': db_record.get('stage'),
+        'nextStep': db_record.get('next_step'),
+        'recentActivity': db_record.get('recent_activity'),
+        'recentActivityDate': db_record.get('recent_activity_date').isoformat() if db_record.get('recent_activity_date') else None,
+        'forecastCategory': db_record.get('forecast_category'),
+        'ownerId': db_record.get('owner_id'),
+        'ownerName': db_record.get('owner_name'),
+        'probability': db_record.get('probability'),
+        'createdDate': db_record.get('created_date').isoformat() if db_record.get('created_date') else None,
+        'lastModifiedDate': db_record.get('last_modified_date').isoformat() if db_record.get('last_modified_date') else None
+    }
+
+
+def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert API camelCase to database snake_case format."""
+    db_data = {}
+    mapping = {
+        'name': 'name', 'accountId': 'account_id', 'accountName': 'account_name',
+        'amount': 'amount', 'closeDate': 'close_date', 'stage': 'stage',
+        'nextStep': 'next_step', 'recentActivity': 'recent_activity',
+        'recentActivityDate': 'recent_activity_date', 'forecastCategory': 'forecast_category',
+        'ownerId': 'owner_id', 'ownerName': 'owner_name', 'probability': 'probability',
+        'createdDate': 'created_date', 'lastModifiedDate': 'last_modified_date'
+    }
+    for api_key, db_key in mapping.items():
+        if api_key in api_data:
+            db_data[db_key] = api_data[api_key]
+    return db_data
+
+
+def search_opportunities(connection, search_query: str, account_id: Optional[str] = None, 
+                        auth_user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """
+    Full text search on opportunities with authorization filtering.
+    Only returns opportunities owned by the authenticated user.
+    
+    Args:
+        connection: Database connection
+        search_query: Search terms
+        account_id: Optional account filter
+        auth_user_id: Authenticated user for ownership filtering
+    
+    Returns:
+        List of matching opportunities owned by user
+    """
+    try:
+        if not search_query or not search_query.strip():
+            return []
+        
+        keywords = search_query.strip().split()
+        logger.info(f"Searching opportunities for user {auth_user_id}: {keywords}")
+        
+        cursor = connection.cursor(cursor_factory=RealDictCursor)
+        
+        # Build keyword search conditions
+        keyword_conditions = []
+        keyword_params = []
+        
+        for keyword in keywords:
+            condition = """
+                (o.name ILIKE %s OR 
+                 COALESCE(o.next_step, '') ILIKE %s OR 
+                 COALESCE(o.recent_activity, '') ILIKE %s OR
+                 a.name ILIKE %s OR
+                 COALESCE(tm.name, '') ILIKE %s OR
+                 COALESCE(tm.role, '') ILIKE %s)
+            """
+            keyword_conditions.append(condition)
+            for _ in range(6):
+                keyword_params.append(f'%{keyword}%')
+        
+        where_clause = " AND ".join(keyword_conditions)
+        
+        # Build relevance scoring
+        relevance_parts = []
+        match_count_parts = []
+        
+        for _ in keywords:
+            relevance_parts.append("""
+                    (CASE WHEN o.name ILIKE %s THEN 3 ELSE 0 END +
+                     CASE WHEN COALESCE(o.next_step, '') ILIKE %s THEN 2 ELSE 0 END +
+                     CASE WHEN COALESCE(o.recent_activity, '') ILIKE %s THEN 2 ELSE 0 END +
+                     CASE WHEN a.name ILIKE %s THEN 1 ELSE 0 END +
+                     CASE WHEN COALESCE(tm.name, '') ILIKE %s THEN 1 ELSE 0 END)
+                    """)
+            
+            match_count_parts.append("""
+                    (CASE WHEN o.name ILIKE %s THEN 1 ELSE 0 END +
+                     CASE WHEN COALESCE(o.next_step, '') ILIKE %s THEN 1 ELSE 0 END +
+                     CASE WHEN COALESCE(o.recent_activity, '') ILIKE %s THEN 1 ELSE 0 END +
+                     CASE WHEN a.name ILIKE %s THEN 1 ELSE 0 END +
+                     CASE WHEN COALESCE(tm.name, '') ILIKE %s THEN 1 ELSE 0 END +
+                     CASE WHEN COALESCE(tm.role, '') ILIKE %s THEN 1 ELSE 0 END)
+                    """)
+        
+        relevance_sql = " + ".join(relevance_parts)
+        match_count_sql = " + ".join(match_count_parts)
+        
+        query = f"""
+            SELECT 
+                o.id, o.name, o.account_id, o.account_name, o.amount, o.close_date,
+                o.stage, o.next_step, o.recent_activity, o.recent_activity_date,
+                o.forecast_category, o.owner_id, o.owner_name, o.probability,
+                o.created_date, o.last_modified_date,
+                ({relevance_sql}) as relevance_score,
+                ({match_count_sql}) as match_count
+            FROM opportunities o
+            JOIN accounts a ON o.account_id = a.id
+            LEFT JOIN team_members tm ON o.owner_id = tm.id
+            WHERE {where_clause}
+        """
+        
+        # AUTHORIZATION: Filter by owner
+        if auth_user_id:
+            query += " AND o.owner_id = %s"
+            keyword_params.append(auth_user_id)
+        
+        if account_id:
+            query += " AND o.account_id = %s"
+            keyword_params.append(account_id)
+        
+        query += """
+            ORDER BY relevance_score DESC, match_count DESC, o.amount DESC
+            LIMIT 100
+        """
+        
+        all_params = keyword_params.copy()
+        
+        # Add scoring parameters
+        for keyword in keywords:
+            for _ in range(5):
+                all_params.append(f'%{keyword}%')
+        
+        for keyword in keywords:
+            for _ in range(6):
+                all_params.append(f'%{keyword}%')
+        
+        cursor.execute(query, all_params)
+        records = cursor.fetchall()
+        cursor.close()
+        
+        opportunities = []
+        for record in records:
+            opp = _map_opportunity_to_api_format(dict(record))
+            opp['relevanceScore'] = record.get('relevance_score', 0)
+            opp['matchCount'] = record.get('match_count', 0)
+            opportunities.append(opp)
+        
+        logger.info(f"Found {len(opportunities)} opportunities for user {auth_user_id}")
+        return opportunities
+        
+    except psycopg2.Error as e:
+        logger.error(f"Database error in search: {str(e)}")
+        raise Exception(f"Search failed: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error in search: {str(e)}")
+        raise
+
+
+def list_opportunities(connection, account_id: Optional[str] = None, 
+                      auth_user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """
+    List opportunities with authorization filtering.
+    Only returns opportunities owned by the authenticated user.
+    
+    Args:
+        connection: Database connection
+        account_id: Optional account filter
+        auth_user_id: Authenticated user for ownership filtering
+    
+    Returns:
+        List of opportunities owned by user
+    """
+    try:
+        logger.info(f"Listing opportunities for user {auth_user_id}")
+        
+        cursor = connection.cursor(cursor_factory=RealDictCursor)
+        
+        query = """
+            SELECT 
+                id, name, account_id, account_name, amount, close_date,
+                stage, next_step, recent_activity, recent_activity_date,
+                forecast_category, owner_id, owner_name, probability,
+                created_date, last_modified_date
+            FROM opportunities
+        """
+        
+        params = []
+        conditions = []
+        
+        # AUTHORIZATION: Filter by owner
+        if auth_user_id:
+            conditions.append("owner_id = %s")
+            params.append(auth_user_id)
+        
+        if account_id:
+            conditions.append("account_id = %s")
+            params.append(account_id)
+        
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+        
+        query += " ORDER BY close_date DESC LIMIT 1000"
+        
+        cursor.execute(query, params)
+        records = cursor.fetchall()
+        cursor.close()
+        
+        opportunities = [_map_opportunity_to_api_format(dict(r)) for r in records]
+        
+        logger.info(f"Retrieved {len(opportunities)} opportunities for user {auth_user_id}")
+        return opportunities
+        
+    except psycopg2.Error as e:
+        logger.error(f"Database error listing: {str(e)}")
+        raise Exception(f"List failed: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error listing: {str(e)}")
+        raise
+
+
+def get_opportunity(connection, opportunity_id: str, 
+                   auth_user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """
+    Get single opportunity with ownership validation.
+    
+    Args:
+        connection: Database connection
+        opportunity_id: Opportunity ID
+        auth_user_id: Authenticated user for ownership validation
+    
+    Returns:
+        Opportunity dict if owned by user, None if not found
+    
+    Raises:
+        AuthorizationError: If user doesn't own the opportunity
+    """
+    try:
+        logger.info(f"Getting opportunity {opportunity_id} for user {auth_user_id}")
+        
+        cursor = connection.cursor(cursor_factory=RealDictCursor)
+        
+        query = """
+            SELECT 
+                id, name, account_id, account_name, amount, close_date,
+                stage, next_step, recent_activity, recent_activity_date,
+                forecast_category, owner_id, owner_name, probability,
+                created_date, last_modified_date
+            FROM opportunities
+            WHERE id = %s
+        """
+        
+        cursor.execute(query, (opportunity_id,))
+        record = cursor.fetchone()
+        cursor.close()
+        
+        if not record:
+            logger.info(f"Opportunity not found: {opportunity_id}")
+            return None
+        
+        opportunity = _map_opportunity_to_api_format(dict(record))
+        
+        # AUTHORIZATION: Validate ownership
+        if auth_user_id:
+            validate_resource_ownership(opportunity, auth_user_id, 'opportunity', opportunity_id)
+        
+        logger.info(f"Retrieved opportunity {opportunity_id}")
+        return opportunity
+        
+    except AuthorizationError:
+        raise
+    except psycopg2.Error as e:
+        logger.error(f"Database error getting {opportunity_id}: {str(e)}")
+        raise Exception(f"Get failed: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error getting {opportunity_id}: {str(e)}")
+        raise
+
+
+def create_opportunity(connection, data: Dict[str, Any], 
+                      auth_user_id: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Create opportunity with automatic owner assignment.
+    
+    Args:
+        connection: Database connection
+        data: Opportunity data (camelCase)
+        auth_user_id: Authenticated user (will be set as owner)
+    
+    Returns:
+        Created opportunity dict
+    """
+    try:
+        logger.info(f"Creating opportunity for user {auth_user_id}: {data.get('name')}")
+        
+        db_data = _map_api_to_db_format(data)
+        
+        # AUTHORIZATION: Set owner to authenticated user
+        if auth_user_id:
+            db_data['owner_id'] = auth_user_id
+            logger.info(f"Setting owner_id to authenticated user: {auth_user_id}")
+        
+        if 'id' not in data:
+            db_data['id'] = str(uuid.uuid4())
+        else:
+            db_data['id'] = data['id']
+        
+        if 'created_date' not in db_data:
+            db_data['created_date'] = datetime.utcnow()
+        
+        if 'last_modified_date' not in db_data:
+            db_data['last_modified_date'] = datetime.utcnow()
+        
+        cursor = connection.cursor(cursor_factory=RealDictCursor)
+        
+        # Validate references
+        if 'account_id' in db_data and db_data['account_id']:
+            cursor.execute("SELECT id FROM accounts WHERE id = %s", (db_data['account_id'],))
+            if not cursor.fetchone():
+                cursor.close()
+                raise Exception("Invalid account ID")
+        
+        if 'owner_id' in db_data and db_data['owner_id']:
+            cursor.execute("SELECT id FROM team_members WHERE id = %s", (db_data['owner_id'],))
+            if not cursor.fetchone():
+                cursor.close()
+                raise Exception("Invalid owner ID")
+        
+        columns = list(db_data.keys())
+        placeholders = ['%s'] * len(columns)
+        values = [db_data[col] for col in columns]
+        
+        query = f"""
+            INSERT INTO opportunities ({', '.join(columns)})
+            VALUES ({', '.join(placeholders)})
+            RETURNING 
+                id, name, account_id, account_name, amount, close_date,
+                stage, next_step, recent_activity, recent_activity_date,
+                forecast_category, owner_id, owner_name, probability,
+                created_date, last_modified_date
+        """
+        
+        cursor.execute(query, values)
+        record = cursor.fetchone()
+        connection.commit()
+        cursor.close()
+        
+        opportunity = _map_opportunity_to_api_format(dict(record))
+        
+        logger.info(f"Created opportunity {opportunity['id']}")
+        return opportunity
+        
+    except psycopg2.IntegrityError as e:
+        connection.rollback()
+        logger.error(f"Integrity error creating: {str(e)}")
+        if 'foreign key' in str(e).lower():
+            if 'account_id' in str(e).lower():
+                raise Exception("Invalid account ID")
+            elif 'owner_id' in str(e).lower():
+                raise Exception("Invalid owner ID")
+        raise Exception("Constraint violation")
+    except psycopg2.Error as e:
+        connection.rollback()
+        logger.error(f"Database error creating: {str(e)}")
+        raise Exception(f"Create failed: {str(e)}")
+    except Exception as e:
+        connection.rollback()
+        if "Invalid account ID" in str(e) or "Invalid owner ID" in str(e):
+            raise
+        logger.error(f"Unexpected error creating: {str(e)}")
+        raise
+
+
+def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any], 
+                      auth_user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """
+    Update opportunity with ownership validation.
+    Blocks modification of ownerId field.
+    
+    Args:
+        connection: Database connection
+        opportunity_id: Opportunity ID
+        data: Update data (camelCase)
+        auth_user_id: Authenticated user for ownership validation
+    
+    Returns:
+        Updated opportunity or None if not found
+    
+    Raises:
+        AuthorizationError: If user doesn't own the opportunity
+    """
+    try:
+        logger.info(f"Updating opportunity {opportunity_id} for user {auth_user_id}")
+        
+        # AUTHORIZATION: Verify ownership first
+        if auth_user_id:
+            existing = get_opportunity(connection, opportunity_id, auth_user_id)
+            if not existing:
+                return None
+        
+        # AUTHORIZATION: Block ownerId modification
+        if 'ownerId' in data:
+            logger.warning(f"Blocked ownerId modification attempt on {opportunity_id}")
+            data = {k: v for k, v in data.items() if k != 'ownerId'}
+        
+        db_data = _map_api_to_db_format(data)
+        db_data.pop('id', None)
+        db_data['last_modified_date'] = datetime.utcnow()
+        
+        if not db_data or (len(db_data) == 1 and 'last_modified_date' in db_data):
+            logger.warning("No fields to update")
+            return get_opportunity(connection, opportunity_id, auth_user_id)
+        
+        cursor = connection.cursor(cursor_factory=RealDictCursor)
+        
+        # Validate references if being updated
+        if 'account_id' in db_data and db_data['account_id']:
+            cursor.execute("SELECT id FROM accounts WHERE id = %s", (db_data['account_id'],))
+            if not cursor.fetchone():
+                cursor.close()
+                raise Exception("Invalid account ID")
+        
+        if 'owner_id' in db_data and db_data['owner_id']:
+            cursor.execute("SELECT id FROM team_members WHERE id = %s", (db_data['owner_id'],))
+            if not cursor.fetchone():
+                cursor.close()
+                raise Exception("Invalid owner ID")
+        
+        set_clauses = [f"{col} = %s" for col in db_data.keys()]
+        values = list(db_data.values())
+        values.append(opportunity_id)
+        
+        query = f"""
+            UPDATE opportunities
+            SET {', '.join(set_clauses)}
+            WHERE id = %s
+            RETURNING 
+                id, name, account_id, account_name, amount, close_date,
+                stage, next_step, recent_activity, recent_activity_date,
+                forecast_category, owner_id, owner_name, probability,
+                created_date, last_modified_date
+        """
+        
+        cursor.execute(query, values)
+        record = cursor.fetchone()
+        
+        if not record:
+            connection.rollback()
+            cursor.close()
+            logger.info(f"Opportunity not found for update: {opportunity_id}")
+            return None
+        
+        connection.commit()
+        cursor.close()
+        
+        opportunity = _map_opportunity_to_api_format(dict(record))
+        
+        logger.info(f"Updated opportunity {opportunity_id}")
+        return opportunity
+        
+    except AuthorizationError:
+        raise
+    except psycopg2.IntegrityError as e:
+        connection.rollback()
+        logger.error(f"Integrity error updating {opportunity_id}: {str(e)}")
+        if 'foreign key' in str(e).lower():
+            if 'account_id' in str(e).lower():
+                raise Exception("Invalid account ID")
+            elif 'owner_id' in str(e).lower():
+                raise Exception("Invalid owner ID")
+        raise Exception("Constraint violation")
+    except psycopg2.Error as e:
+        connection.rollback()
+        logger.error(f"Database error updating {opportunity_id}: {str(e)}")
+        raise Exception(f"Update failed: {str(e)}")
+    except Exception as e:
+        connection.rollback()
+        if "Invalid account ID" in str(e) or "Invalid owner ID" in str(e):
+            raise
+        logger.error(f"Unexpected error updating {opportunity_id}: {str(e)}")
+        raise
+
+
+def delete_opportunity(connection, opportunity_id: str, 
+                      auth_user_id: Optional[str] = None) -> bool:
+    """
+    Delete opportunity with ownership validation.
+    
+    Args:
+        connection: Database connection
+        opportunity_id: Opportunity ID
+        auth_user_id: Authenticated user for ownership validation
+    
+    Returns:
+        True if deleted, False if not found
+    
+    Raises:
+        AuthorizationError: If user doesn't own the opportunity
+    """
+    try:
+        logger.info(f"Deleting opportunity {opportunity_id} for user {auth_user_id}")
+        
+        # AUTHORIZATION: Verify ownership first
+        if auth_user_id:
+            existing = get_opportunity(connection, opportunity_id, auth_user_id)
+            if not existing:
+                return False
+        
+        cursor = connection.cursor()
+        
+        cursor.execute("SELECT id FROM opportunities WHERE id = %s", (opportunity_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            logger.info(f"Opportunity not found for deletion: {opportunity_id}")
+            return False
+        
+        cursor.execute("DELETE FROM opportunities WHERE id = %s", (opportunity_id,))
+        connection.commit()
+        cursor.close()
+        
+        logger.info(f"Deleted opportunity {opportunity_id}")
+        return True
+        
+    except AuthorizationError:
+        raise
+    except psycopg2.Error as e:
+        connection.rollback()
+        logger.error(f"Database error deleting {opportunity_id}: {str(e)}")
+        raise Exception(f"Delete failed: {str(e)}")
+    except Exception as e:
+        connection.rollback()
+        logger.error(f"Unexpected error deleting {opportunity_id}: {str(e)}")
+        raise
+"""
 Opportunities handler module for CRUD operations on opportunity entities.
 Handles database operations and field mapping between snake_case and camelCase.
 """

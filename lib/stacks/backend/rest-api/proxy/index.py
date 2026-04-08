@@ -10,8 +10,8 @@ Requirements: 1.1, 1.2, 2.1, 3.1, 4.1, 5.1, 6.1, 7.1, 8.1, 9.1, 10.1
 
 import json
 import logging
-import time
 from typing import Dict, Any
+from typing import Dict, Any, Optional
 import boto3
 
 # Import handler modules
@@ -177,15 +177,14 @@ def execute_operation(connection, route_info, operation: str) -> Any:
     Raises:
         ValueError: If resource type or operation is not supported
     """
-    resource_type = route_info.resource_type
-    resource_id = route_info.resource_id
-    query_params = route_info.query_params
+def execute_operation(connection, route_info, operation: str, auth_user_id: Optional[str] = None):
+    """
+    Execute the appropriate CRUD operation based on route information.
     body = route_info.body
     
     logger.info(f"Executing {operation} operation on {resource_type}")
     
     # Route to accounts handler
-    if resource_type == 'accounts':
         if operation == 'list':
             return accounts_handler.list_accounts(connection)
         elif operation == 'get':
