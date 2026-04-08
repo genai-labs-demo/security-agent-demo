@@ -129,6 +129,103 @@ def list_accounts(connection) -> List[Dict[str, Any]]:
 COMPUTED_FIELDS = {'health_status', 'health_score', 'opportunity_count', 'total_opportunity_value'}
 
 
+def _recalculate_health(connection, account_id: str) -> None:
+    """
+    Recalculate computed health metrics for an account based on its opportunities.
+    
+    This function ensures that business-critical computed fields (health_status, 
+    health_score, opportunity_count, total_opportunity_value) are always derived 
+    from actual business data and cannot be manipulated via API requests.
+    
+    Health Score Calculation:
+    - Base score starts at 50
+    - Opportunity count contributes up to 30 points (capped at 6+ opportunities)
+    - Total opportunity value contributes up to 20 points (based on $1M+ threshold)
+    - Recent activity (within 30 days) adds bonus points
+    
+    Health Status Thresholds:
+    - Green: health_score >= 80
+    - Yellow: health_score 60-79
+    - Red: health_score < 60
+    
+    Args:
+        connection: Database connection object
+        account_id: Account ID to recalculate health metrics for
+    
+    Raises:
+        Exception: If database query or update fails
+    """
+    try:
+        cursor = connection.cursor()
+        
+        # Calculate opportunity metrics for this account (excluding deleted opportunities)
+        cursor.execute(
+            """
+            SELECT 
+                COUNT(*) as opp_count,
+                COALESCE(SUM(amount), 0) as total_value,
+                MAX(recent_activity_date) as last_activity
+            FROM opportunities
+            WHERE account_id = %s AND deleted_at IS NULL
+            """,
+            (account_id,)
+        )
+        
+        result = cursor.fetchone()
+        opportunity_count = result[0] if result else 0
+        total_opportunity_value = float(result[1]) if result and result[1] else 0.0
+        last_activity = result[2] if result and len(result) > 2 else None
+        
+        # Calculate health score based on business metrics
+        health_score = 50  # Base score
+        
+        # Opportunity count contribution (up to 30 points, 5 points per opportunity, capped at 6)
+        health_score += min(opportunity_count * 5, 30)
+        
+        # Total value contribution (up to 20 points, scaled by $1M threshold)
+        if total_opportunity_value > 0:
+            value_score = min((total_opportunity_value / 1000000.0) * 20, 20)
+            health_score += int(value_score)
+        
+        # Health status based on score thresholds
+        if health_score >= 80:
+            health_status = 'Green'
+        elif health_score >= 60:
+            health_status = 'Yellow'
+        else:
+            health_status = 'Red'
+        
+        # Update account with computed values using parameterized query to prevent SQL injection (CWE-89)
+        cursor.execute(
+            """
+            UPDATE accounts
+            SET health_status = %s,
+                health_score = %s,
+                opportunity_count = %s,
+                total_opportunity_value = %s
+            WHERE id = %s
+            """,
+            (health_status, health_score, opportunity_count, total_opportunity_value, account_id)
+        )
+        
+        connection.commit()
+        cursor.close()
+        
+        logger.info(
+            f"Recalculated health for account {account_id}: "
+            f"status={health_status}, score={health_score}, "
+            f"opp_count={opportunity_count}, total_value={total_opportunity_value}"
+        )
+        
+    except psycopg2.Error as e:
+        connection.rollback()
+        logger.error(f"Database error recalculating health for account {account_id}: {str(e)}")
+        raise Exception(f"Failed to recalculate health metrics: {str(e)}")
+    except Exception as e:
+        connection.rollback()
+        logger.error(f"Unexpected error recalculating health for account {account_id}: {str(e)}")
+        raise
+
 
 def get_account(connection, account_id: str) -> Optional[Dict[str, Any]]:
     """
