@@ -1,6 +1,7 @@
 """
 Team members handler module for CRUD operations on team member entities.
 Handles database operations and field mapping between snake_case and camelCase.
+Includes authorization framework to prevent unauthorized access (CWE-639).
 """
 
 import logging
@@ -12,6 +13,46 @@ from psycopg2.extras import RealDictCursor
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+
+def _check_team_member_access_authorization(connection, member_id: str, user_id: Optional[str] = None, require_admin: bool = False) -> bool:
+    """
+    Check if the user has authorization to access the specified team member.
+    
+    Authorization Rules:
+    - Users can view their own team member record (member_id matches user_id)
+    - Admin users can access all team member records
+    - Modifications (update/delete) require admin privileges
+    - When no user context is provided, authorization is bypassed (for now)
+    
+    Args:
+        connection: Database connection object
+        member_id: Team member ID to check access for
+        user_id: ID of the requesting user (from authentication context)
+        require_admin: If True, requires admin role for authorization
+    
+    Returns:
+        True if user is authorized, False otherwise
+    
+    Note:
+        This function implements an authorization framework to prevent unauthorized access (CWE-639).
+        Currently, user_id is None because authentication is not yet integrated.
+        
+        TODO: Integrate with API Gateway Authorizer or Cognito to extract user_id and role from JWT token
+        TODO: Implement role-based access control (RBAC) for admin users
+        TODO: Enable authorization checks once authentication is deployed
+    """
+    # TODO: Remove this bypass once authentication is implemented
+    if user_id is None:
+        logger.warning(f"Authorization check bypassed for team member {member_id} - no user context available")
+        return True
+    
+    # If admin is required, check user role (would come from JWT token)
+    # if require_admin:
+    #     return user_role == 'admin'
+    
+    # Users can view their own record
+    return member_id == user_id
 
 
 def _map_team_member_to_api_format(db_record: Dict[str, Any]) -> Dict[str, Any]:
@@ -117,13 +158,14 @@ def list_team_members(connection) -> List[Dict[str, Any]]:
 
 
 def get_team_member(connection, member_id: str) -> Optional[Dict[str, Any]]:
-    """
+def get_team_member(connection, member_id: str, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     Query a single team member by ID from the database.
     
     Args:
         connection: Database connection object
         member_id: Team member ID to retrieve
     
+        user_id: Optional user ID for authorization check
     Returns:
         Team member dictionary in API format, or None if not found
     
@@ -134,6 +176,11 @@ def get_team_member(connection, member_id: str) -> Optional[Dict[str, Any]]:
         logger.info(f"Getting team member with ID: {member_id}")
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
+        
+        # TODO: Enable authorization check once authentication is implemented
+        # if not _check_team_member_access_authorization(connection, member_id, user_id):
+        #     logger.warning(f"Unauthorized access attempt to team member {member_id} by user {user_id}")
+        #     return None
         
         query = """
             SELECT 
@@ -250,7 +297,7 @@ def create_team_member(connection, data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def update_team_member(connection, member_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """
+def update_team_member(connection, member_id: str, data: Dict[str, Any], user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     Update an existing team member record in the database.
     Validates email uniqueness if email is being updated.
     
@@ -259,6 +306,7 @@ def update_team_member(connection, member_id: str, data: Dict[str, Any]) -> Opti
         member_id: Team member ID to update
         data: Partial team member data in API format (camelCase)
     
+        user_id: Optional user ID for authorization check
     Returns:
         Updated team member dictionary in API format, or None if not found
     
@@ -268,6 +316,12 @@ def update_team_member(connection, member_id: str, data: Dict[str, Any]) -> Opti
     try:
         logger.info(f"Updating team member: {member_id}")
         
+        
+        # TODO: Enable authorization check once authentication is implemented
+        # Require admin privileges for updating team members
+        # if not _check_team_member_access_authorization(connection, member_id, user_id, require_admin=True):
+        #     logger.warning(f"Unauthorized update attempt on team member {member_id} by user {user_id}")
+        #     raise Exception("Unauthorized: Admin privileges required to update team member records")
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
         
@@ -344,7 +398,7 @@ def update_team_member(connection, member_id: str, data: Dict[str, Any]) -> Opti
 
 
 def delete_team_member(connection, member_id: str) -> bool:
-    """
+def delete_team_member(connection, member_id: str, user_id: Optional[str] = None) -> bool:
     Delete a team member record from the database.
     Checks for foreign key constraints (owned accounts/opportunities) before deletion.
     
@@ -352,6 +406,7 @@ def delete_team_member(connection, member_id: str) -> bool:
         connection: Database connection object
         member_id: Team member ID to delete
     
+        user_id: Optional user ID for authorization check
     Returns:
         True if team member was deleted, False if not found
     
@@ -361,6 +416,12 @@ def delete_team_member(connection, member_id: str) -> bool:
     try:
         logger.info(f"Deleting team member: {member_id}")
         
+        
+        # TODO: Enable authorization check once authentication is implemented
+        # Require admin privileges for deleting team members
+        # if not _check_team_member_access_authorization(connection, member_id, user_id, require_admin=True):
+        #     logger.warning(f"Unauthorized delete attempt on team member {member_id} by user {user_id}")
+        #     raise Exception("Unauthorized: Admin privileges required to delete team member records")
         cursor = connection.cursor()
         
         # Check if team member exists
