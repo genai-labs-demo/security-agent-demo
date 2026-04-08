@@ -679,3 +679,85 @@ def delete_opportunity(connection, opportunity_id: str) -> bool:
         connection.rollback()
         logger.error(f"Unexpected error soft-deleting opportunity {opportunity_id}: {str(e)}")
         raise
+
+
+def restore_opportunity(connection, opportunity_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Restore a soft-deleted opportunity by clearing the deleted_at timestamp.
+    This allows recovery of accidentally deleted opportunities.
+    Recalculates parent account aggregates after restoration.
+
+    Args:
+        connection: Database connection object
+        opportunity_id: Opportunity ID to restore
+
+    Returns:
+        Restored opportunity dictionary in API format, or None if not found or not deleted
+
+    Raises:
+        Exception: If database update fails or opportunity is not soft-deleted
+    """
+    try:
+        logger.info(f"Restoring opportunity: {opportunity_id}")
+
+        cursor = connection.cursor(cursor_factory=RealDictCursor)
+
+        # Check if opportunity exists and is soft-deleted, capture account_id for aggregate recalculation
+        cursor.execute(
+            "SELECT id, account_id FROM opportunities WHERE id = %s AND deleted_at IS NOT NULL",
+            (opportunity_id,)
+        )
+        row = cursor.fetchone()
+        if not row:
+            cursor.close()
+            logger.info(f"Opportunity not found or not deleted: {opportunity_id}")
+            # Check if opportunity exists but is not deleted
+            cursor = connection.cursor()
+            cursor.execute(
+                "SELECT id FROM opportunities WHERE id = %s",
+                (opportunity_id,)
+            )
+            if cursor.fetchone():
+                cursor.close()
+                raise Exception(f"Opportunity with id {opportunity_id} is not deleted and cannot be restored")
+            cursor.close()
+            return None
+
+        account_id = row['account_id']
+
+        # Restore: clear deleted_at timestamp
+        cursor.execute(
+            """UPDATE opportunities 
+               SET deleted_at = NULL 
+               WHERE id = %s
+               RETURNING 
+                   id, name, account_id, account_name, amount, close_date,
+                   stage, next_step, recent_activity, recent_activity_date,
+                   forecast_category, owner_id, owner_name, probability,
+                   created_date, last_modified_date""",
+            (opportunity_id,)
+        )
+        record = cursor.fetchone()
+        connection.commit()
+        cursor.close()
+
+        # Map to API format
+        opportunity = _map_opportunity_to_api_format(dict(record))
+
+        # Recalculate parent account aggregates
+        _recalculate_account_aggregates(connection, account_id)
+
+        logger.info(f"Restored opportunity: {opportunity_id}")
+        return opportunity
+
+    except psycopg2.Error as e:
+        connection.rollback()
+        logger.error(f"Database error restoring opportunity {opportunity_id}: {str(e)}")
+        raise Exception(f"Failed to restore opportunity: {str(e)}")
+    except Exception as e:
+        connection.rollback()
+        # Re-raise if it's already our custom exception
+        if "is not deleted" in str(e):
+            raise
+        logger.error(f"Unexpected error restoring opportunity {opportunity_id}: {str(e)}")
+        raise

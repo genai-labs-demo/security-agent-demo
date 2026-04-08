@@ -436,3 +436,78 @@ def delete_account(connection, account_id: str) -> bool:
             raise
         logger.error(f"Unexpected error soft-deleting account {account_id}: {str(e)}")
         raise
+
+
+def restore_account(connection, account_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Restore a soft-deleted account by clearing the deleted_at timestamp.
+    This allows recovery of accidentally deleted accounts.
+
+    Args:
+        connection: Database connection object
+        account_id: Account ID to restore
+
+    Returns:
+        Restored account dictionary in API format, or None if not found or not deleted
+
+    Raises:
+        Exception: If database update fails or account is not soft-deleted
+    """
+    try:
+        logger.info(f"Restoring account: {account_id}")
+
+        cursor = connection.cursor(cursor_factory=RealDictCursor)
+
+        # Check if account exists and is soft-deleted
+        cursor.execute(
+            "SELECT id FROM accounts WHERE id = %s AND deleted_at IS NOT NULL",
+            (account_id,)
+        )
+        if not cursor.fetchone():
+            cursor.close()
+            logger.info(f"Account not found or not deleted: {account_id}")
+            # Check if account exists but is not deleted
+            cursor = connection.cursor()
+            cursor.execute(
+                "SELECT id FROM accounts WHERE id = %s",
+                (account_id,)
+            )
+            if cursor.fetchone():
+                cursor.close()
+                raise Exception(f"Account with id {account_id} is not deleted and cannot be restored")
+            cursor.close()
+            return None
+
+        # Restore: clear deleted_at timestamp
+        cursor.execute(
+            """UPDATE accounts 
+               SET deleted_at = NULL 
+               WHERE id = %s
+               RETURNING 
+                   id, name, domain, industry_id, annual_revenue, employee_count,
+                   owner_id, owner_name, health_status, health_score,
+                   opportunity_count, total_opportunity_value,
+                   last_activity_date, created_date, logo_url""",
+            (account_id,)
+        )
+        record = cursor.fetchone()
+        connection.commit()
+        cursor.close()
+
+        # Map to API format
+        account = _map_account_to_api_format(dict(record))
+
+        logger.info(f"Restored account: {account_id}")
+        return account
+
+    except psycopg2.Error as e:
+        connection.rollback()
+        logger.error(f"Database error restoring account {account_id}: {str(e)}")
+        raise Exception(f"Failed to restore account: {str(e)}")
+    except Exception as e:
+        connection.rollback()
+        # Re-raise if it's already our custom exception
+        if "is not deleted" in str(e):
+            raise
+        logger.error(f"Unexpected error restoring account {account_id}: {str(e)}")
+        raise

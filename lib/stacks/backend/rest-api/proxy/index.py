@@ -168,7 +168,7 @@ def execute_operation(connection, route_info, operation: str) -> Any:
     
     Args:
         connection: Database connection object
-        route_info: Parsed route information
+        operation: Operation type ('list', 'get', 'create', 'update', 'delete', 'restore')
         operation: Operation type ('list', 'get', 'create', 'update', 'delete')
         
     Returns:
@@ -205,6 +205,11 @@ def execute_operation(connection, route_info, operation: str) -> Any:
             if not success:
                 raise ValueError(f"Account with id {resource_id} not found")
             return None
+        elif operation == 'restore':
+            result = accounts_handler.restore_account(connection, resource_id)
+            if result is None:
+                raise ValueError(f"Account with id {resource_id} not found or not deleted")
+            return result
     
     # Route to opportunities handler
     elif resource_type == 'opportunities':
@@ -237,6 +242,11 @@ def execute_operation(connection, route_info, operation: str) -> Any:
             if not success:
                 raise ValueError(f"Opportunity with id {resource_id} not found")
             return None
+        elif operation == 'restore':
+            result = opportunities_handler.restore_opportunity(connection, resource_id)
+            if result is None:
+                raise ValueError(f"Opportunity with id {resource_id} not found or not deleted")
+            return result
     
     # Route to team members handler
     elif resource_type == 'team-members':
