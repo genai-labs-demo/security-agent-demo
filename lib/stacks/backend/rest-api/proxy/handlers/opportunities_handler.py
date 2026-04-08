@@ -139,13 +139,41 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
         
         keywords = search_query.strip().split()
         
-        # Limit keyword count to prevent resource exhaustion via query explosion
-        MAX_KEYWORDS = 10
+        # Limit keyword count to prevent resource exhaustion via query explosion (CWE-400)
+        # Reduced from 10 to 5 to halve worst-case query complexity (170 ops -> 85 ops)
+        MAX_KEYWORDS = 5
+        MIN_KEYWORD_LENGTH = 2  # Prevent single-character wildcard searches
+        MAX_KEYWORD_LENGTH = 50  # Prevent excessively long keywords
+        
         if len(keywords) > MAX_KEYWORDS:
             logger.warning(f"Search query truncated from {len(keywords)} to {MAX_KEYWORDS} keywords")
             keywords = keywords[:MAX_KEYWORDS]
         
+        # Validate keyword length to prevent abuse (CWE-20: Improper Input Validation)
+        validated_keywords = []
+        for keyword in keywords:
+            # Strip whitespace and check length
+            keyword = keyword.strip()
+            if len(keyword) < MIN_KEYWORD_LENGTH:
+                logger.warning(f"Keyword '{keyword}' too short (min {MIN_KEYWORD_LENGTH} chars), skipping")
+                continue
+            if len(keyword) > MAX_KEYWORD_LENGTH:
+                logger.warning(f"Keyword '{keyword}' too long (max {MAX_KEYWORD_LENGTH} chars), truncating")
+                keyword = keyword[:MAX_KEYWORD_LENGTH]
+            validated_keywords.append(keyword)
+        
+        keywords = validated_keywords
+        
+        # If no valid keywords remain after validation, return empty results
+        if not keywords:
+            logger.warning("No valid keywords after validation")
+            return []
+        
         logger.info(f"Searching opportunities for keywords: {keywords}")
+        
+        # Calculate and log query complexity for monitoring
+        query_complexity = len(keywords) * 17  # 17 operations per keyword (6 ILIKE + 5 relevance + 6 match)
+        logger.info(f"Query complexity score: {query_complexity} operations across {len(keywords)} keywords")
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
@@ -244,6 +272,16 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
         for keyword in keywords:
             for _ in range(6):
                 all_params.append(f'%{keyword}%')
+        
+        # Set query timeout to prevent long-running queries from exhausting database resources
+        # This protects against resource exhaustion (CWE-400) at the database level
+        QUERY_TIMEOUT_SECONDS = 5
+        try:
+            cursor.execute(f"SET statement_timeout = '{QUERY_TIMEOUT_SECONDS}s'")
+        except Exception as e:
+            # Log but don't fail if timeout setting is not supported
+            logger.warning(f"Could not set query timeout: {str(e)}")
+        
         
         cursor.execute(query, all_params)
         records = cursor.fetchall()
