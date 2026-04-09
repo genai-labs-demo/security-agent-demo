@@ -22,6 +22,7 @@ from handlers import security_handler
 from s3_integration import enhance_with_images
 from cors_handler import process_cors
 from error_handler import (
+    handle_forbidden_error,
     handle_validation_error,
     handle_not_found_error,
     handle_conflict_error,
@@ -29,6 +30,7 @@ from error_handler import (
     handle_server_error,
     parse_database_error
 )
+from authorization import extract_user_context, check_authorization, UnauthorizedException
 
 # CloudWatch client for custom metrics
 cloudwatch = boto3.client('cloudwatch')
@@ -69,6 +71,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             return process_cors(event)
         
         # Parse API Gateway event to extract route information
+        # Extract user context from Cognito JWT claims
+        # This will be None for unauthenticated security endpoints
+        user_context = extract_user_context(event)
+        
         route_info = parse_api_gateway_event(event)
         
         # Validate route
@@ -85,7 +91,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             start_time = time.time()
             
             # Route to appropriate handler and execute operation
-            result = execute_operation(connection, route_info, operation)
+            result = execute_operation(connection, route_info, operation, user_context)
             
             # Calculate and publish search latency metrics
             elapsed_time = (time.time() - start_time) * 1000  # Convert to milliseconds
@@ -129,6 +135,12 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         logger.info(f"Request {request_id} completed successfully with status {response['statusCode']}")
         return response
         
+    except UnauthorizedException as e:
+        # Authorization errors (403)
+        logger.warning(f"Authorization error in request {request_id}: {str(e)}")
+        response = handle_forbidden_error(str(e))
+        return process_cors(event, response)
+        
     except ValueError as e:
         # Validation errors (400)
         logger.warning(f"Validation error in request {request_id}: {str(e)}")
@@ -162,7 +174,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         return process_cors(event, response)
 
 
-def execute_operation(connection, route_info, operation: str) -> Any:
+def execute_operation(connection, route_info, operation: str, user_context) -> Any:
     """
     Execute the appropriate CRUD operation based on route information.
     
@@ -170,6 +182,7 @@ def execute_operation(connection, route_info, operation: str) -> Any:
         connection: Database connection object
         route_info: Parsed route information
         operation: Operation type ('list', 'get', 'create', 'update', 'delete')
+        user_context: User context with identity and group membership
         
     Returns:
         Operation result (record, list of records, or boolean)
@@ -183,6 +196,9 @@ def execute_operation(connection, route_info, operation: str) -> Any:
     body = route_info.body
     
     logger.info(f"Executing {operation} operation on {resource_type}")
+    
+    # Check authorization before executing operation
+    check_authorization(user_context, resource_type, operation)
     
     # Route to accounts handler
     if resource_type == 'accounts':
