@@ -3,6 +3,7 @@ Validation module for CRM API request data.
 Validates required fields, data types, and enum values for all entity types.
 """
 
+from datetime import datetime, date
 import re
 from typing import Dict, Any, List, Optional
 
@@ -11,6 +12,26 @@ from typing import Dict, Any, List, Optional
 HEALTH_STATUS_VALUES = ['Green', 'Yellow', 'Red']
 OPPORTUNITY_STAGE_VALUES = ['Launched', 'Qualified', 'Proof of Concept', 'Negotiation', 'Closed Won', 'Closed Lost']
 FORECAST_CATEGORY_VALUES = ['Pipeline', 'Best Case', 'Commit', 'Closed']
+
+# Sales stage progression rules
+STAGE_TRANSITIONS = {
+    'Launched': ['Qualified', 'Closed Lost'],
+    'Qualified': ['Launched', 'Proof of Concept', 'Closed Lost'],
+    'Proof of Concept': ['Qualified', 'Negotiation', 'Closed Lost'],
+    'Negotiation': ['Proof of Concept', 'Closed Won', 'Closed Lost'],
+    'Closed Won': [],
+    'Closed Lost': []
+}
+
+# Expected probability for each stage (min, max)
+STAGE_PROBABILITIES = {
+    'Launched': (0, 30),
+    'Qualified': (10, 40),
+    'Proof of Concept': (30, 70),
+    'Negotiation': (60, 90),
+    'Closed Won': (100, 100),
+    'Closed Lost': (0, 0)
+}
 
 # Email validation regex pattern
 EMAIL_PATTERN = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
@@ -111,13 +132,65 @@ def validate_account(data: Dict[str, Any], is_update: bool = False) -> None:
             raise ValidationError("Field 'logoUrl' must be a string", field='logoUrl')
 
 
-def validate_opportunity(data: Dict[str, Any], is_update: bool = False) -> None:
+def check_stage_transition(from_stage: str, to_stage: str) -> None:
+    """Check if stage transition is valid according to business rules."""
+    if from_stage == to_stage:
+        return
+    
+    valid_next = STAGE_TRANSITIONS.get(from_stage, [])
+    
+    if to_stage not in valid_next:
+        if len(valid_next) == 0:
+            raise ValidationError(
+                f"Cannot modify closed opportunity in '{from_stage}' stage",
+                field='stage'
+            )
+        raise ValidationError(
+            f"Invalid stage progression from '{from_stage}' to '{to_stage}'. Valid next stages: {', '.join(valid_next)}",
+            field='stage'
+        )
+
+
+def check_probability_for_stage(stage: str, probability: int) -> None:
+    """Check if probability value is appropriate for the stage."""
+    if stage not in STAGE_PROBABILITIES:
+        return
+    
+    min_val, max_val = STAGE_PROBABILITIES[stage]
+    
+    if probability < min_val or probability > max_val:
+        raise ValidationError(
+            f"Probability {probability}% does not match stage '{stage}'. Expected: {min_val}-{max_val}%",
+            field='probability'
+        )
+
+
+def check_close_date_not_future(stage: str, close_date_str: str) -> None:
+    """Check that closed opportunities have close_date not in future."""
+    if stage not in ['Closed Won', 'Closed Lost']:
+        return
+    
+    try:
+        close_dt = datetime.fromisoformat(close_date_str.split('T')[0]).date()
+        today = date.today()
+        
+        if close_dt > today:
+            raise ValidationError(
+                f"Cannot close opportunity with future date. Close date must be today or earlier for '{stage}' stage",
+                field='closeDate'
+            )
+    except (ValueError, AttributeError):
+        pass
+
+
+def validate_opportunity(data: Dict[str, Any], is_update: bool = False, current_data: Optional[Dict[str, Any]] = None) -> None:
     """
     Validate opportunity data against schema requirements.
     
     Args:
         data: Opportunity data in API format (camelCase)
         is_update: If True, required fields are optional (partial update)
+        current_data: Current state for transition validation
     
     Raises:
         ValidationError: If validation fails with field-specific details
@@ -214,6 +287,33 @@ def validate_opportunity(data: Dict[str, Any], is_update: bool = False) -> None:
         if len(data['ownerName']) > 255:
             raise ValidationError("Field 'ownerName' must not exceed 255 characters", field='ownerName')
 
+    
+    # Business logic validation for updates
+    if is_update and current_data:
+        # Validate stage transitions
+        if 'stage' in data:
+            old_stage = current_data.get('stage')
+            new_stage = data['stage']
+            if old_stage:
+                check_stage_transition(old_stage, new_stage)
+        
+        # Validate probability matches stage
+        stage = data.get('stage', current_data.get('stage'))
+        prob = data.get('probability', current_data.get('probability'))
+        if stage and prob is not None:
+            check_probability_for_stage(stage, prob)
+        
+        # Validate close date for closed stages
+        if 'stage' in data:
+            close_date = data.get('closeDate', current_data.get('closeDate'))
+            if close_date:
+                check_close_date_not_future(data['stage'], close_date)
+    else:
+        # Validation for create operations
+        if 'stage' in data and 'probability' in data:
+            check_probability_for_stage(data['stage'], data['probability'])
+        if 'stage' in data and 'closeDate' in data:
+            check_close_date_not_future(data['stage'], data['closeDate'])
 
 def validate_team_member(data: Dict[str, Any], is_update: bool = False) -> None:
     """
