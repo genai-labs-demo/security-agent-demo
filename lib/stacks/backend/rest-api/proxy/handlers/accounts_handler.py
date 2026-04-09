@@ -129,6 +129,81 @@ def list_accounts(connection) -> List[Dict[str, Any]]:
 COMPUTED_FIELDS = {'health_status', 'health_score', 'opportunity_count', 'total_opportunity_value'}
 
 
+def _recalculate_health(connection, account_id: str) -> None:
+    """
+    Recalculate health score and status based on account activity metrics.
+    
+    Args:
+        connection: Database connection
+        account_id: ID of account to recalculate
+    """
+    if not account_id:
+        return
+    
+    cursor = connection.cursor()
+    try:
+        # Update counts and totals from opportunities
+        cursor.execute("""
+            UPDATE accounts
+            SET opportunity_count = q.opp_count,
+                total_opportunity_value = q.opp_total
+            FROM (
+                SELECT
+                    COUNT(*) AS opp_count,
+                    COALESCE(SUM(amount), 0) AS opp_total
+                FROM opportunities
+                WHERE account_id = %s AND deleted_at IS NULL
+            ) q
+            WHERE accounts.id = %s
+        """, (account_id, account_id))
+        
+        # Retrieve current metrics
+        cursor.execute("""
+            SELECT last_activity_date, opportunity_count, total_opportunity_value
+            FROM accounts WHERE id = %s
+        """, (account_id,))
+        
+        result = cursor.fetchone()
+        if not result:
+            return
+        
+        last_activity, num_opps, total_value = result
+        
+        # Compute health score from three factors
+        points = 0
+        
+        # Factor 1: Recency of activity (max 40 points)
+        if last_activity:
+            from datetime import datetime, timezone
+            current_time = datetime.now(timezone.utc)
+            if last_activity.tzinfo is None:
+                last_activity = last_activity.replace(tzinfo=timezone.utc)
+            elapsed_days = (current_time - last_activity).days
+            
+            points += 40 if elapsed_days < 31 else 30 if elapsed_days < 91 else 15 if elapsed_days < 181 else 0
+        
+        # Factor 2: Opportunity count (max 30 points)
+        num_opps = num_opps or 0
+        points += 30 if num_opps > 3 else 25 if num_opps == 3 else 15 if num_opps == 2 else 5 if num_opps == 1 else 0
+        
+        # Factor 3: Pipeline value (max 30 points)
+        pipeline = float(total_value or 0)
+        points += 30 if pipeline > 999999 else 25 if pipeline > 499999 else 20 if pipeline > 249999 else 10 if pipeline > 99999 else 5 if pipeline > 0 else 0
+        
+        # Map to status
+        status_label = 'Green' if points > 79 else 'Yellow' if points > 59 else 'Red'
+        
+        # Save to database
+        cursor.execute("""
+            UPDATE accounts SET health_score = %s, health_status = %s WHERE id = %s
+        """, (points, status_label, account_id))
+        
+        connection.commit()
+        logger.info(f"Updated health for account {account_id}")
+    finally:
+        cursor.close()
+
+
 
 def get_account(connection, account_id: str) -> Optional[Dict[str, Any]]:
     """
