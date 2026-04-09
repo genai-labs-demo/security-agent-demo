@@ -38,6 +38,54 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 
+def get_user_owner_id(event: Dict[str, Any], connection) -> str:
+    """
+    Extract user email from JWT claims and resolve to team_members.id (owner_id).
+    
+    This function implements authorization by mapping the authenticated Cognito user
+    to their corresponding team member record, which is used to filter opportunities
+    by ownership.
+    
+    Args:
+        event: API Gateway event dictionary containing JWT claims in requestContext
+        connection: Database connection object
+        
+    Returns:
+        Team member ID (owner_id) for the authenticated user
+        
+    Raises:
+        ValueError: If user email is not found in JWT claims or not found in team_members table
+    """
+    try:
+        # Extract email from JWT claims provided by Cognito User Pool authorizer
+        claims = event.get('requestContext', {}).get('authorizer', {}).get('claims', {})
+        user_email = claims.get('email')
+        
+        if not user_email:
+            logger.warning("No email claim found in JWT token")
+            raise ValueError("User email not found in authentication token")
+        
+        logger.info(f"Resolving owner_id for authenticated user: {user_email}")
+        
+        # Query team_members table to get the owner_id for this email
+        cursor = connection.cursor()
+        cursor.execute("SELECT id FROM team_members WHERE email = %s", (user_email,))
+        result = cursor.fetchone()
+        cursor.close()
+        
+        if not result:
+            logger.warning(f"User email {user_email} not found in team_members table")
+            raise ValueError("User not authorized to access this resource")
+        
+        owner_id = result[0]
+        logger.info(f"Resolved owner_id: {owner_id} for user: {user_email}")
+        return owner_id
+        
+    except Exception as e:
+        logger.error(f"Error resolving user owner_id: {str(e)}")
+        raise
+
+
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Main Lambda handler entry point for API Gateway requests.
@@ -81,11 +129,24 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         connection = get_database_connection()
         
         try:
+            # Extract user identity for authorization (only for authenticated endpoints)
+            # Security demo endpoints don't have JWT claims, so we skip this for them
+            user_owner_id = None
+            if route_info.resource_type not in ['security-profile', 'security-comments', 
+                                                  'security-search', 'security-tools', 
+                                                  'security-health', 'security-xss-page']:
+                try:
+                    user_owner_id = get_user_owner_id(event, connection)
+                except ValueError as auth_error:
+                    # User authentication succeeded but authorization failed (no team member record)
+                    logger.warning(f"Authorization failed: {str(auth_error)}")
+                    raise ValueError(f"Forbidden: {str(auth_error)}")
+            
             # Start timing for search operations
             start_time = time.time()
             
             # Route to appropriate handler and execute operation
-            result = execute_operation(connection, route_info, operation)
+            result = execute_operation(connection, route_info, operation, user_owner_id)
             
             # Calculate and publish search latency metrics
             elapsed_time = (time.time() - start_time) * 1000  # Convert to milliseconds
@@ -163,7 +224,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
 
 def execute_operation(connection, route_info, operation: str) -> Any:
-    """
+def execute_operation(connection, route_info, operation: str, user_owner_id: str = None) -> Any:
     Execute the appropriate CRUD operation based on route information.
     
     Args:
@@ -171,6 +232,7 @@ def execute_operation(connection, route_info, operation: str) -> Any:
         route_info: Parsed route information
         operation: Operation type ('list', 'get', 'create', 'update', 'delete')
         
+        user_owner_id: Team member ID of the authenticated user (for authorization)
     Returns:
         Operation result (record, list of records, or boolean)
         
@@ -217,25 +279,25 @@ def execute_operation(connection, route_info, operation: str) -> Any:
         if operation == 'list' or is_search_endpoint:
             # If search query is provided, perform search instead of list
             if search_query:
-                return opportunities_handler.search_opportunities(connection, search_query, account_id)
+                return opportunities_handler.search_opportunities(connection, search_query, account_id, user_owner_id)
             else:
-                return opportunities_handler.list_opportunities(connection, account_id)
+                return opportunities_handler.list_opportunities(connection, account_id, user_owner_id)
         elif operation == 'get':
-            result = opportunities_handler.get_opportunity(connection, resource_id)
+            result = opportunities_handler.get_opportunity(connection, resource_id, user_owner_id)
             if result is None:
-                raise ValueError(f"Opportunity with id {resource_id} not found")
+                raise ValueError(f"Opportunity with id {resource_id} not found or access denied")
             return result
         elif operation == 'create':
             return opportunities_handler.create_opportunity(connection, body)
         elif operation == 'update':
-            result = opportunities_handler.update_opportunity(connection, resource_id, body)
+            result = opportunities_handler.update_opportunity(connection, resource_id, body, user_owner_id)
             if result is None:
-                raise ValueError(f"Opportunity with id {resource_id} not found")
+                raise ValueError(f"Opportunity with id {resource_id} not found or access denied")
             return result
         elif operation == 'delete':
-            success = opportunities_handler.delete_opportunity(connection, resource_id)
+            success = opportunities_handler.delete_opportunity(connection, resource_id, user_owner_id)
             if not success:
-                raise ValueError(f"Opportunity with id {resource_id} not found")
+                raise ValueError(f"Opportunity with id {resource_id} not found or access denied")
             return None
     
     # Route to team members handler
