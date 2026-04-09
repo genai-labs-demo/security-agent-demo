@@ -85,7 +85,8 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
 def _recalculate_account_aggregates(connection, account_id: str) -> None:
     """
     Recalculate and update the aggregate fields (opportunity_count, total_opportunity_value)
-    on the parent account after any opportunity create/update/delete.
+    on the parent account after any opportunity create/update/delete. This function must be
+    called within the same transaction as the opportunity operation to ensure atomicity.
     
     Args:
         connection: Database connection object
@@ -109,11 +110,10 @@ def _recalculate_account_aggregates(connection, account_id: str) -> None:
             ) sub
             WHERE accounts.id = %s
         """, (account_id, account_id))
-        connection.commit()
         logger.info(f"Recalculated aggregates for account {account_id}")
     except Exception as e:
         logger.error(f"Failed to recalculate aggregates for account {account_id}: {str(e)}")
-        # Don't rollback here — let the caller handle transaction management
+        raise  # Propagate exception to caller to trigger transaction rollback
     finally:
         cursor.close()
 
@@ -476,14 +476,16 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         
         cursor.execute(query, values)
         record = cursor.fetchone()
+        
+        # Recalculate parent account aggregates BEFORE commit for atomicity
+        _recalculate_account_aggregates(connection, db_data.get('account_id'))
+        
         connection.commit()
         cursor.close()
         
         # Map to API format
         opportunity = _map_opportunity_to_api_format(dict(record))
         
-        # Recalculate parent account aggregates
-        _recalculate_account_aggregates(connection, db_data.get('account_id'))
         
         logger.info(f"Created opportunity with ID: {opportunity['id']}")
         return opportunity
@@ -583,10 +585,12 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         record = cursor.fetchone()
         
         if not record:
-            connection.rollback()
             cursor.close()
             logger.info(f"Opportunity not found for update: {opportunity_id}")
             return None
+        
+        # Recalculate parent account aggregates BEFORE commit for atomicity
+        _recalculate_account_aggregates(connection, record.get('account_id'))
         
         connection.commit()
         cursor.close()
@@ -594,8 +598,6 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         # Map to API format
         opportunity = _map_opportunity_to_api_format(dict(record))
         
-        # Recalculate parent account aggregates (handles amount or account changes)
-        _recalculate_account_aggregates(connection, record.get('account_id'))
         
         logger.info(f"Updated opportunity: {opportunity_id}")
         return opportunity
@@ -662,11 +664,12 @@ def delete_opportunity(connection, opportunity_id: str) -> bool:
             "UPDATE opportunities SET deleted_at = NOW() WHERE id = %s",
             (opportunity_id,)
         )
+        
+        # Recalculate parent account aggregates BEFORE commit for atomicity
+        _recalculate_account_aggregates(connection, account_id)
+        
         connection.commit()
         cursor.close()
-
-        # Recalculate parent account aggregates
-        _recalculate_account_aggregates(connection, account_id)
 
         logger.info(f"Soft-deleted opportunity: {opportunity_id}")
         return True
