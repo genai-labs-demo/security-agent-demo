@@ -17,6 +17,7 @@ Vulnerability inventory (matches pen-test target set):
 
 import json
 import logging
+import html
 import subprocess
 from datetime import datetime
 
@@ -384,9 +385,9 @@ def render_xss_comments_page(connection):
 
         comments_html = ""
         for row in rows:
-            username = row.get("username") or "Anonymous"
+            username = html.escape(row.get("username") or "Anonymous")
             # VULNERABILITY: Stored XSS — content rendered directly in HTML without encoding
-            content = row.get("content", "")
+            content = html.escape(row.get("content", ""))
             comments_html += f"""
             <div style="border:1px solid #333;border-radius:6px;padding:12px;margin:8px 0;background:#16213e;">
                 <strong style="color:#ffa07a;">{username}</strong>
