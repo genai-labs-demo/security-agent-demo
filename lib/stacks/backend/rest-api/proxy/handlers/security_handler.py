@@ -17,6 +17,7 @@ Vulnerability inventory (matches pen-test target set):
 
 import json
 import logging
+import html
 import subprocess
 from datetime import datetime
 
@@ -213,6 +214,9 @@ def create_security_comment(connection, body):
         for key, val in row.items():
             if isinstance(val, datetime):
                 row[key] = val.isoformat()
+        # Escape HTML entities in content to prevent XSS
+        if 'content' in row and row['content']:
+            row['content'] = html.escape(row['content'])
 
         is_xss = _detect_xss(content)
         is_mass = bool(author_name or author_role)
@@ -256,6 +260,9 @@ def list_security_comments(connection):
             for key, val in row.items():
                 if isinstance(val, datetime):
                     row[key] = val.isoformat()
+            # Escape HTML entities in content to prevent XSS
+            if 'content' in row and row['content']:
+                row['content'] = html.escape(row['content'])
 
         has_xss = any(_detect_xss(r.get("content", "")) for r in rows)
         if has_xss:
