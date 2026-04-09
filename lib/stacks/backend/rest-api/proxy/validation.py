@@ -298,3 +298,63 @@ def validate_team_member(data: Dict[str, Any], is_update: bool = False) -> None:
     if 'avatarUrl' in data and data['avatarUrl'] is not None:
         if not isinstance(data['avatarUrl'], str):
             raise ValidationError("Field 'avatarUrl' must be a string", field='avatarUrl')
+
+
+def validate_stage_transition(current_stage: str, new_stage: str) -> None:
+    """
+    Validate that opportunity stage transition follows business workflow rules.
+    Enforces state machine constraints to prevent skipping stages, moving backward
+    from terminal states, and other invalid workflow transitions.
+    
+    Valid progression:
+        Launched → Qualified → Proof of Concept → Negotiation → Closed Won
+                                                              ↘ Closed Lost
+    
+    Rules:
+    - Terminal states (Closed Won, Closed Lost) cannot transition to any other stage
+    - Forward transitions must follow sequential order (cannot skip intermediate stages)
+    - Backward transitions are not permitted
+    - Staying in the same stage is allowed (no-op)
+    
+    Args:
+        current_stage: Current opportunity stage
+        new_stage: Requested new stage
+    
+    Raises:
+        ValidationError: If stage transition violates workflow rules
+    """
+    # Allow no-op transitions (staying in same stage)
+    if current_stage == new_stage:
+        return
+    
+    # Validate that both stages are valid enum values
+    if current_stage not in OPPORTUNITY_STAGE_VALUES:
+        raise ValidationError(
+            f"Current stage '{current_stage}' is not valid",
+            field='stage'
+        )
+    if new_stage not in OPPORTUNITY_STAGE_VALUES:
+        raise ValidationError(
+            f"New stage '{new_stage}' is not valid",
+            field='stage'
+        )
+    
+    # Define allowed transitions as a state machine
+    # Each stage maps to the list of stages it can transition to
+    ALLOWED_TRANSITIONS = {
+        'Launched': ['Qualified', 'Closed Lost'],
+        'Qualified': ['Proof of Concept', 'Closed Lost'],
+        'Proof of Concept': ['Negotiation', 'Closed Lost'],
+        'Negotiation': ['Closed Won', 'Closed Lost'],
+        'Closed Won': [],  # Terminal state - no transitions allowed
+        'Closed Lost': []  # Terminal state - no transitions allowed
+    }
+    
+    allowed_next_stages = ALLOWED_TRANSITIONS.get(current_stage, [])
+    
+    if new_stage not in allowed_next_stages:
+        raise ValidationError(
+            f"Invalid stage transition from '{current_stage}' to '{new_stage}'. "
+            f"Allowed transitions from '{current_stage}': {', '.join(allowed_next_stages) if allowed_next_stages else 'none (terminal state)'}",
+            field='stage'
+        )

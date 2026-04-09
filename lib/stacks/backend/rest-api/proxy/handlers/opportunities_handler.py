@@ -536,6 +536,29 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         if 'amount' in db_data:
             _validate_amount(db_data.get('amount'))
         
+        # Validate stage transition if stage is being updated
+        if 'stage' in db_data:
+            cursor = connection.cursor(cursor_factory=RealDictCursor)
+            
+            # Query current opportunity to get current stage
+            cursor.execute(
+                "SELECT stage FROM opportunities WHERE id = %s AND deleted_at IS NULL",
+                (opportunity_id,)
+            )
+            current_record = cursor.fetchone()
+            cursor.close()
+            
+            if not current_record:
+                logger.info(f"Opportunity not found for stage validation: {opportunity_id}")
+                return None
+            
+            current_stage = current_record['stage']
+            new_stage = db_data['stage']
+            
+            # Import and validate state transition
+            from validation import validate_stage_transition, ValidationError
+            validate_stage_transition(current_stage, new_stage)
+        
         # Remove id if present (shouldn't be updated)
         db_data.pop('id', None)
         
@@ -617,7 +640,7 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
     except Exception as e:
         connection.rollback()
         # Re-raise if it's already our custom exception
-        if "Invalid account ID" in str(e) or "Invalid owner ID" in str(e) or "Invalid amount" in str(e):
+        if "Invalid account ID" in str(e) or "Invalid owner ID" in str(e) or "Invalid amount" in str(e) or "Invalid stage transition" in str(e):
             raise
         logger.error(f"Unexpected error updating opportunity {opportunity_id}: {str(e)}")
         raise
