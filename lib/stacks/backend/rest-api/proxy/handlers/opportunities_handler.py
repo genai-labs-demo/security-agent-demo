@@ -122,6 +122,12 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
     """
     Perform full text search on opportunities using multiple keywords.
     
+    Resource Protection:
+    - Keyword limit: Maximum 10 keywords to prevent query complexity explosion
+    - Result limit: Maximum 100 results returned
+    - Query timeout: Database-level statement_timeout prevents long-running queries
+    - Pattern matching: ILIKE operations with wildcards may trigger table scans on large datasets
+    
     Args:
         connection: Database connection object
         search_query: Search string (e.g., "finance software platform")
@@ -262,8 +268,14 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
         return opportunities
         
     except psycopg2.Error as e:
-        logger.error(f"Database error searching opportunities: {str(e)}")
-        raise Exception(f"Failed to search opportunities: {str(e)}")
+        error_message = str(e)
+        logger.error(f"Database error searching opportunities: {error_message}")
+        
+        # Check if query was terminated due to statement timeout
+        if 'statement timeout' in error_message.lower() or 'query_canceled' in error_message.lower():
+            raise Exception("Search query exceeded time limit. Please try a more specific search with fewer keywords.")
+        
+        raise Exception(f"Failed to search opportunities: {error_message}")
     except Exception as e:
         logger.error(f"Unexpected error searching opportunities: {str(e)}")
         raise
