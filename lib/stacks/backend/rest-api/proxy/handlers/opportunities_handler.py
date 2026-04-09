@@ -8,6 +8,7 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from validation import validate_opportunity, ValidationError
 
 # Configure logging
 logger = logging.getLogger()
@@ -268,36 +269,6 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
         logger.error(f"Unexpected error searching opportunities: {str(e)}")
         raise
 
-# Maximum allowed opportunity amount ($10M) to prevent pipeline inflation
-MAX_OPPORTUNITY_AMOUNT = 10_000_000
-
-
-def _validate_amount(amount) -> None:
-    """
-    Validate opportunity amount is within acceptable bounds.
-    Rejects negative values and amounts exceeding the upper limit.
-
-    Args:
-        amount: The opportunity amount to validate
-
-    Raises:
-        ValueError: If amount is negative or exceeds the maximum
-    """
-    if amount is None:
-        return
-    try:
-        amount_val = float(amount)
-    except (TypeError, ValueError):
-        raise ValueError(f"Invalid amount: must be a number")
-    if amount_val < 0:
-        raise ValueError(f"Invalid amount: cannot be negative")
-    if amount_val > MAX_OPPORTUNITY_AMOUNT:
-        raise ValueError(
-            f"Invalid amount: ${amount_val:,.2f} exceeds the maximum allowed "
-            f"amount of ${MAX_OPPORTUNITY_AMOUNT:,.2f}. Contact an administrator "
-            f"for opportunities above this threshold."
-        )
-
 
 def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
@@ -422,11 +393,11 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     try:
         logger.info(f"Creating new opportunity: {data.get('name')}")
         
+        # Validate input data using comprehensive validation module
+        validate_opportunity(data, is_update=False)
+        
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
-        
-        # Validate amount bounds
-        _validate_amount(db_data.get('amount'))
         
         # Generate ID if not provided
         if 'id' not in data:
@@ -488,6 +459,10 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         logger.info(f"Created opportunity with ID: {opportunity['id']}")
         return opportunity
         
+    except ValidationError as e:
+        connection.rollback()
+        logger.error(f"Validation error creating opportunity: {e.message}")
+        raise Exception(e.message)
     except psycopg2.IntegrityError as e:
         connection.rollback()
         logger.error(f"Integrity error creating opportunity: {str(e)}")
@@ -529,12 +504,11 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
     try:
         logger.info(f"Updating opportunity: {opportunity_id}")
         
+        # Validate input data using comprehensive validation module
+        validate_opportunity(data, is_update=True)
+        
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
-        
-        # Validate amount bounds if being updated
-        if 'amount' in db_data:
-            _validate_amount(db_data.get('amount'))
         
         # Remove id if present (shouldn't be updated)
         db_data.pop('id', None)
@@ -600,6 +574,10 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         logger.info(f"Updated opportunity: {opportunity_id}")
         return opportunity
         
+    except ValidationError as e:
+        connection.rollback()
+        logger.error(f"Validation error updating opportunity {opportunity_id}: {e.message}")
+        raise Exception(e.message)
     except psycopg2.IntegrityError as e:
         connection.rollback()
         logger.error(f"Integrity error updating opportunity {opportunity_id}: {str(e)}")
