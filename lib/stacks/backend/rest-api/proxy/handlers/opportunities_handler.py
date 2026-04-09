@@ -85,7 +85,8 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
 def _recalculate_account_aggregates(connection, account_id: str) -> None:
     """
     Recalculate and update the aggregate fields (opportunity_count, total_opportunity_value)
-    on the parent account after any opportunity create/update/delete.
+    on the parent account after any opportunity create/update/delete. Uses row-level locking
+    (SELECT FOR UPDATE) to prevent race conditions under concurrent modifications.
     
     Args:
         connection: Database connection object
@@ -97,18 +98,33 @@ def _recalculate_account_aggregates(connection, account_id: str) -> None:
     cursor = connection.cursor()
     try:
         cursor.execute("""
+            SELECT id FROM accounts WHERE id = %s FOR UPDATE
+        """, (account_id,))
+        
+        account_row = cursor.fetchone()
+        if not account_row:
+            logger.warning(f"Account {account_id} not found during aggregate recalculation")
+            return
+        
+        # Calculate aggregates from opportunities
+        cursor.execute("""
+            SELECT
+                COUNT(*)::int AS cnt,
+                COALESCE(SUM(amount), 0) AS total
+            FROM opportunities
+            WHERE account_id = %s AND deleted_at IS NULL
+        """, (account_id,))
+        
+        aggregates = cursor.fetchone()
+        opportunity_count = aggregates[0] if aggregates else 0
+        total_value = aggregates[1] if aggregates else 0
+        
+        # Update the locked account row
+        cursor.execute("""
             UPDATE accounts
-            SET opportunity_count = sub.cnt,
-                total_opportunity_value = sub.total
-            FROM (
-                SELECT
-                    COUNT(*)::int AS cnt,
-                    COALESCE(SUM(amount), 0) AS total
-                FROM opportunities
-                WHERE account_id = %s AND deleted_at IS NULL
-            ) sub
+            SET opportunity_count = %s, total_opportunity_value = %s
             WHERE accounts.id = %s
-        """, (account_id, account_id))
+        """, (opportunity_count, total_value, account_id))
         connection.commit()
         logger.info(f"Recalculated aggregates for account {account_id}")
     except Exception as e:
