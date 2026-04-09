@@ -11,6 +11,7 @@ Requirements: 1.1, 1.2, 2.1, 3.1, 4.1, 5.1, 6.1, 7.1, 8.1, 9.1, 10.1
 import json
 import logging
 import time
+import os
 from typing import Dict, Any
 import boto3
 
@@ -29,6 +30,7 @@ from error_handler import (
     handle_server_error,
     parse_database_error
 )
+from utils.rate_limiter import RateLimiter
 
 # CloudWatch client for custom metrics
 cloudwatch = boto3.client('cloudwatch')
@@ -37,6 +39,14 @@ cloudwatch = boto3.client('cloudwatch')
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
+# Initialize rate limiter for opportunity creation
+OPPORTUNITY_CREATION_RATE_LIMIT = int(os.environ.get('OPPORTUNITY_CREATION_RATE_LIMIT', '100'))
+OPPORTUNITY_CREATION_WINDOW_SECONDS = int(os.environ.get('OPPORTUNITY_CREATION_WINDOW_SECONDS', '3600'))
+
+opportunity_rate_limiter = RateLimiter(
+    max_requests=OPPORTUNITY_CREATION_RATE_LIMIT,
+    window_seconds=OPPORTUNITY_CREATION_WINDOW_SECONDS
+)
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
@@ -130,6 +140,12 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         return response
         
     except ValueError as e:
+    except RateLimitExceeded as e:
+        # Rate limit errors (429)
+        logger.warning(f"Rate limit exceeded in request {request_id}: {str(e)}")
+        response = handle_rate_limit_error(str(e), e.retry_after)
+        return process_cors(event, response)
+        
         # Validation errors (400)
         logger.warning(f"Validation error in request {request_id}: {str(e)}")
         response = handle_validation_error(str(e))
@@ -226,7 +242,29 @@ def execute_operation(connection, route_info, operation: str) -> Any:
                 raise ValueError(f"Opportunity with id {resource_id} not found")
             return result
         elif operation == 'create':
-            return opportunities_handler.create_opportunity(connection, body)
+            # Apply rate limiting for opportunity creation
+            user_id = route_info.user_id
+            
+            if user_id:
+                is_allowed, retry_after = opportunity_rate_limiter.is_allowed(user_id)
+                
+                if not is_allowed:
+                    # Rate limit exceeded - return 429 Too Many Requests
+                    current_usage, max_allowed = opportunity_rate_limiter.get_usage(user_id)
+                    error_message = (
+                        f"Rate limit exceeded: You have created {current_usage} opportunities "
+                        f"in the last hour. Maximum allowed is {max_allowed} per hour. "
+                        f"Please try again in {retry_after} seconds."
+                    )
+                    logger.warning(
+                        f"Rate limit exceeded for user {user_id} on opportunity creation: "
+                        f"{current_usage}/{max_allowed}"
+                    )
+                    raise RateLimitExceeded(error_message, retry_after)
+            else:
+                logger.warning("Opportunity creation without authenticated user - rate limiting skipped")
+            
+            return opportunities_handler.create_opportunity(connection, body, user_id)
         elif operation == 'update':
             result = opportunities_handler.update_opportunity(connection, resource_id, body)
             if result is None:
@@ -396,3 +434,27 @@ def format_success_response(result: Any, route_info, operation: str) -> Dict[str
     }
     
     return response
+
+
+class RateLimitExceeded(Exception):
+    """Exception raised when rate limit is exceeded."""
+    
+    def __init__(self, message: str, retry_after: int):
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
+def handle_rate_limit_error(message: str, retry_after: int) -> Dict[str, Any]:
+    """Handle rate limit exceeded errors with 429 status code."""
+    return {
+        'statusCode': 429,
+        'headers': {
+            'Content-Type': 'application/json',
+            'Retry-After': str(retry_after)
+        },
+        'body': json.dumps({
+            'error': 'Too Many Requests',
+            'message': message,
+            'retryAfter': retry_after
+        })
+    }

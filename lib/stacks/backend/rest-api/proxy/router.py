@@ -24,7 +24,8 @@ class RouteInfo:
         resource_id: Optional[str] = None,
         query_params: Optional[Dict[str, str]] = None,
         body: Optional[Dict[str, Any]] = None,
-        path: Optional[str] = None
+        path: Optional[str] = None,
+        user_id: Optional[str] = None
     ):
         self.resource_type = resource_type
         self.http_method = http_method
@@ -32,6 +33,7 @@ class RouteInfo:
         self.query_params = query_params or {}
         self.body = body or {}
         self.path = path or ""
+        self.user_id = user_id
     
     def __repr__(self):
         return (f"RouteInfo(resource_type={self.resource_type}, "
@@ -90,13 +92,17 @@ def parse_api_gateway_event(event: Dict[str, Any]) -> RouteInfo:
         # Extract and parse request body
         body = _parse_request_body(event)
         
+        # Extract user ID from Cognito authorizer claims
+        user_id = _extract_user_id(event)
+        
         route_info = RouteInfo(
             resource_type=resource_type,
             http_method=http_method,
             resource_id=resource_id,
             query_params=query_params,
             body=body,
-            path=path
+            path=path,
+            user_id=user_id
         )
         
         logger.info(f"Parsed route: {route_info}")
@@ -231,6 +237,32 @@ def _parse_request_body(event: Dict[str, Any]) -> Dict[str, Any]:
         logger.error(f"Failed to parse JSON body: {str(e)}")
         raise ValueError(f"Invalid JSON in request body: {str(e)}")
 
+
+def _extract_user_id(event: Dict[str, Any]) -> Optional[str]:
+    """
+    Extract user ID from Cognito authorizer claims in API Gateway request context.
+    
+    The user ID (sub claim) is used for rate limiting and audit logging.
+    
+    Args:
+        event: API Gateway event dictionary
+    
+    Returns:
+        User ID (Cognito sub claim) if authenticated, None otherwise
+    """
+    try:
+        # Extract from requestContext.authorizer.claims.sub (Cognito JWT)
+        request_context = event.get('requestContext', {})
+        authorizer = request_context.get('authorizer', {})
+        claims = authorizer.get('claims', {})
+        user_id = claims.get('sub')
+        
+        if user_id:
+            logger.info(f"Extracted user ID from Cognito claims: {user_id}")
+        return user_id
+    except Exception as e:
+        logger.warning(f"Failed to extract user ID from request context: {str(e)}")
+        return None
 
 def route_request(route_info: RouteInfo) -> str:
     """
