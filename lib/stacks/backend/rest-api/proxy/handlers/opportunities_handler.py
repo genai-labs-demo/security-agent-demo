@@ -450,14 +450,14 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
             cursor.execute("SELECT id FROM accounts WHERE id = %s", (db_data['account_id'],))
             if not cursor.fetchone():
                 cursor.close()
-                raise Exception(f"Invalid account ID: account does not exist")
+                raise Exception("Invalid reference: one or more referenced entities do not exist")
         
         # Validate owner_id exists
         if 'owner_id' in db_data and db_data['owner_id']:
             cursor.execute("SELECT id FROM team_members WHERE id = %s", (db_data['owner_id'],))
             if not cursor.fetchone():
                 cursor.close()
-                raise Exception(f"Invalid owner ID: team member does not exist")
+                raise Exception("Invalid reference: one or more referenced entities do not exist")
         
         # Build INSERT query dynamically based on provided fields
         columns = list(db_data.keys())
@@ -493,11 +493,8 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         logger.error(f"Integrity error creating opportunity: {str(e)}")
         # Check for specific constraint violations
         if 'foreign key' in str(e).lower():
-            if 'account_id' in str(e).lower():
-                raise Exception("Invalid account ID: account does not exist")
-            elif 'owner_id' in str(e).lower():
-                raise Exception("Invalid owner ID: team member does not exist")
-        raise Exception(f"Failed to create opportunity: constraint violation")
+            raise Exception("Invalid reference: one or more referenced entities do not exist")
+        raise Exception("Failed to create opportunity: constraint violation")
     except psycopg2.Error as e:
         connection.rollback()
         logger.error(f"Database error creating opportunity: {str(e)}")
@@ -505,7 +502,7 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         connection.rollback()
         # Re-raise if it's already our custom exception
-        if "Invalid account ID" in str(e) or "Invalid owner ID" in str(e):
+        if "Invalid reference" in str(e):
             raise
         logger.error(f"Unexpected error creating opportunity: {str(e)}")
         raise
@@ -554,14 +551,14 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
             cursor.execute("SELECT id FROM accounts WHERE id = %s", (db_data['account_id'],))
             if not cursor.fetchone():
                 cursor.close()
-                raise Exception(f"Invalid account ID: account does not exist")
+                raise Exception("Invalid reference: one or more referenced entities do not exist")
         
         # Validate owner_id exists if being updated
         if 'owner_id' in db_data and db_data['owner_id']:
             cursor.execute("SELECT id FROM team_members WHERE id = %s", (db_data['owner_id'],))
             if not cursor.fetchone():
                 cursor.close()
-                raise Exception(f"Invalid owner ID: team member does not exist")
+                raise Exception("Invalid reference: one or more referenced entities do not exist")
         
         # Build UPDATE query dynamically based on provided fields
         set_clauses = [f"{col} = %s" for col in db_data.keys()]
@@ -605,11 +602,8 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         logger.error(f"Integrity error updating opportunity {opportunity_id}: {str(e)}")
         # Check for specific constraint violations
         if 'foreign key' in str(e).lower():
-            if 'account_id' in str(e).lower():
-                raise Exception("Invalid account ID: account does not exist")
-            elif 'owner_id' in str(e).lower():
-                raise Exception("Invalid owner ID: team member does not exist")
-        raise Exception(f"Failed to update opportunity: constraint violation")
+            raise Exception("Invalid reference: one or more referenced entities do not exist")
+        raise Exception("Failed to update opportunity: constraint violation")
     except psycopg2.Error as e:
         connection.rollback()
         logger.error(f"Database error updating opportunity {opportunity_id}: {str(e)}")
@@ -617,7 +611,7 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
     except Exception as e:
         connection.rollback()
         # Re-raise if it's already our custom exception
-        if "Invalid account ID" in str(e) or "Invalid owner ID" in str(e) or "Invalid amount" in str(e):
+        if "Invalid reference" in str(e) or "Invalid amount" in str(e):
             raise
         logger.error(f"Unexpected error updating opportunity {opportunity_id}: {str(e)}")
         raise
