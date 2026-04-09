@@ -8,6 +8,7 @@ import {
 } from "@cloudscape-design/components";
 import { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
+import { fetchAuthSession } from "aws-amplify/auth";
 
 const API_BASE = import.meta.env.VITE_REST_API_URL?.replace(/\/$/, "") ?? "";
 
@@ -33,9 +34,14 @@ const SecurityProfilePage = () => {
         setError(null);
         setResult(null);
         try {
+            const session = await fetchAuthSession();
+            const token = session.tokens?.idToken?.toString() ?? "";
             const res = await fetch(`${API_BASE}/security-profile`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: { 
+                    "Content-Type": "application/json",
+                    Authorization: token,
+                },
                 body: JSON.stringify({ user_id: searchId }),
             });
             const data = await res.json();
