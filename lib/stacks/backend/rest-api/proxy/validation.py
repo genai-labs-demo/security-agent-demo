@@ -12,6 +12,20 @@ HEALTH_STATUS_VALUES = ['Green', 'Yellow', 'Red']
 OPPORTUNITY_STAGE_VALUES = ['Launched', 'Qualified', 'Proof of Concept', 'Negotiation', 'Closed Won', 'Closed Lost']
 FORECAST_CATEGORY_VALUES = ['Pipeline', 'Best Case', 'Commit', 'Closed']
 
+# Define stage-probability correlation rules for business logic validation
+# Each stage has an expected probability range to ensure data integrity
+STAGE_PROBABILITY_RANGES = {
+    'Launched': (10, 20),
+    'Qualified': (20, 40),
+    'Proof of Concept': (40, 60),
+    'Negotiation': (60, 80),
+    'Closed Won': (100, 100),
+    'Closed Lost': (0, 0)
+}
+
+# Tolerance note: Ranges are inclusive on both ends
+# Example: Launched accepts 10, 11, ..., 20
+
 # Email validation regex pattern
 EMAIL_PATTERN = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
 
@@ -192,6 +206,29 @@ def validate_opportunity(data: Dict[str, Any], is_update: bool = False) -> None:
             raise ValidationError("Field 'probability' must be an integer", field='probability')
         if not (0 <= data['probability'] <= 100):
             raise ValidationError("Field 'probability' must be between 0 and 100", field='probability')
+    
+    # Validate stage-probability correlation (business logic validation)
+    # Only validate when BOTH stage and probability are present in the request
+    # This allows partial updates of individual fields without correlation check
+    if 'stage' in data and 'probability' in data:
+        stage = data['stage']
+        probability = data['probability']
+        
+        # Ensure stage is valid before checking correlation
+        if stage in STAGE_PROBABILITY_RANGES:
+            min_prob, max_prob = STAGE_PROBABILITY_RANGES[stage]
+            
+            if not (min_prob <= probability <= max_prob):
+                if min_prob == max_prob:
+                    raise ValidationError(
+                        f"Field 'probability' must be {min_prob}% for stage '{stage}'",
+                        field='probability'
+                    )
+                else:
+                    raise ValidationError(
+                        f"Field 'probability' must be between {min_prob}% and {max_prob}% for stage '{stage}'",
+                        field='probability'
+                    )
     
     # Validate optional fields if present
     if 'accountName' in data and data['accountName'] is not None:

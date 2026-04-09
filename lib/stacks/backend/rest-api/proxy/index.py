@@ -17,6 +17,7 @@ import boto3
 # Import handler modules
 from router import parse_api_gateway_event, validate_route, get_operation_type
 from db_connection import get_database_connection, return_database_connection
+from validation import ValidationError
 from handlers import accounts_handler, opportunities_handler, team_members_handler, industries_handler
 from handlers import security_handler
 from s3_integration import enhance_with_images
@@ -133,6 +134,12 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Validation errors (400)
         logger.warning(f"Validation error in request {request_id}: {str(e)}")
         response = handle_validation_error(str(e))
+        return process_cors(event, response)
+        
+    except ValidationError as e:
+        # Custom validation errors with field information (400)
+        logger.warning(f"Validation error in request {request_id}: {str(e)}")
+        response = handle_validation_error(e.message, field=e.field)
         return process_cors(event, response)
         
     except Exception as e:
