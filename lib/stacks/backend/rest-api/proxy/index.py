@@ -11,7 +11,7 @@ Requirements: 1.1, 1.2, 2.1, 3.1, 4.1, 5.1, 6.1, 7.1, 8.1, 9.1, 10.1
 import json
 import logging
 import time
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import boto3
 
 # Import handler modules
@@ -85,7 +85,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             start_time = time.time()
             
             # Route to appropriate handler and execute operation
-            result = execute_operation(connection, route_info, operation)
+            result = execute_operation(connection, route_info, operation, event)
             
             # Calculate and publish search latency metrics
             elapsed_time = (time.time() - start_time) * 1000  # Convert to milliseconds
@@ -162,7 +162,27 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         return process_cors(event, response)
 
 
-def execute_operation(connection, route_info, operation: str) -> Any:
+def _extract_user_context(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    Extract user context from API Gateway event (Cognito authorizer claims).
+    
+    Args:
+        event: API Gateway event dictionary
+        
+    Returns:
+        Dictionary with user context (username, sub, email) or None if not available
+    """
+    try:
+        request_context = event.get('requestContext', {})
+        authorizer = request_context.get('authorizer', {})
+        claims = authorizer.get('claims', {})
+        return claims if claims else None
+    except Exception as e:
+        logger.debug(f"Could not extract user context: {str(e)}")
+        return None
+
+
+def execute_operation(connection, route_info, operation: str, event: Dict[str, Any]) -> Any:
     """
     Execute the appropriate CRUD operation based on route information.
     
@@ -228,7 +248,11 @@ def execute_operation(connection, route_info, operation: str) -> Any:
         elif operation == 'create':
             return opportunities_handler.create_opportunity(connection, body)
         elif operation == 'update':
-            result = opportunities_handler.update_opportunity(connection, resource_id, body)
+            # Extract user context for audit logging in update operations
+            user_context = _extract_user_context(event)
+            result = opportunities_handler.update_opportunity(
+                connection, resource_id, body, user_context
+            )
             if result is None:
                 raise ValueError(f"Opportunity with id {resource_id} not found")
             return result
