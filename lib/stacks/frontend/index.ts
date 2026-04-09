@@ -1,4 +1,4 @@
-import { CfnOutput, StackProps } from "aws-cdk-lib";
+import { CfnOutput, Duration, StackProps } from "aws-cdk-lib";
 import { Certificate, CertificateValidation } from "aws-cdk-lib/aws-certificatemanager";
 import {
     AllowedMethods,
@@ -7,7 +7,10 @@ import {
     Function as CloudFrontFunction,
     FunctionCode,
     FunctionEventType,
+    HeadersFrameOption,
+    HeadersReferrerPolicy,
     OriginRequestPolicy,
+    ResponseHeadersPolicy,
     SecurityPolicyProtocol,
     SSLMethod,
     ViewerProtocolPolicy,
@@ -34,6 +37,7 @@ const HOSTED_ZONE_NAME = "YOUR_HOSTED_ZONE_NAME"; // e.g. "example.com"
 export class Frontend extends CommonStack {
     public readonly websiteBucket: Bucket;
     public readonly distribution: Distribution;
+    private readonly responseHeadersPolicy: ResponseHeadersPolicy;
     public readonly urls: string[];
 
     constructor(scope: Construct, id: string, props?: StackProps) {
@@ -148,6 +152,50 @@ export class Frontend extends CommonStack {
             validation: CertificateValidation.fromDns(hostedZone),
         });
 
+        // Response Headers Policy for security headers
+        const responseHeadersPolicy = new ResponseHeadersPolicy(this, "securityHeadersPolicy", {
+            securityHeadersBehavior: {
+                strictTransportSecurity: {
+                    accessControlMaxAge: Duration.days(365),
+                    includeSubdomains: true,
+                    preload: true,
+                    override: true,
+                },
+                contentTypeOptions: {
+                    override: true,
+                },
+                frameOptions: {
+                    frameOption: HeadersFrameOption.DENY,
+                    override: true,
+                },
+                referrerPolicy: {
+                    referrerPolicy: HeadersReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN,
+                    override: true,
+                },
+                xssProtection: {
+                    protection: true,
+                    modeBlock: true,
+                    override: true,
+                },
+                contentSecurityPolicy: {
+                    contentSecurityPolicy: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://*.amazonaws.com; frame-ancestors 'none';",
+                    override: true,
+                },
+            },
+            customHeadersBehavior: {
+                customHeaders: [
+                    {
+                        header: "Permissions-Policy",
+                        value: "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
+                        override: true,
+                    },
+                ],
+            },
+        });
+
+        // Store the policy for use in addApiProxy method
+        this.responseHeadersPolicy = responseHeadersPolicy;
+
         const distribution = new Distribution(this, "distribution", {
             defaultRootObject: "index.html",
             domainNames: [CUSTOM_DOMAIN],
@@ -157,6 +205,7 @@ export class Frontend extends CommonStack {
                 viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                 allowedMethods: AllowedMethods.ALLOW_ALL,
                 originRequestPolicy: OriginRequestPolicy.CORS_S3_ORIGIN,
+                responseHeadersPolicy: responseHeadersPolicy,
             },
             additionalBehaviors: {
                 "/assets/*": {
@@ -164,6 +213,7 @@ export class Frontend extends CommonStack {
                     viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                     allowedMethods: AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
                     originRequestPolicy: OriginRequestPolicy.CORS_S3_ORIGIN,
+                    responseHeadersPolicy: responseHeadersPolicy,
                 },
             },
             errorResponses: [
@@ -245,6 +295,7 @@ function handler(event) {
             allowedMethods: AllowedMethods.ALLOW_ALL,
             cachePolicy: CachePolicy.CACHING_DISABLED,
             originRequestPolicy: OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+            responseHeadersPolicy: this.responseHeadersPolicy,
             functionAssociations: [{
                 function: rewriteFunction,
                 eventType: FunctionEventType.VIEWER_REQUEST,
