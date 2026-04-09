@@ -9,6 +9,9 @@ from datetime import datetime
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
+# Import validation for cross-field checks
+from validation import validate_opportunity
+
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -517,6 +520,199 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
     
     Args:
         connection: Database connection object
+    
+    Args:
+        connection: Database connection object
+        opportunity_id: Opportunity ID to update
+        data: Partial opportunity data in API format (camelCase)
+    
+    Returns:
+        Updated opportunity dictionary in API format, or None if not found
+    
+    Raises:
+        Exception: If database update fails or validation fails
+    """
+    try:
+        logger.info(f"Updating opportunity: {opportunity_id}")
+        
+        # For partial updates (stage or forecastCategory only), we need the current values
+        # to perform cross-field validation
+        if ('stage' in data and 'forecastCategory' not in data) or \
+           ('forecastCategory' in data and 'stage' not in data):
+            # Fetch current opportunity to get missing field for validation
+            cursor = connection.cursor(cursor_factory=RealDictCursor)
+            cursor.execute("""
+                SELECT stage, forecast_category
+                FROM opportunities
+                WHERE id = %s AND deleted_at IS NULL
+            """, (opportunity_id,))
+            current_record = cursor.fetchone()
+            cursor.close()
+            
+            if not current_record:
+                logger.info(f"Opportunity not found for update: {opportunity_id}")
+                return None
+            
+            # Create validation context with both current and new values
+            validation_data = data.copy()
+            if 'stage' not in validation_data:
+                validation_data['stage'] = current_record['stage']
+            if 'forecastCategory' not in validation_data:
+                validation_data['forecastCategory'] = current_record['forecast_category']
+            
+            # Validate with complete context
+            validate_opportunity(validation_data, is_update=True)
+        
+        # Map API format to database format
+        db_data = _map_api_to_db_format(data)
+        
+        # Validate amount bounds if being updated
+        if 'amount' in data:
+            _validate_amount(db_data.get('amount'))
+        
+        # Remove id if present (shouldn't be updated)
+        db_data.pop('id', None)
+        
+        # Update last_modified_date
+        db_data['last_modified_date'] = datetime.utcnow()
+        
+        if not db_data or (len(db_data) == 1 and 'last_modified_date' in db_data):
+            logger.warning("No fields to update")
+            # Return current opportunity
+            return get_opportunity(connection, opportunity_id)
+        
+        cursor = connection.cursor(cursor_factory=RealDictCursor)
+        
+        # Validate account_id exists if being updated
+        if 'account_id' in db_data and db_data['account_id']:
+            cursor.execute("SELECT id FROM accounts WHERE id = %s", (db_data['account_id'],))
+            if not cursor.fetchone():
+                cursor.close()
+                raise Exception(f"Invalid account ID: account does not exist")
+        
+        # Validate owner_id exists if being updated
+        if 'owner_id' in db_data and db_data['owner_id']:
+            cursor.execute("SELECT id FROM team_members WHERE id = %s", (db_data['owner_id'],))
+            if not cursor.fetchone():
+                cursor.close()
+                raise Exception(f"Invalid owner ID: team member does not exist")
+        
+        # Build UPDATE query dynamically based on provided fields
+        set_clauses = [f"{col} = %s" for col in db_data.keys()]
+        values = list(db_data.values())
+        values.append(opportunity_id)  # For WHERE clause
+        
+        query = f"""
+            UPDATE opportunities
+            SET {', '.join(set_clauses)}
+            WHERE id = %s
+            RETURNING 
+                id, name, account_id, account_name, amount, close_date,
+                stage, next_step, recent_activity, recent_activity_date,
+                forecast_category, owner_id, owner_name, probability,
+                created_date, last_modified_date
+        """
+        
+        cursor.execute(query, values)
+        record = cursor.fetchone()
+        
+        if not record:
+            connection.rollback()
+            cursor.close()
+            logger.info(f"Opportunity not found for update: {opportunity_id}")
+            return None
+        
+        connection.commit()
+        cursor.close()
+        
+        # Map to API format
+        opportunity = _map_opportunity_to_api_format(dict(record))
+        
+        # Recalculate parent account aggregates (handles amount or account changes)
+        _recalculate_account_aggregates(connection, record.get('account_id'))
+        
+        logger.info(f"Updated opportunity: {opportunity_id}")
+        return opportunity
+        
+    except psycopg2.IntegrityError as e:
+        connection.rollback()
+        logger.error(f"Integrity error updating opportunity {opportunity_id}: {str(e)}")
+        # Check for specific constraint violations
+        if 'foreign key' in str(e).lower():
+            if 'account_id' in str(e).lower():
+                raise Exception("Invalid account ID: account does not exist")
+            elif 'owner_id' in str(e).lower():
+                raise Exception("Invalid owner ID: team member does not exist")
+        raise Exception(f"Failed to update opportunity: constraint violation")
+    except psycopg2.Error as e:
+        connection.rollback()
+        logger.error(f"Database error updating opportunity {opportunity_id}: {str(e)}")
+        raise Exception(f"Failed to update opportunity: {str(e)}")
+    except Exception as e:
+        connection.rollback()
+        # Re-raise if it's already our custom exception
+        if "Invalid account ID" in str(e) or "Invalid owner ID" in str(e) or "Invalid amount" in str(e):
+            raise
+        logger.error(f"Unexpected error updating opportunity {opportunity_id}: {str(e)}")
+        raise
+
+
+def delete_opportunity(connection, opportunity_id: str) -> bool:
+    """
+    Soft-delete an opportunity record by marking it as deleted.
+    The record is retained in the database for recovery purposes.
+    Recalculates parent account aggregates after deletion.
+
+    Args:
+        connection: Database connection object
+        opportunity_id: Opportunity ID to soft-delete
+
+    Returns:
+        True if opportunity was soft-deleted, False if not found
+
+    Raises:
+        Exception: If database update fails
+    """
+    try:
+        logger.info(f"Soft-deleting opportunity: {opportunity_id}")
+
+        cursor = connection.cursor()
+
+        # Check if opportunity exists and capture account_id for aggregate recalculation
+        cursor.execute(
+            "SELECT id, account_id FROM opportunities WHERE id = %s AND (deleted_at IS NULL)",
+            (opportunity_id,)
+        )
+        row = cursor.fetchone()
+        if not row:
+            cursor.close()
+            logger.info(f"Opportunity not found for deletion: {opportunity_id}")
+            return False
+
+        account_id = row[1]
+
+        # Soft-delete: set deleted_at timestamp instead of removing the row
+        cursor.execute(
+            "UPDATE opportunities SET deleted_at = NOW() WHERE id = %s",
+            (opportunity_id,)
+        )
+        connection.commit()
+        cursor.close()
+
+        # Recalculate parent account aggregates
+        _recalculate_account_aggregates(connection, account_id)
+
+        logger.info(f"Soft-deleted opportunity: {opportunity_id}")
+        return True
+
+    except psycopg2.Error as e:
+        connection.rollback()
+        logger.error(f"Database error soft-deleting opportunity {opportunity_id}: {str(e)}")
+        raise Exception(f"Failed to delete opportunity: {str(e)}")
+    except Exception as e:
+        connection.rollback()
+        logger.error(f"Unexpected error soft-deleting opportunity {opportunity_id}: {str(e)}")
+        raise
         opportunity_id: Opportunity ID to update
         data: Partial opportunity data in API format (camelCase)
     

@@ -18,6 +18,7 @@ import boto3
 from router import parse_api_gateway_event, validate_route, get_operation_type
 from db_connection import get_database_connection, return_database_connection
 from handlers import accounts_handler, opportunities_handler, team_members_handler, industries_handler
+from validation import validate_account, validate_opportunity, validate_team_member, ValidationError
 from handlers import security_handler
 from s3_integration import enhance_with_images
 from cors_handler import process_cors
@@ -130,6 +131,11 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         return response
         
     except ValueError as e:
+    except ValidationError as e:
+        # Custom validation errors (400)
+        logger.warning(f"Validation error in request {request_id}: {str(e)}")
+        response = handle_validation_error(str(e))
+        return process_cors(event, response)
         # Validation errors (400)
         logger.warning(f"Validation error in request {request_id}: {str(e)}")
         response = handle_validation_error(str(e))
@@ -196,8 +202,10 @@ def execute_operation(connection, route_info, operation: str) -> Any:
         elif operation == 'create':
             return accounts_handler.create_account(connection, body)
         elif operation == 'update':
+            validate_account(body, is_update=False)
             result = accounts_handler.update_account(connection, resource_id, body)
             if result is None:
+            validate_account(body, is_update=True)
                 raise ValueError(f"Account with id {resource_id} not found")
             return result
         elif operation == 'delete':
@@ -228,8 +236,12 @@ def execute_operation(connection, route_info, operation: str) -> Any:
         elif operation == 'create':
             return opportunities_handler.create_opportunity(connection, body)
         elif operation == 'update':
+            validate_opportunity(body, is_update=False)
             result = opportunities_handler.update_opportunity(connection, resource_id, body)
             if result is None:
+            # Note: For partial updates with stage/forecastCategory, 
+            # opportunities_handler will fetch current values and validate
+            validate_opportunity(body, is_update=True)
                 raise ValueError(f"Opportunity with id {resource_id} not found")
             return result
         elif operation == 'delete':
@@ -254,8 +266,10 @@ def execute_operation(connection, route_info, operation: str) -> Any:
             if result is None:
                 raise ValueError(f"Team member with id {resource_id} not found")
             return result
+            validate_team_member(body, is_update=False)
         elif operation == 'delete':
             success = team_members_handler.delete_team_member(connection, resource_id)
+            validate_team_member(body, is_update=True)
             if not success:
                 raise ValueError(f"Team member with id {resource_id} not found")
             return None
