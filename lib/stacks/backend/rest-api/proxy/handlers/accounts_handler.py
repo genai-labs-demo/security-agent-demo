@@ -128,6 +128,10 @@ def list_accounts(connection) -> List[Dict[str, Any]]:
 # Fields that are computed from business metrics and cannot be set directly by users
 COMPUTED_FIELDS = {'health_status', 'health_score', 'opportunity_count', 'total_opportunity_value'}
 
+# Fields that must be controlled server-side and cannot be set via API input
+# These require proper authorization and should be set based on authenticated context
+PROTECTED_FIELDS = {'owner_id'}
+
 
 
 def get_account(connection, account_id: str) -> Optional[Dict[str, Any]]:
@@ -203,6 +207,11 @@ def create_account(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         
         # Strip computed fields — these are derived from business metrics, not user input
         for field in COMPUTED_FIELDS:
+            db_data.pop(field, None)
+        
+        # Strip protected fields — these require authorization and cannot be set via API
+        # CWE-915: Mass Assignment Prevention
+        for field in PROTECTED_FIELDS:
             db_data.pop(field, None)
         
         # Generate ID if not provided
@@ -297,6 +306,11 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
         
         # Strip computed fields — these are derived from business metrics, not user input
         for field in COMPUTED_FIELDS:
+            db_data.pop(field, None)
+        
+        # Strip protected fields — these require authorization and cannot be set via API
+        # CWE-915: Mass Assignment Prevention
+        for field in PROTECTED_FIELDS:
             db_data.pop(field, None)
         
         if not db_data:

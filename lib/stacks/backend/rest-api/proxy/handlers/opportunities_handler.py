@@ -82,6 +82,11 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
     return db_data
 
 
+# Fields that must be controlled server-side and cannot be set via API input
+# These require proper authorization and should be set based on authenticated context
+PROTECTED_FIELDS = {'owner_id'}
+
+
 def _recalculate_account_aggregates(connection, account_id: str) -> None:
     """
     Recalculate and update the aggregate fields (opportunity_count, total_opportunity_value)
@@ -428,6 +433,11 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         # Validate amount bounds
         _validate_amount(db_data.get('amount'))
         
+        # Strip protected fields — these require authorization and cannot be set via API
+        # CWE-915: Mass Assignment Prevention
+        for field in PROTECTED_FIELDS:
+            db_data.pop(field, None)
+        
         # Generate ID if not provided
         if 'id' not in data:
             import uuid
@@ -538,6 +548,11 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         
         # Remove id if present (shouldn't be updated)
         db_data.pop('id', None)
+        
+        # Strip protected fields — these require authorization and cannot be set via API
+        # CWE-915: Mass Assignment Prevention
+        for field in PROTECTED_FIELDS:
+            db_data.pop(field, None)
         
         # Update last_modified_date
         db_data['last_modified_date'] = datetime.utcnow()
