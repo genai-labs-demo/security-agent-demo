@@ -9,6 +9,7 @@ from datetime import datetime
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
+from validation import validate_opportunity, ValidationError
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -422,11 +423,14 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     try:
         logger.info(f"Creating new opportunity: {data.get('name')}")
         
+        # Validate input data
+        try:
+            validate_opportunity(data, is_update=False)
+        except ValidationError as e:
+            raise ValueError(str(e))
+        
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
-        
-        # Validate amount bounds
-        _validate_amount(db_data.get('amount'))
         
         # Generate ID if not provided
         if 'id' not in data:
@@ -529,12 +533,14 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
     try:
         logger.info(f"Updating opportunity: {opportunity_id}")
         
+        # Validate input data
+        try:
+            validate_opportunity(data, is_update=True)
+        except ValidationError as e:
+            raise ValueError(str(e))
+        
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
-        
-        # Validate amount bounds if being updated
-        if 'amount' in db_data:
-            _validate_amount(db_data.get('amount'))
         
         # Remove id if present (shouldn't be updated)
         db_data.pop('id', None)

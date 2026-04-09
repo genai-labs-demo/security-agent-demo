@@ -9,6 +9,7 @@ from datetime import datetime
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
+from validation import validate_team_member, ValidationError
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -183,6 +184,12 @@ def create_team_member(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     try:
         logger.info(f"Creating new team member: {data.get('name')}")
         
+        # Validate input data
+        try:
+            validate_team_member(data, is_update=False)
+        except ValidationError as e:
+            raise ValueError(str(e))
+        
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
         
@@ -267,6 +274,12 @@ def update_team_member(connection, member_id: str, data: Dict[str, Any]) -> Opti
     """
     try:
         logger.info(f"Updating team member: {member_id}")
+        
+        # Validate input data
+        try:
+            validate_team_member(data, is_update=True)
+        except ValidationError as e:
+            raise ValueError(str(e))
         
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
