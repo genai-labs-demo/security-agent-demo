@@ -129,6 +129,94 @@ def list_accounts(connection) -> List[Dict[str, Any]]:
 COMPUTED_FIELDS = {'health_status', 'health_score', 'opportunity_count', 'total_opportunity_value'}
 
 
+def _recalculate_health(connection, account_id: str) -> None:
+    """
+    Recalculate and update the health score and health status for an account
+    based on business metrics including opportunity engagement, pipeline value,
+    and account activity.
+    
+    Health Score Calculation (0-100):
+    - Recent activity (0-40 points): Based on days since last_activity_date
+      * 0-7 days: 40 points
+      * 8-30 days: 30 points
+      * 31-60 days: 20 points
+      * 61-90 days: 10 points
+      * 90+ days: 0 points
+    - Opportunity engagement (0-40 points): Based on opportunity_count
+      * 5+ opportunities: 40 points
+      * 3-4 opportunities: 30 points
+      * 1-2 opportunities: 20 points
+      * 0 opportunities: 0 points
+    - Pipeline value (0-20 points): Based on total_opportunity_value
+      * $500K+: 20 points
+      * $250K-$499K: 15 points
+      * $100K-$249K: 10 points
+      * $1-$99K: 5 points
+      * $0: 0 points
+    
+    Health Status Determination:
+    - 70-100: 'Green'
+    - 40-69: 'Yellow'
+    - 0-39: 'Red'
+    
+    Args:
+        connection: Database connection object
+        account_id: Account ID whose health metrics need recalculation
+    """
+    if not account_id:
+        return
+    
+    cursor = connection.cursor()
+    try:
+        # Calculate health score using SQL to ensure consistency
+        cursor.execute("""
+            UPDATE accounts
+            SET health_score = (
+                -- Activity score (0-40 points)
+                CASE 
+                    WHEN COALESCE(EXTRACT(DAY FROM (NOW() - last_activity_date)), 999999) <= 7 THEN 40
+                    WHEN COALESCE(EXTRACT(DAY FROM (NOW() - last_activity_date)), 999999) <= 30 THEN 30
+                    WHEN COALESCE(EXTRACT(DAY FROM (NOW() - last_activity_date)), 999999) <= 60 THEN 20
+                    WHEN COALESCE(EXTRACT(DAY FROM (NOW() - last_activity_date)), 999999) <= 90 THEN 10
+                    ELSE 0
+                END +
+                -- Opportunity engagement score (0-40 points)
+                CASE
+                    WHEN COALESCE(opportunity_count, 0) >= 5 THEN 40
+                    WHEN COALESCE(opportunity_count, 0) >= 3 THEN 30
+                    WHEN COALESCE(opportunity_count, 0) >= 1 THEN 20
+                    ELSE 0
+                END +
+                -- Pipeline value score (0-20 points)
+                CASE
+                    WHEN COALESCE(total_opportunity_value, 0) >= 500000 THEN 20
+                    WHEN COALESCE(total_opportunity_value, 0) >= 250000 THEN 15
+                    WHEN COALESCE(total_opportunity_value, 0) >= 100000 THEN 10
+                    WHEN COALESCE(total_opportunity_value, 0) >= 1 THEN 5
+                    ELSE 0
+                END
+            ),
+            health_status = (
+                CASE
+                    WHEN (/* Calculate same health_score inline for status determination */
+                        CASE WHEN COALESCE(EXTRACT(DAY FROM (NOW() - last_activity_date)), 999999) <= 7 THEN 40 WHEN COALESCE(EXTRACT(DAY FROM (NOW() - last_activity_date)), 999999) <= 30 THEN 30 WHEN COALESCE(EXTRACT(DAY FROM (NOW() - last_activity_date)), 999999) <= 60 THEN 20 WHEN COALESCE(EXTRACT(DAY FROM (NOW() - last_activity_date)), 999999) <= 90 THEN 10 ELSE 0 END +
+                        CASE WHEN COALESCE(opportunity_count, 0) >= 5 THEN 40 WHEN COALESCE(opportunity_count, 0) >= 3 THEN 30 WHEN COALESCE(opportunity_count, 0) >= 1 THEN 20 ELSE 0 END +
+                        CASE WHEN COALESCE(total_opportunity_value, 0) >= 500000 THEN 20 WHEN COALESCE(total_opportunity_value, 0) >= 250000 THEN 15 WHEN COALESCE(total_opportunity_value, 0) >= 100000 THEN 10 WHEN COALESCE(total_opportunity_value, 0) >= 1 THEN 5 ELSE 0 END
+                    ) >= 70 THEN 'Green'
+                    WHEN (CASE WHEN COALESCE(EXTRACT(DAY FROM (NOW() - last_activity_date)), 999999) <= 7 THEN 40 WHEN COALESCE(EXTRACT(DAY FROM (NOW() - last_activity_date)), 999999) <= 30 THEN 30 WHEN COALESCE(EXTRACT(DAY FROM (NOW() - last_activity_date)), 999999) <= 60 THEN 20 WHEN COALESCE(EXTRACT(DAY FROM (NOW() - last_activity_date)), 999999) <= 90 THEN 10 ELSE 0 END + CASE WHEN COALESCE(opportunity_count, 0) >= 5 THEN 40 WHEN COALESCE(opportunity_count, 0) >= 3 THEN 30 WHEN COALESCE(opportunity_count, 0) >= 1 THEN 20 ELSE 0 END + CASE WHEN COALESCE(total_opportunity_value, 0) >= 500000 THEN 20 WHEN COALESCE(total_opportunity_value, 0) >= 250000 THEN 15 WHEN COALESCE(total_opportunity_value, 0) >= 100000 THEN 10 WHEN COALESCE(total_opportunity_value, 0) >= 1 THEN 5 ELSE 0 END) >= 40 THEN 'Yellow'
+                    ELSE 'Red'
+                END
+            )
+            WHERE id = %s
+        """, (account_id,))
+        connection.commit()
+        logger.info(f"Recalculated health metrics for account {account_id}")
+    except Exception as e:
+        logger.error(f"Failed to recalculate health for account {account_id}: {str(e)}")
+        # Don't rollback here — let the caller handle transaction management
+    finally:
+        cursor.close()
+
 
 def get_account(connection, account_id: str) -> Optional[Dict[str, Any]]:
     """
