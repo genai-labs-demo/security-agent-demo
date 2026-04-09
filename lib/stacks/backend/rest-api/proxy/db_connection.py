@@ -89,7 +89,7 @@ def _get_database_credentials() -> dict:
 def _initialize_connection_pool() -> psycopg2.pool.SimpleConnectionPool:
     """
     Initialize the database connection pool.
-    Creates a pool with min 1 and max 5 connections.
+    Creates a pool with min 1 and max 10 connections.
     
     Returns:
         SimpleConnectionPool: Initialized connection pool
@@ -113,7 +113,7 @@ def _initialize_connection_pool() -> psycopg2.pool.SimpleConnectionPool:
         # Create connection pool
         _connection_pool = psycopg2.pool.SimpleConnectionPool(
             minconn=1,
-            maxconn=5,
+            maxconn=10,
             user=credentials['username'],
             password=credentials['password'],
             host=credentials['host'],
@@ -172,6 +172,14 @@ def get_database_connection():
             cursor = connection.cursor()
             cursor.execute("SELECT 1")
             cursor.close()
+            
+            # Set statement timeout to prevent long-running queries from exhausting connections
+            # This protects against resource exhaustion attacks via complex search queries
+            # CWE-400: Uncontrolled Resource Consumption
+            cursor = connection.cursor()
+            cursor.execute("SET statement_timeout = '30s'")
+            cursor.close()
+            connection.commit()
         except psycopg2.Error:
             # Connection is dead, close it and get a new one
             logger.warning("Connection test failed, getting new connection")
