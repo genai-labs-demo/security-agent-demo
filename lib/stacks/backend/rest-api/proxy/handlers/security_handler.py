@@ -15,6 +15,7 @@ Vulnerability inventory (matches pen-test target set):
   9. Reflected XSS (HTML)   — GET /security-xss-search?q= (reflects search query in HTML for pen-test detection)
 """
 
+import html
 import json
 import logging
 import subprocess
@@ -335,6 +336,10 @@ def render_xss_page(query_params):
     A pen-test scanner will detect this because the response is Content-Type: text/html
     and the payload is reflected verbatim.
     """
+    # SECURITY FIX: HTML-encode user input to prevent XSS
+    # This prevents malicious scripts from executing by converting special characters
+    # to HTML entities (e.g., < becomes &lt;, > becomes &gt;)
+    
     name = query_params.get("name", "Guest")
     search = query_params.get("q", "")
 
@@ -345,17 +350,18 @@ def render_xss_page(query_params):
 <html>
 <head><title>Security Demo - User Profile</title></head>
 <body>
-<h1>Welcome, {name}</h1>
+<h1>Welcome, {html.escape(name)}</h1>
 <p>Your profile page is ready.</p>
 <div id="search-results">
-  <h2>Search Results for: {search}</h2>
+  <h2>Search Results for: {html.escape(search)}</h2>
   <p>No results found for your query.</p>
 </div>
 <script>
-  // VULNERABILITY: DOM-based XSS — reads from URL fragment and injects into DOM
+  // SECURITY FIX: Encode hash value before injecting into DOM to prevent XSS
   var hash = window.location.hash.substring(1);
   if (hash) {{
-    document.getElementById('search-results').innerHTML += '<p>Fragment: ' + hash + '</p>';
+    var encoded = hash.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#x27;');
+    document.getElementById('search-results').innerHTML += '<p>Fragment: ' + encoded + '</p>';
   }}
 </script>
 </body>
@@ -385,12 +391,16 @@ def render_xss_comments_page(connection):
         comments_html = ""
         for row in rows:
             username = row.get("username") or "Anonymous"
-            # VULNERABILITY: Stored XSS — content rendered directly in HTML without encoding
+            # SECURITY FIX: HTML-encode content and username to prevent stored XSS
+            # This ensures malicious scripts stored in the database cannot execute
+            # when rendered to users
             content = row.get("content", "")
+            safe_username = html.escape(username)
+            safe_content = html.escape(content)
             comments_html += f"""
             <div style="border:1px solid #333;border-radius:6px;padding:12px;margin:8px 0;background:#16213e;">
-                <strong style="color:#ffa07a;">{username}</strong>
-                <div style="margin-top:6px;color:#e0e0e0;">{content}</div>
+                <strong style="color:#ffa07a;">{safe_username}</strong>
+                <div style="margin-top:6px;color:#e0e0e0;">{safe_content}</div>
             </div>"""
 
         html = f"""<!DOCTYPE html>
@@ -442,12 +452,14 @@ def render_xss_search_page(connection, query):
 
             for row in rows:
                 username = row.get("username") or "Anonymous"
-                # VULNERABILITY: Stored XSS — content rendered without encoding
+                # SECURITY FIX: HTML-encode content to prevent stored XSS in search results
                 content = row.get("content", "")
+                safe_username = html.escape(username)
+                safe_content = html.escape(content)
                 results_html += f"""
                 <div style="border:1px solid #333;border-radius:6px;padding:12px;margin:8px 0;background:#16213e;">
-                    <strong style="color:#ffa07a;">{username}</strong>
-                    <div style="margin-top:6px;color:#e0e0e0;">{content}</div>
+                    <strong style="color:#ffa07a;">{safe_username}</strong>
+                    <div style="margin-top:6px;color:#e0e0e0;">{safe_content}</div>
                 </div>"""
 
             if not rows:
@@ -460,17 +472,18 @@ def render_xss_search_page(connection, query):
             cursor.close()
 
     # VULNERABILITY: Reflected XSS — query injected directly into HTML without encoding
-    html = f"""<!DOCTYPE html>
+    # SECURITY FIX: HTML-encode query to prevent reflected XSS in multiple contexts
+    safe_query = html.escape(query, quote=True)
 <html>
 <head><title>Search Results - Security Demo</title></head>
 <body style="font-family:Arial,sans-serif;max-width:800px;margin:40px auto;padding:0 20px;background:#1a1a2e;color:#e0e0e0;">
 <h1 style="color:#ff6b6b;">Comment Search</h1>
 <form method="GET" action="">
   <input type="text" name="q" value="{query}" style="padding:8px;width:60%;background:#0f3460;color:#e0e0e0;border:1px solid #533483;border-radius:4px;">
-  <button type="submit" style="padding:8px 16px;background:#e94560;color:white;border:none;border-radius:4px;cursor:pointer;">Search</button>
+  <input type="text" name="q" value="{safe_query}" style="padding:8px;width:60%;background:#0f3460;color:#e0e0e0;border:1px solid #533483;border-radius:4px;">
 </form>
 <h2 style="color:#ffa07a;">Results for: {query}</h2>
-<div id="results">{results_html}</div>
+<h2 style="color:#ffa07a;">Results for: {html.escape(query)}</h2>
 </body>
 </html>"""
 
