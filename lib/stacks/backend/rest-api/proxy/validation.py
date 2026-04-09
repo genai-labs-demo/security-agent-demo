@@ -12,6 +12,16 @@ HEALTH_STATUS_VALUES = ['Green', 'Yellow', 'Red']
 OPPORTUNITY_STAGE_VALUES = ['Launched', 'Qualified', 'Proof of Concept', 'Negotiation', 'Closed Won', 'Closed Lost']
 FORECAST_CATEGORY_VALUES = ['Pipeline', 'Best Case', 'Commit', 'Closed']
 
+# Define opportunity stage progression order (index = stage order)
+OPPORTUNITY_STAGE_ORDER = {
+    'Launched': 0,
+    'Qualified': 1,
+    'Proof of Concept': 2,
+    'Negotiation': 3,
+    'Closed Won': 4,
+    'Closed Lost': 4  # Terminal state, same level as Closed Won
+}
+
 # Email validation regex pattern
 EMAIL_PATTERN = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
 
@@ -111,13 +121,15 @@ def validate_account(data: Dict[str, Any], is_update: bool = False) -> None:
             raise ValidationError("Field 'logoUrl' must be a string", field='logoUrl')
 
 
-def validate_opportunity(data: Dict[str, Any], is_update: bool = False) -> None:
+def validate_opportunity(data: Dict[str, Any], is_update: bool = False, current_opportunity: Optional[Dict[str, Any]] = None) -> None:
     """
     Validate opportunity data against schema requirements.
+    Enforces business logic rules for opportunity stage transitions.
     
     Args:
         data: Opportunity data in API format (camelCase)
         is_update: If True, required fields are optional (partial update)
+        current_opportunity: Current opportunity data (required for stage transition validation)
     
     Raises:
         ValidationError: If validation fails with field-specific details
@@ -172,6 +184,48 @@ def validate_opportunity(data: Dict[str, Any], is_update: bool = False) -> None:
                 f"Field 'stage' must be one of: {', '.join(OPPORTUNITY_STAGE_VALUES)}",
                 field='stage'
             )
+    
+    # Validate stage transitions for updates
+    if is_update and 'stage' in data and current_opportunity:
+        current_stage = current_opportunity.get('stage')
+        new_stage = data['stage']
+        
+        # Allow no-change updates
+        if current_stage == new_stage:
+            pass  # Same stage, no validation needed
+        else:
+            # Define terminal stages that cannot be changed once set
+            terminal_stages = ['Closed Won', 'Closed Lost']
+            
+            # Prevent modification of terminal stages
+            if current_stage in terminal_stages:
+                raise ValidationError(
+                    f"Cannot change stage from terminal state '{current_stage}'. "
+                    f"Closed opportunities cannot be reopened. "
+                    f"Contact an administrator if this opportunity was closed in error.",
+                    field='stage'
+                )
+            
+            # Prevent moving TO a different terminal stage from another terminal stage
+            # (This is redundant with above check but included for clarity)
+            if new_stage in terminal_stages and current_stage in terminal_stages:
+                raise ValidationError(
+                    f"Cannot change stage from '{current_stage}' to '{new_stage}'. "
+                    f"Terminal stage changes require administrator approval.",
+                    field='stage'
+                )
+            
+            # Prevent backward progression through sales stages
+            current_order = OPPORTUNITY_STAGE_ORDER.get(current_stage, -1)
+            new_order = OPPORTUNITY_STAGE_ORDER.get(new_stage, -1)
+            
+            if new_order < current_order:
+                raise ValidationError(
+                    f"Cannot move opportunity backward from '{current_stage}' to '{new_stage}'. "
+                    f"Opportunity stages must progress forward through the sales pipeline. "
+                    f"Contact your manager if you need to regress this opportunity.",
+                    field='stage'
+                )
     
     # Validate forecastCategory enum
     if 'forecastCategory' in data:
