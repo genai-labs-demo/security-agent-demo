@@ -12,6 +12,18 @@ HEALTH_STATUS_VALUES = ['Green', 'Yellow', 'Red']
 OPPORTUNITY_STAGE_VALUES = ['Launched', 'Qualified', 'Proof of Concept', 'Negotiation', 'Closed Won', 'Closed Lost']
 FORECAST_CATEGORY_VALUES = ['Pipeline', 'Best Case', 'Commit', 'Closed']
 
+# Define valid stage transitions (state machine)
+# Each stage maps to a list of stages it can transition to
+# This enforces sequential workflow: Launched → Qualified → Proof of Concept → Negotiation → Closed Won/Closed Lost
+OPPORTUNITY_STAGE_TRANSITIONS = {
+    'Launched': ['Qualified', 'Closed Lost'],
+    'Qualified': ['Proof of Concept', 'Closed Lost'],
+    'Proof of Concept': ['Negotiation', 'Closed Lost'],
+    'Negotiation': ['Closed Won', 'Closed Lost'],
+    'Closed Won': [],  # Terminal state - no further transitions
+    'Closed Lost': []  # Terminal state - no further transitions
+}
+
 # Email validation regex pattern
 EMAIL_PATTERN = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
 
@@ -23,6 +35,48 @@ class ValidationError(Exception):
         self.message = message
         self.field = field
         super().__init__(self.message)
+
+
+def validate_stage_transition(current_stage: Optional[str], new_stage: str) -> None:
+    """
+    Validate that a stage transition follows the defined workflow state machine.
+    
+    Enforces sequential progression through the opportunity lifecycle:
+    Launched → Qualified → Proof of Concept → Negotiation → Closed Won/Closed Lost
+    
+    Prevents business logic vulnerabilities by blocking:
+    - Skipping intermediate stages (e.g., Launched → Closed Won)
+    - Moving backwards through the pipeline (e.g., Negotiation → Launched)
+    - Invalid transitions from terminal states
+    
+    Args:
+        current_stage: Current stage of the opportunity (None for new opportunities)
+        new_stage: Requested new stage
+    
+    Raises:
+        ValidationError: If the transition is invalid
+    """
+    # New opportunities can start at 'Launched' only
+    if current_stage is None:
+        if new_stage != 'Launched':
+            raise ValidationError(
+                f"New opportunities must start at 'Launched' stage, cannot start at '{new_stage}'",
+                field='stage'
+            )
+        return
+    
+    # If stage hasn't changed, no validation needed
+    if current_stage == new_stage:
+        return
+    
+    # Check if transition is valid according to state machine
+    allowed_transitions = OPPORTUNITY_STAGE_TRANSITIONS.get(current_stage, [])
+    if new_stage not in allowed_transitions:
+        raise ValidationError(
+            f"Invalid stage transition: cannot move from '{current_stage}' to '{new_stage}'. "
+            f"Valid transitions from '{current_stage}': {', '.join(allowed_transitions) if allowed_transitions else 'none (terminal state)'}",
+            field='stage'
+        )
 
 
 def validate_account(data: Dict[str, Any], is_update: bool = False) -> None:
@@ -111,13 +165,14 @@ def validate_account(data: Dict[str, Any], is_update: bool = False) -> None:
             raise ValidationError("Field 'logoUrl' must be a string", field='logoUrl')
 
 
-def validate_opportunity(data: Dict[str, Any], is_update: bool = False) -> None:
+def validate_opportunity(data: Dict[str, Any], is_update: bool = False, current_stage: Optional[str] = None) -> None:
     """
     Validate opportunity data against schema requirements.
     
     Args:
         data: Opportunity data in API format (camelCase)
         is_update: If True, required fields are optional (partial update)
+        current_stage: Current stage of the opportunity (required for updates to validate transitions)
     
     Raises:
         ValidationError: If validation fails with field-specific details
@@ -165,13 +220,21 @@ def validate_opportunity(data: Dict[str, Any], is_update: bool = False) -> None:
         if not re.match(r'^\d{4}-\d{2}-\d{2}', data['closeDate']):
             raise ValidationError("Field 'closeDate' must be in ISO 8601 date format (YYYY-MM-DD)", field='closeDate')
     
-    # Validate stage enum
+    # Validate stage enum and transitions
     if 'stage' in data:
         if data['stage'] not in OPPORTUNITY_STAGE_VALUES:
             raise ValidationError(
                 f"Field 'stage' must be one of: {', '.join(OPPORTUNITY_STAGE_VALUES)}",
                 field='stage'
             )
+        
+        # Validate stage transition according to business workflow
+        if is_update:
+            # For updates, validate transition from current stage to new stage
+            validate_stage_transition(current_stage, data['stage'])
+        else:
+            # For new opportunities, validate starting stage (must be 'Launched')
+            validate_stage_transition(None, data['stage'])
     
     # Validate forecastCategory enum
     if 'forecastCategory' in data:
