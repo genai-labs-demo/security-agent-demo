@@ -8,6 +8,7 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from authorization import validate_resource_ownership, AuthorizationError
 
 # Configure logging
 logger = logging.getLogger()
@@ -119,13 +120,14 @@ def _recalculate_account_aggregates(connection, account_id: str) -> None:
 
 
 def search_opportunities(connection, search_query: str, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
-    """
+def search_opportunities(connection, search_query: str, user_id: Optional[str] = None, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
     Perform full text search on opportunities using multiple keywords.
     
     Args:
         connection: Database connection object
         search_query: Search string (e.g., "finance software platform")
         account_id: Optional account ID to filter opportunities
+        user_id: Authenticated user ID for ownership filtering
     
     Returns:
         List of opportunity dictionaries in API format, ordered by relevance
@@ -224,6 +226,11 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
             query += " AND o.account_id = %s"
             keyword_params.append(account_id)
         
+        # Add ownership filter to enforce authorization
+        if user_id:
+            query += " AND o.owner_id = %s"
+            keyword_params.append(user_id)
+        
         query += """
             ORDER BY 
                 relevance_score DESC,
@@ -300,12 +307,13 @@ def _validate_amount(amount) -> None:
 
 
 def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
-    """
+def list_opportunities(connection, user_id: Optional[str] = None, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
     Query opportunities from the database with optional account filter.
     
     Args:
         connection: Database connection object
         account_id: Optional account ID to filter opportunities
+        user_id: Authenticated user ID for ownership filtering
     
     Returns:
         List of opportunity dictionaries in API format
@@ -333,6 +341,11 @@ def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dic
             query += " AND account_id = %s"
             params.append(account_id)
         
+        # Add ownership filter to enforce authorization
+        if user_id:
+            query += " AND owner_id = %s"
+            params.append(user_id)
+        
         query += " ORDER BY close_date DESC LIMIT 1000"
         
         cursor.execute(query, params)
@@ -354,19 +367,21 @@ def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dic
 
 
 def get_opportunity(connection, opportunity_id: str) -> Optional[Dict[str, Any]]:
-    """
+def get_opportunity(connection, opportunity_id: str, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     Query a single opportunity by ID from the database.
     
     Args:
         connection: Database connection object
         opportunity_id: Opportunity ID to retrieve
     
+        user_id: Authenticated user ID for ownership validation
     Returns:
         Opportunity dictionary in API format, or None if not found
     
     Raises:
         Exception: If database query fails
     """
+        AuthorizationError: If user does not own the opportunity
     try:
         logger.info(f"Getting opportunity with ID: {opportunity_id}")
         
@@ -393,6 +408,10 @@ def get_opportunity(connection, opportunity_id: str) -> Optional[Dict[str, Any]]
         # Map to API format
         opportunity = _map_opportunity_to_api_format(dict(record))
         
+        
+        # Validate ownership before returning the resource
+        if user_id:
+            validate_resource_ownership(opportunity, user_id, 'opportunity', opportunity_id)
         logger.info(f"Retrieved opportunity: {opportunity_id}")
         return opportunity
         
@@ -407,7 +426,7 @@ def get_opportunity(connection, opportunity_id: str) -> Optional[Dict[str, Any]]
 def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Insert a new opportunity record into the database.
-    Validates that account_id and owner_id reference existing records.
+def create_opportunity(connection, data: Dict[str, Any], user_id: Optional[str] = None) -> Dict[str, Any]:
     
     Args:
         connection: Database connection object
@@ -415,6 +434,7 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     
     Returns:
         Created opportunity dictionary in API format
+        user_id: Authenticated user ID (will be set as owner if not specified)
     
     Raises:
         Exception: If database insert fails or validation fails
@@ -443,6 +463,11 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         if 'last_modified_date' not in db_data:
             db_data['last_modified_date'] = datetime.utcnow()
         
+        
+        # Set owner_id to authenticated user if not explicitly provided
+        # This ensures new opportunities are owned by the creator by default
+        if 'owner_id' not in db_data and user_id:
+            db_data['owner_id'] = user_id
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
         # Validate account_id exists
@@ -514,7 +539,7 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
 def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     Update an existing opportunity record in the database.
-    
+def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any], user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     Args:
         connection: Database connection object
         opportunity_id: Opportunity ID to update
@@ -522,15 +547,26 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
     
     Returns:
         Updated opportunity dictionary in API format, or None if not found
+        user_id: Authenticated user ID for ownership validation
     
     Raises:
         Exception: If database update fails or validation fails
     """
     try:
         logger.info(f"Updating opportunity: {opportunity_id}")
+        AuthorizationError: If user does not own the opportunity
         
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
+        
+        # First, fetch the existing opportunity to validate ownership
+        existing_opportunity = get_opportunity(connection, opportunity_id, user_id=None)
+        if not existing_opportunity:
+            return None
+        
+        # Validate ownership before allowing update
+        if user_id:
+            validate_resource_ownership(existing_opportunity, user_id, 'opportunity', opportunity_id)
         
         # Validate amount bounds if being updated
         if 'amount' in db_data:
@@ -626,7 +662,7 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
 def delete_opportunity(connection, opportunity_id: str) -> bool:
     """
     Soft-delete an opportunity record by marking it as deleted.
-    The record is retained in the database for recovery purposes.
+def delete_opportunity(connection, opportunity_id: str, user_id: Optional[str] = None) -> bool:
     Recalculates parent account aggregates after deletion.
 
     Args:
@@ -635,15 +671,26 @@ def delete_opportunity(connection, opportunity_id: str) -> bool:
 
     Returns:
         True if opportunity was soft-deleted, False if not found
+        user_id: Authenticated user ID for ownership validation
 
     Raises:
         Exception: If database update fails
     """
     try:
         logger.info(f"Soft-deleting opportunity: {opportunity_id}")
+        AuthorizationError: If user does not own the opportunity
 
         cursor = connection.cursor()
 
+        
+        # First, fetch the existing opportunity to validate ownership
+        existing_opportunity = get_opportunity(connection, opportunity_id, user_id=None)
+        if not existing_opportunity:
+            return False
+        
+        # Validate ownership before allowing delete
+        if user_id:
+            validate_resource_ownership(existing_opportunity, user_id, 'opportunity', opportunity_id)
         # Check if opportunity exists and capture account_id for aggregate recalculation
         cursor.execute(
             "SELECT id, account_id FROM opportunities WHERE id = %s AND (deleted_at IS NULL)",

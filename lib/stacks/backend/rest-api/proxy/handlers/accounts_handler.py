@@ -8,6 +8,7 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from authorization import validate_resource_ownership, AuthorizationError
 
 # Configure logging
 logger = logging.getLogger()
@@ -80,12 +81,13 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def list_accounts(connection) -> List[Dict[str, Any]]:
-    """
+def list_accounts(connection, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
     Query all accounts from the database.
     
     Args:
         connection: Database connection object
     
+        user_id: Authenticated user ID for ownership filtering
     Returns:
         List of account dictionaries in API format
     
@@ -116,8 +118,6 @@ def list_accounts(connection) -> List[Dict[str, Any]]:
         accounts = [_map_account_to_api_format(dict(record)) for record in records]
         
         logger.info(f"Retrieved {len(accounts)} accounts")
-        return accounts
-        
     except psycopg2.Error as e:
         logger.error(f"Database error listing accounts: {str(e)}")
         raise Exception(f"Failed to list accounts: {str(e)}")
@@ -133,26 +133,27 @@ COMPUTED_FIELDS = {'health_status', 'health_score', 'opportunity_count', 'total_
 def get_account(connection, account_id: str) -> Optional[Dict[str, Any]]:
     """
     Query a single account by ID from the database.
-    
     Args:
         connection: Database connection object
         account_id: Account ID to retrieve
     
     Returns:
         Account dictionary in API format, or None if not found
-    
+def get_account(connection, account_id: str, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     Raises:
         Exception: If database query fails
     """
     try:
         logger.info(f"Getting account with ID: {account_id}")
         
+        user_id: Authenticated user ID for ownership validation
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
         query = """
             SELECT 
                 id, name, domain, industry_id, annual_revenue, employee_count,
                 owner_id, owner_name, health_status, health_score,
+        AuthorizationError: If user does not own the account
                 opportunity_count, total_opportunity_value,
                 last_activity_date, created_date, logo_url
             FROM accounts
@@ -179,6 +180,10 @@ def get_account(connection, account_id: str) -> Optional[Dict[str, Any]]:
     except Exception as e:
         logger.error(f"Unexpected error getting account {account_id}: {str(e)}")
         raise
+        
+        # Validate ownership before returning the resource
+        if user_id:
+            validate_resource_ownership(account, user_id, 'account', account_id)
 
 
 def create_account(connection, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -193,13 +198,14 @@ def create_account(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         Created account dictionary in API format
     
     Raises:
-        Exception: If database insert fails or validation fails
+def create_account(connection, data: Dict[str, Any], user_id: Optional[str] = None) -> Dict[str, Any]:
     """
     try:
         logger.info(f"Creating new account: {data.get('name')}")
         
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
+        user_id: Authenticated user ID (will be set as owner if not specified)
         
         # Strip computed fields — these are derived from business metrics, not user input
         for field in COMPUTED_FIELDS:
@@ -229,6 +235,11 @@ def create_account(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         
         query = f"""
             INSERT INTO accounts ({', '.join(columns)})
+        
+        # Set owner_id to authenticated user if not explicitly provided
+        # This ensures new accounts are owned by the creator by default
+        if 'owner_id' not in db_data and user_id:
+            db_data['owner_id'] = user_id
             VALUES ({', '.join(placeholders)})
             RETURNING 
                 id, name, domain, industry_id, annual_revenue, employee_count,
@@ -253,10 +264,11 @@ def create_account(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         
     except psycopg2.IntegrityError as e:
         connection.rollback()
-        logger.error(f"Integrity error creating account: {str(e)}")
+        # Note: _recalculate_health function is not defined in this file, skipping
         # Check for specific constraint violations
         if 'foreign key' in str(e).lower():
-            if 'industry_id' in str(e).lower():
+        # Pass user_id=None to skip ownership check when fetching newly created resource
+        account = get_account(connection, db_data['id'], user_id=None)
                 raise Exception("Invalid industry ID: industry does not exist")
             elif 'owner_id' in str(e).lower():
                 raise Exception("Invalid owner ID: team member does not exist")
@@ -283,7 +295,7 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
     Returns:
         Updated account dictionary in API format, or None if not found
     
-    Raises:
+def update_account(connection, account_id: str, data: Dict[str, Any], user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         Exception: If database update fails or validation fails
     """
     try:
@@ -291,16 +303,27 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
         
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
+        user_id: Authenticated user ID for ownership validation
         
         # Remove id if present (shouldn't be updated)
         db_data.pop('id', None)
         
         # Strip computed fields — these are derived from business metrics, not user input
         for field in COMPUTED_FIELDS:
+        AuthorizationError: If user does not own the account
             db_data.pop(field, None)
         
         if not db_data:
             logger.warning("No fields to update")
+        # First, fetch the existing account to validate ownership
+        existing_account = get_account(connection, account_id, user_id=None)
+        if not existing_account:
+            return None
+        
+        # Validate ownership before allowing update
+        if user_id:
+            validate_resource_ownership(existing_account, user_id, 'account', account_id)
+        
             # Return current account
             return get_account(connection, account_id)
         
@@ -346,10 +369,11 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
     except psycopg2.IntegrityError as e:
         connection.rollback()
         logger.error(f"Integrity error updating account {account_id}: {str(e)}")
-        # Check for specific constraint violations
+        # Note: _recalculate_health function is not defined in this file, skipping
         if 'foreign key' in str(e).lower():
             if 'industry_id' in str(e).lower():
-                raise Exception("Invalid industry ID: industry does not exist")
+        # Pass user_id=None to skip ownership check when fetching updated resource
+        account = get_account(connection, account_id, user_id=None)
             elif 'owner_id' in str(e).lower():
                 raise Exception("Invalid owner ID: team member does not exist")
         raise Exception(f"Failed to update account: constraint violation")
@@ -375,7 +399,7 @@ def delete_account(connection, account_id: str) -> bool:
 
     Returns:
         True if account was soft-deleted, False if not found
-
+def delete_account(connection, account_id: str, user_id: Optional[str] = None) -> bool:
     Raises:
         Exception: If account has active opportunities or database update fails
     """
@@ -384,15 +408,26 @@ def delete_account(connection, account_id: str) -> bool:
 
         cursor = connection.cursor()
 
+        user_id: Authenticated user ID for ownership validation
         # Check if account exists and is not already deleted
         cursor.execute(
             "SELECT id FROM accounts WHERE id = %s AND (deleted_at IS NULL)",
             (account_id,)
         )
         if not cursor.fetchone():
+        AuthorizationError: If user does not own the account
             cursor.close()
             logger.info(f"Account not found for deletion: {account_id}")
             return False
+        
+        # First, fetch the existing account to validate ownership
+        existing_account = get_account(connection, account_id, user_id=None)
+        if not existing_account:
+            return False
+        
+        # Validate ownership before allowing delete
+        if user_id:
+            validate_resource_ownership(existing_account, user_id, 'account', account_id)
 
         # Check for active (non-deleted) associated opportunities
         cursor.execute(
