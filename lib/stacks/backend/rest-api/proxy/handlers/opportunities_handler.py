@@ -9,6 +9,7 @@ from datetime import datetime
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
+import rate_limiter
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -404,7 +405,7 @@ def get_opportunity(connection, opportunity_id: str) -> Optional[Dict[str, Any]]
         raise
 
 
-def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
+def create_opportunity(connection, data: Dict[str, Any], user_id: str = None) -> Dict[str, Any]:
     """
     Insert a new opportunity record into the database.
     Validates that account_id and owner_id reference existing records.
@@ -412,6 +413,7 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     Args:
         connection: Database connection object
         data: Opportunity data in API format (camelCase)
+        user_id: Authenticated user ID for rate limiting
     
     Returns:
         Created opportunity dictionary in API format
@@ -424,6 +426,17 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
+        
+        # Rate limiting check - prevents unrestricted resource consumption
+        # Security control for CWE-770: Unrestricted Resource Consumption
+        try:
+            rate_limiter.check_create_rate(user_id, db_data.get('amount'))
+        except rate_limiter.RateLimitError as e:
+            logger.warning(f"Rate limit exceeded for user {user_id}: {e.message}")
+            # Re-raise with original message and retry_after
+            raise ValueError(f"RATE_LIMIT:{e.retry_after}:{e.message}")
+        except Exception as e:
+            logger.error(f"Rate limit check error: {str(e)}")
         
         # Validate amount bounds
         _validate_amount(db_data.get('amount'))

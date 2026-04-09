@@ -14,6 +14,7 @@ import time
 from typing import Dict, Any
 import boto3
 
+import rate_limiter
 # Import handler modules
 from router import parse_api_gateway_event, validate_route, get_operation_type
 from db_connection import get_database_connection, return_database_connection
@@ -85,7 +86,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             start_time = time.time()
             
             # Route to appropriate handler and execute operation
-            result = execute_operation(connection, route_info, operation)
+            result = execute_operation(connection, route_info, operation, event)
             
             # Calculate and publish search latency metrics
             elapsed_time = (time.time() - start_time) * 1000  # Convert to milliseconds
@@ -131,6 +132,21 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         
     except ValueError as e:
         # Validation errors (400)
+        error_str = str(e)
+        
+        # Check for rate limit errors (429)
+        if error_str.startswith('RATE_LIMIT:'):
+            parts = error_str.split(':', 2)
+            retry_after = int(parts[1]) if len(parts) > 1 else 60
+            message = parts[2] if len(parts) > 2 else "Rate limit exceeded"
+            logger.warning(f"Rate limit error: {message}")
+            response = {
+                'statusCode': 429,
+                'headers': {'Content-Type': 'application/json', 'Retry-After': str(retry_after)},
+                'body': json.dumps({'error': 'Too Many Requests', 'message': message, 'retryAfter': retry_after})
+            }
+            return process_cors(event, response)
+        
         logger.warning(f"Validation error in request {request_id}: {str(e)}")
         response = handle_validation_error(str(e))
         return process_cors(event, response)
@@ -163,7 +179,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
 
 def execute_operation(connection, route_info, operation: str) -> Any:
-    """
+def execute_operation(connection, route_info, operation: str, event: Dict[str, Any]) -> Any:
     Execute the appropriate CRUD operation based on route information.
     
     Args:
@@ -171,6 +187,7 @@ def execute_operation(connection, route_info, operation: str) -> Any:
         route_info: Parsed route information
         operation: Operation type ('list', 'get', 'create', 'update', 'delete')
         
+        event: Original API Gateway event for context extraction
     Returns:
         Operation result (record, list of records, or boolean)
         
@@ -182,6 +199,7 @@ def execute_operation(connection, route_info, operation: str) -> Any:
     query_params = route_info.query_params
     body = route_info.body
     
+    user_id = rate_limiter.get_user_from_context(event)
     logger.info(f"Executing {operation} operation on {resource_type}")
     
     # Route to accounts handler
@@ -227,7 +245,7 @@ def execute_operation(connection, route_info, operation: str) -> Any:
             return result
         elif operation == 'create':
             return opportunities_handler.create_opportunity(connection, body)
-        elif operation == 'update':
+            return opportunities_handler.create_opportunity(connection, body, user_id)
             result = opportunities_handler.update_opportunity(connection, resource_id, body)
             if result is None:
                 raise ValueError(f"Opportunity with id {resource_id} not found")
