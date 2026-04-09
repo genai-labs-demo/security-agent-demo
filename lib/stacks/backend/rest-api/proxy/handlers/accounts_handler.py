@@ -129,6 +129,92 @@ def list_accounts(connection) -> List[Dict[str, Any]]:
 COMPUTED_FIELDS = {'health_status', 'health_score', 'opportunity_count', 'total_opportunity_value'}
 
 
+def _recalculate_health(connection, account_id: str) -> None:
+    """
+    Recalculate and update account health metrics based on associated opportunities.
+    
+    This function computes derived fields that reflect the account's business health:
+    - opportunity_count: Number of active opportunities
+    - total_opportunity_value: Sum of all opportunity values
+    - health_score: Calculated score based on opportunity metrics
+    - health_status: Status category (healthy, at-risk, critical) based on score
+    
+    Args:
+        connection: Database connection object
+        account_id: Account ID to recalculate health for
+    
+    Note:
+        This function logs errors but does not raise exceptions to prevent
+        breaking the main create/update operations if health calculation fails.
+    """
+    try:
+        logger.info(f"Recalculating health metrics for account: {account_id}")
+        
+        cursor = connection.cursor()
+        
+        # Query opportunity metrics for this account
+        # Only count non-deleted opportunities
+        query = """
+            SELECT 
+                COUNT(*) as opp_count,
+                COALESCE(SUM(value), 0) as total_value,
+                COALESCE(AVG(CASE 
+                    WHEN stage = 'closed-won' THEN 100
+                    WHEN stage = 'proposal' THEN 75
+                    WHEN stage = 'negotiation' THEN 85
+                    WHEN stage = 'qualification' THEN 50
+                    WHEN stage = 'discovery' THEN 25
+                    ELSE 10
+                END), 0) as avg_stage_score
+            FROM opportunities
+            WHERE account_id = %s AND deleted_at IS NULL
+        """
+        
+        cursor.execute(query, (account_id,))
+        result = cursor.fetchone()
+        
+        opp_count = result[0] if result else 0
+        total_value = float(result[1]) if result and result[1] is not None else 0.0
+        avg_stage_score = float(result[2]) if result and result[2] is not None else 0.0
+        
+        # Calculate health score (0-100) based on opportunity metrics
+        health_score = int(avg_stage_score)
+        
+        # Determine health status based on score
+        if health_score >= 70:
+            health_status = 'healthy'
+        elif health_score >= 40:
+            health_status = 'at-risk'
+        else:
+            health_status = 'critical'
+        
+        # Update account with calculated metrics
+        update_query = """
+            UPDATE accounts
+            SET opportunity_count = %s,
+                total_opportunity_value = %s,
+                health_score = %s,
+                health_status = %s
+            WHERE id = %s
+        """
+        
+        cursor.execute(update_query, (opp_count, total_value, health_score, health_status, account_id))
+        connection.commit()
+        cursor.close()
+        
+        logger.info(f"Updated health metrics for account {account_id}: "
+                   f"count={opp_count}, value={total_value}, score={health_score}, status={health_status}")
+        
+    except Exception as e:
+        # Log error but don't raise exception - health calculation failure
+        # should not break the main create/update operation
+        logger.error(f"Failed to recalculate health for account {account_id}: {str(e)}")
+        # Rollback any partial health updates
+        try:
+            connection.rollback()
+        except Exception:
+            pass
+
 
 def get_account(connection, account_id: str) -> Optional[Dict[str, Any]]:
     """
