@@ -6,15 +6,16 @@ DO NOT use these patterns in production code.
 Vulnerability inventory (matches pen-test target set):
   1. SQL Injection          — GET /security-profile/{id}  (string concatenation in SQL)
   2. IDOR                   — GET /security-profile/{id}  (sequential IDs, no auth check)
-  3. Stored XSS             — POST /security-comments     (unsanitized content stored & returned)
+  3. Stored XSS             — FIXED: POST /security-comments (content now sanitized and HTML-encoded)
   4. DOM-based / Reflected XSS — GET /security-xss-page?name=...  (reflected in HTML)
   5. Command Injection #1   — POST /security-tools/ping   (shell=True with user input)
   6. Command Injection #2   — POST /security-tools/ping   (pipe / semicolon chaining)
-  7. Mass Assignment        — POST /security-comments     (author_name & role accepted from body)
-  8. Stored XSS (HTML)      — GET /security-xss-comments  (renders stored comments as HTML for pen-test detection)
+  7. Mass Assignment        — FIXED: POST /security-comments (author_name & role now rejected)
+  8. Stored XSS (HTML)      — FIXED: GET /security-xss-comments (content now HTML-encoded)
   9. Reflected XSS (HTML)   — GET /security-xss-search?q= (reflects search query in HTML for pen-test detection)
 """
 
+import html
 import json
 import logging
 import subprocess
@@ -174,8 +175,9 @@ def list_security_profiles(connection):
 def create_security_comment(connection, body):
     """
     POST /security-comments
-    VULNERABILITY 3: Stored XSS — stores unsanitized user input.
-    VULNERABILITY 7: Mass Assignment — accepts author_name and role from body.
+    FIXED: Input sanitization and mass assignment prevention implemented.
+    - Content is now HTML-escaped to prevent XSS
+    - author_name and role fields are rejected (mass assignment prevention)
     """
     user_id = body.get("user_id")
     content = body.get("content")
@@ -183,30 +185,27 @@ def create_security_comment(connection, body):
     if not user_id or not content:
         return {"success": False, "error": "user_id and content are required"}
 
-    # VULNERABILITY: Mass Assignment — accept author_name and role from request body
-    author_name = body.get("author_name")
-    author_role = body.get("role")
+    # SECURITY FIX: Reject mass assignment attempts
+    if "author_name" in body or "role" in body:
+        logger.warning(f"[SECURITY] Mass assignment attempt blocked: author_name={body.get('author_name')}, role={body.get('role')}")
+        return {
+            "success": False, 
+            "error": "Invalid fields detected. Only 'user_id' and 'content' are allowed.",
+            "rejected_fields": [k for k in ["author_name", "role"] if k in body]
+        }
+
+    # SECURITY FIX: Sanitize content to prevent stored XSS
+    sanitized_content = html.escape(content)
 
     cursor = connection.cursor()
     try:
-        logger.info(f"[VULNERABLE] Storing unsanitized comment: {content}")
-
-        if author_name or author_role:
-            # Mass Assignment: if attacker supplies author_name or role, persist them
-            logger.info(f"[VULNERABLE] Mass assignment — author_name={author_name}, role={author_role}")
-            cursor.execute(
-                """INSERT INTO security_comments (user_id, content, author_name, author_role, created_at)
-                   VALUES (%s, %s, %s, %s, NOW())
-                   RETURNING id, user_id, content, author_name, author_role, created_at""",
-                (user_id, content, author_name, author_role),
-            )
-        else:
-            cursor.execute(
-                """INSERT INTO security_comments (user_id, content, created_at)
-                   VALUES (%s, %s, NOW())
-                   RETURNING id, user_id, content, author_name, author_role, created_at""",
-                (user_id, content),
-            )
+        logger.info(f"[SECURE] Storing sanitized comment")
+        cursor.execute(
+            """INSERT INTO security_comments (user_id, content, created_at)
+               VALUES (%s, %s, NOW())
+               RETURNING id, user_id, content, author_name, author_role, created_at""",
+            (user_id, sanitized_content),
+        )
         connection.commit()
         columns = [desc[0] for desc in cursor.description]
         row = dict(zip(columns, cursor.fetchone()))
@@ -214,24 +213,12 @@ def create_security_comment(connection, body):
             if isinstance(val, datetime):
                 row[key] = val.isoformat()
 
-        is_xss = _detect_xss(content)
-        is_mass = bool(author_name or author_role)
-
-        result = {"success": True, "data": row}
-        if is_xss:
-            result["message"] = "Stored XSS Detected"
-            result["educational"] = _get_educational_content("xss_stored")
-        if is_mass:
-            result["message"] = result.get("message", "") + " | Mass Assignment Detected"
-            result["educational_mass_assignment"] = _get_educational_content("mass_assignment")
-        if not is_xss and not is_mass:
-            result["message"] = "Comment created successfully"
-        return result
+        return {"success": True, "data": row, "message": "Comment created successfully"}
 
     except Exception as e:
         connection.rollback()
         logger.error(f"[VULNERABLE] Database error: {str(e)}")
-        return {"success": False, "error": "Failed to create comment", "message": str(e)}
+        return {"success": False, "error": "Failed to create comment"}
     finally:
         cursor.close()
 
@@ -239,11 +226,11 @@ def create_security_comment(connection, body):
 def list_security_comments(connection):
     """
     GET /security-comments
-    VULNERABILITY: Stored XSS — returns unsanitized content.
+    Returns comments from database (content already sanitized at input).
     """
     cursor = connection.cursor()
     try:
-        logger.info("[VULNERABLE] Retrieving comments without sanitization")
+        logger.info("[SECURE] Retrieving comments")
         cursor.execute("""
             SELECT c.id, c.user_id, c.content, c.author_name, c.author_role, c.created_at, u.username
             FROM security_comments c
@@ -257,19 +244,11 @@ def list_security_comments(connection):
                 if isinstance(val, datetime):
                     row[key] = val.isoformat()
 
-        has_xss = any(_detect_xss(r.get("content", "")) for r in rows)
-        if has_xss:
-            return {
-                "success": True,
-                "message": "Stored XSS Detected in Comments",
-                "educational": _get_educational_content("xss_stored"),
-                "data": rows,
-            }
         return {"success": True, "data": rows}
 
     except Exception as e:
         connection.rollback()
-        return {"success": False, "error": "Failed to retrieve comments", "message": str(e)}
+        return {"success": False, "error": "Failed to retrieve comments"}
     finally:
         cursor.close()
 
@@ -366,7 +345,7 @@ def render_xss_page(query_params):
 def render_xss_comments_page(connection):
     """
     GET /security-xss-comments
-    VULNERABILITY: Stored XSS — renders stored comments as HTML without encoding.
+    FIXED: Content is now HTML-encoded to prevent XSS execution.
     Returns text/html so pen-test scanners can detect stored XSS payloads executing
     in a real HTML page context (unlike the JSON API which returns application/json).
     """
@@ -384,9 +363,10 @@ def render_xss_comments_page(connection):
 
         comments_html = ""
         for row in rows:
-            username = row.get("username") or "Anonymous"
-            # VULNERABILITY: Stored XSS — content rendered directly in HTML without encoding
-            content = row.get("content", "")
+            # SECURITY FIX: HTML-encode all user-generated content
+            username = html.escape(row.get("username") or "Anonymous")
+            content = row.get("content", "")  # Already sanitized at input, but double-encode for safety
+            content = html.escape(content) if content else ""
             comments_html += f"""
             <div style="border:1px solid #333;border-radius:6px;padding:12px;margin:8px 0;background:#16213e;">
                 <strong style="color:#ffa07a;">{username}</strong>
@@ -413,9 +393,9 @@ def render_xss_comments_page(connection):
 
     except Exception as e:
         logger.error(f"[VULNERABLE] Error rendering comments page: {str(e)}")
-        connection.rollback()
+        logger.error(f"[SECURE] Error rendering comments page: {str(e)}")
         return {"_html": True, "content": f"<html><body><h1>Error</h1><p>{str(e)}</p></body></html>"}
-    finally:
+        return {"_html": True, "content": f"<html><body><h1>Error</h1><p>{html.escape(str(e))}</p></body></html>"}
         cursor.close()
 
 
@@ -423,7 +403,7 @@ def render_xss_search_page(connection, query):
     """
     GET /security-xss-search?q=...
     VULNERABILITY: Reflected XSS — search query reflected directly in HTML response.
-    Returns text/html so pen-test scanners can detect reflected XSS in a real HTML context.
+    FIXED: Content is now HTML-encoded to prevent stored XSS in search results.
     """
     results_html = ""
     if query:
@@ -441,9 +421,10 @@ def render_xss_search_page(connection, query):
             rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
 
             for row in rows:
-                username = row.get("username") or "Anonymous"
-                # VULNERABILITY: Stored XSS — content rendered without encoding
-                content = row.get("content", "")
+                # SECURITY FIX: HTML-encode all user-generated content
+                username = html.escape(row.get("username") or "Anonymous")
+                content = row.get("content", "")  # Already sanitized at input, but double-encode for safety
+                content = html.escape(content) if content else ""
                 results_html += f"""
                 <div style="border:1px solid #333;border-radius:6px;padding:12px;margin:8px 0;background:#16213e;">
                     <strong style="color:#ffa07a;">{username}</strong>
