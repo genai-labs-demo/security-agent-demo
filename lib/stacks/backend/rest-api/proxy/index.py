@@ -201,9 +201,14 @@ def execute_operation(connection, route_info, operation: str) -> Any:
                 raise ValueError(f"Account with id {resource_id} not found")
             return result
         elif operation == 'delete':
-            success = accounts_handler.delete_account(connection, resource_id)
-            if not success:
+            # Check for cascade parameter in query string
+            cascade = query_params.get('cascade', '').lower() == 'true'
+            result = accounts_handler.delete_account(connection, resource_id, cascade=cascade)
+            if not result['success']:
                 raise ValueError(f"Account with id {resource_id} not found")
+            # Return result with opportunities_deleted count if cascade was used
+            if cascade and result['opportunities_deleted'] > 0:
+                return {'message': f"Account deleted successfully. {result['opportunities_deleted']} opportunities were also deleted."}
             return None
     
     # Route to opportunities handler
@@ -352,14 +357,19 @@ def format_success_response(result: Any, route_info, operation: str) -> Dict[str
     else:
         status_code = 200
     
-    # For delete operations, return empty response
+    # For delete operations, return empty response or message if result is provided
     if operation == 'delete':
+        # If result contains a message (e.g., cascade delete), return it
+        if result and isinstance(result, dict) and 'message' in result:
+            body = json.dumps(result)
+        else:
+            body = ''
         return {
             'statusCode': status_code,
             'headers': {
                 'Content-Type': 'application/json'
             },
-            'body': ''
+            'body': body
         }
     
     # Enhance result with S3 image URLs

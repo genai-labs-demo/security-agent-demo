@@ -363,18 +363,21 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
         raise
 
 
-def delete_account(connection, account_id: str) -> bool:
+def delete_account(connection, account_id: str, cascade: bool = False) -> dict:
     """
     Soft-delete an account record by marking it as deleted.
     The record is retained in the database for recovery purposes.
+    
+    When cascade=True, automatically deletes all active opportunities before deleting the account.
     Checks for active (non-deleted) opportunities before allowing deletion.
 
     Args:
         connection: Database connection object
         account_id: Account ID to soft-delete
+        cascade: If True, automatically delete all active opportunities first
 
     Returns:
-        True if account was soft-deleted, False if not found
+        Dictionary with 'success' (bool) and 'opportunities_deleted' (int) keys
 
     Raises:
         Exception: If account has active opportunities or database update fails
@@ -392,7 +395,7 @@ def delete_account(connection, account_id: str) -> bool:
         if not cursor.fetchone():
             cursor.close()
             logger.info(f"Account not found for deletion: {account_id}")
-            return False
+            return {'success': False, 'opportunities_deleted': 0}
 
         # Check for active (non-deleted) associated opportunities
         cursor.execute(
@@ -402,13 +405,29 @@ def delete_account(connection, account_id: str) -> bool:
         result = cursor.fetchone()
         opportunity_count = result[0] if result else 0
 
-        if opportunity_count > 0:
+        # If there are active opportunities and cascade is not enabled, reject the deletion
+        if opportunity_count > 0 and not cascade:
             cursor.close()
             logger.warning(f"Cannot delete account {account_id}: has {opportunity_count} active opportunities")
             raise Exception(
                 f"Cannot delete account: account has {opportunity_count} active opportunities. "
                 f"Delete or archive the opportunities first."
             )
+        
+        # If cascade is enabled and there are opportunities, delete them first
+        opportunities_deleted = 0
+        if cascade and opportunity_count > 0:
+            cursor.close()
+            logger.info(f"Cascade delete: deleting {opportunity_count} opportunities for account {account_id}")
+            
+            # Import here to avoid circular dependency
+            from handlers.opportunities_handler import bulk_delete_opportunities
+            
+            # Delete all opportunities for this account
+            opportunities_deleted = bulk_delete_opportunities(connection, account_id)
+            
+            # Recreate cursor for account deletion
+            cursor = connection.cursor()
 
         # Soft-delete: set deleted_at timestamp instead of removing the row
         cursor.execute(
@@ -418,8 +437,11 @@ def delete_account(connection, account_id: str) -> bool:
         connection.commit()
         cursor.close()
 
-        logger.info(f"Soft-deleted account: {account_id}")
-        return True
+        if cascade and opportunities_deleted > 0:
+            logger.info(f"Cascade soft-deleted account {account_id} with {opportunities_deleted} opportunities")
+        else:
+            logger.info(f"Soft-deleted account: {account_id}")
+        return {'success': True, 'opportunities_deleted': opportunities_deleted}
 
     except psycopg2.IntegrityError as e:
         connection.rollback()
