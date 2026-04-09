@@ -102,17 +102,17 @@ def _get_educational_content(vuln_type):
 def get_security_profile(connection, user_id):
     """
     GET /security-profile/{userId}
-    VULNERABILITY 1: SQL Injection via string concatenation.
+    FIXED: SQL Injection - now using parameterized query.
     VULNERABILITY 2: IDOR — any sequential ID returns data, no auth check.
     """
     cursor = connection.cursor()
     try:
-        # VULNERABILITY: SQL Injection - string concatenation instead of parameterized query
-        # Cast id to TEXT so string-based payloads (e.g. admin' --) work without type errors
-        query = f"SELECT id, username, email, role, bio, created_at FROM security_users WHERE id::text = '{user_id}'"
+        # FIXED: SQL Injection - using parameterized query with placeholder
+        # Cast id to TEXT to maintain original behavior for string-based IDs
+        query = "SELECT id, username, email, role, bio, created_at FROM security_users WHERE id::text = %s"
         logger.info(f"[VULNERABLE] Executing SQL query: {query}")
 
-        cursor.execute(query)
+        cursor.execute(query, (user_id,))
         columns = [desc[0] for desc in cursor.description]
         rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
 
@@ -142,7 +142,7 @@ def get_security_profile(connection, user_id):
         return {
             "success": False,
             "error": "Database error",
-            "message": str(e),
+            "message": "An error occurred while processing your request",
         }
     finally:
         cursor.close()
