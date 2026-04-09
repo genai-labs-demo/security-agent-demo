@@ -134,7 +134,7 @@ export class Database extends Construct {
                 subnetType: SubnetType.PRIVATE_ISOLATED,
             },
             securityGroups: [securityGroup],
-            requireTLS: false,
+            requireTLS: true,
             dbProxyName: "sec-agent-database-proxy",
         });
 
