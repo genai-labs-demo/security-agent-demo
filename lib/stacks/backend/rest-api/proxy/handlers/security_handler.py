@@ -15,6 +15,7 @@ Vulnerability inventory (matches pen-test target set):
   9. Reflected XSS (HTML)   — GET /security-xss-search?q= (reflects search query in HTML for pen-test detection)
 """
 
+import html
 import json
 import logging
 import subprocess
@@ -336,13 +337,13 @@ def render_xss_page(query_params):
     and the payload is reflected verbatim.
     """
     name = query_params.get("name", "Guest")
-    search = query_params.get("q", "")
-
+    name = html.escape(query_params.get("name", "Guest"))
+    search = html.escape(query_params.get("q", ""))
     logger.info(f"[VULNERABLE] Rendering HTML with unsanitized name={name}, q={search}")
 
     # VULNERABILITY: user input injected directly into HTML without encoding
-    html = f"""<!DOCTYPE html>
-<html>
+    # FIXED: user input is now HTML-encoded before rendering
+    html_content = f"""<!DOCTYPE html>
 <head><title>Security Demo - User Profile</title></head>
 <body>
 <h1>Welcome, {name}</h1>
@@ -354,16 +355,18 @@ def render_xss_page(query_params):
 <script>
   // VULNERABILITY: DOM-based XSS — reads from URL fragment and injects into DOM
   var hash = window.location.hash.substring(1);
-  if (hash) {{
+  // FIXED: DOM-based XSS — now uses textContent instead of innerHTML for safe text insertion
     document.getElementById('search-results').innerHTML += '<p>Fragment: ' + hash + '</p>';
   }}
-</script>
+    var p = document.createElement('p');
+    p.textContent = 'Fragment: ' + hash;
+    document.getElementById('search-results').appendChild(p);
 </body>
 </html>"""
 
     return {"_html": True, "content": html}
 
-def render_xss_comments_page(connection):
+    return {"_html": True, "content": html_content}
     """
     GET /security-xss-comments
     VULNERABILITY: Stored XSS — renders stored comments as HTML without encoding.
@@ -386,15 +389,15 @@ def render_xss_comments_page(connection):
         for row in rows:
             username = row.get("username") or "Anonymous"
             # VULNERABILITY: Stored XSS — content rendered directly in HTML without encoding
-            content = row.get("content", "")
-            comments_html += f"""
+            # FIXED: Stored XSS — content is now HTML-encoded before rendering
+            content = html.escape(row.get("content", ""))
             <div style="border:1px solid #333;border-radius:6px;padding:12px;margin:8px 0;background:#16213e;">
                 <strong style="color:#ffa07a;">{username}</strong>
                 <div style="margin-top:6px;color:#e0e0e0;">{content}</div>
             </div>"""
 
         html = f"""<!DOCTYPE html>
-<html>
+        html_content = f"""<!DOCTYPE html>
 <head><title>CRM Comments - Security Demo</title></head>
 <body style="font-family:Arial,sans-serif;max-width:800px;margin:40px auto;padding:0 20px;background:#1a1a2e;color:#e0e0e0;">
 <h1 style="color:#ff6b6b;">CRM Comments Board</h1>
@@ -409,7 +412,7 @@ def render_xss_comments_page(connection):
 </body>
 </html>"""
 
-        return {"_html": True, "content": html}
+        return {"_html": True, "content": html_content}
 
     except Exception as e:
         logger.error(f"[VULNERABLE] Error rendering comments page: {str(e)}")
@@ -425,6 +428,9 @@ def render_xss_search_page(connection, query):
     VULNERABILITY: Reflected XSS — search query reflected directly in HTML response.
     Returns text/html so pen-test scanners can detect reflected XSS in a real HTML context.
     """
+    # Encode query parameter to prevent reflected XSS
+    query = html.escape(query) if query else ""
+    
     results_html = ""
     if query:
         cursor = connection.cursor()
@@ -443,8 +449,8 @@ def render_xss_search_page(connection, query):
             for row in rows:
                 username = row.get("username") or "Anonymous"
                 # VULNERABILITY: Stored XSS — content rendered without encoding
-                content = row.get("content", "")
-                results_html += f"""
+                # FIXED: Stored XSS — content is now HTML-encoded before rendering
+                content = html.escape(row.get("content", ""))
                 <div style="border:1px solid #333;border-radius:6px;padding:12px;margin:8px 0;background:#16213e;">
                     <strong style="color:#ffa07a;">{username}</strong>
                     <div style="margin-top:6px;color:#e0e0e0;">{content}</div>
@@ -461,8 +467,8 @@ def render_xss_search_page(connection, query):
 
     # VULNERABILITY: Reflected XSS — query injected directly into HTML without encoding
     html = f"""<!DOCTYPE html>
-<html>
-<head><title>Search Results - Security Demo</title></head>
+    # FIXED: Reflected XSS — query is now HTML-encoded before rendering
+    html_content = f"""<!DOCTYPE html>
 <body style="font-family:Arial,sans-serif;max-width:800px;margin:40px auto;padding:0 20px;background:#1a1a2e;color:#e0e0e0;">
 <h1 style="color:#ff6b6b;">Comment Search</h1>
 <form method="GET" action="">
@@ -476,7 +482,7 @@ def render_xss_search_page(connection, query):
 
     return {"_html": True, "content": html}
 
-
+    return {"_html": True, "content": html_content}
 
 
 # ============================================================
