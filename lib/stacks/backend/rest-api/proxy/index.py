@@ -20,6 +20,7 @@ from db_connection import get_database_connection, return_database_connection
 from handlers import accounts_handler, opportunities_handler, team_members_handler, industries_handler
 from handlers import security_handler
 from s3_integration import enhance_with_images
+from rate_limiter import RateLimiter
 from cors_handler import process_cors
 from error_handler import (
     handle_validation_error,
@@ -36,6 +37,13 @@ cloudwatch = boto3.client('cloudwatch')
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+# Initialize rate limiter (shared across warm Lambda invocations)
+rate_limiter = RateLimiter()
+
+# Cleanup counter for rate limiter maintenance
+request_counter = 0
+CLEANUP_INTERVAL = 100  # Clean up old buckets every 100 requests
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -60,6 +68,11 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         
     Requirements: 1.1, 1.2, 2.1, 3.1, 4.1, 5.1, 6.1, 7.1, 8.1, 9.1, 10.1
     """
+    global request_counter
+    
+    # Increment request counter
+    request_counter += 1
+    
     request_id = context.aws_request_id if context else "unknown"
     logger.info(f"Processing request {request_id}: {event.get('httpMethod')} {event.get('path')}")
     
@@ -67,6 +80,29 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Handle CORS preflight requests
         if event.get('httpMethod') == 'OPTIONS':
             return process_cors(event)
+        
+        # Extract client identifier for rate limiting
+        # Priority: authenticated user ID > source IP address
+        client_id = _get_client_identifier(event)
+        
+        # Check rate limit
+        allowed, retry_after = rate_limiter.check_rate_limit(client_id)
+        if not allowed:
+            logger.warning(f"Rate limit exceeded for client {client_id}")
+            response = {
+                'statusCode': 429,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Retry-After': str(retry_after) if retry_after else '60',
+                    'X-RateLimit-Limit': str(rate_limiter.default_rate_limit),
+                },
+                'body': json.dumps({
+                    'error': 'Too Many Requests',
+                    'message': f'Rate limit exceeded. Please retry after {retry_after} seconds.',
+                    'retryAfter': retry_after
+                })
+            }
+            return process_cors(event, response)
         
         # Parse API Gateway event to extract route information
         route_info = parse_api_gateway_event(event)
@@ -126,6 +162,11 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Apply CORS headers
         response = process_cors(event, response)
         
+        # Periodically cleanup old rate limit buckets
+        if request_counter % CLEANUP_INTERVAL == 0:
+            rate_limiter.cleanup_old_buckets()
+            logger.info(f"Rate limiter cleanup performed at request {request_counter}")
+        
         logger.info(f"Request {request_id} completed successfully with status {response['statusCode']}")
         return response
         
@@ -161,6 +202,33 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         response = handle_server_error(e, request_id)
         return process_cors(event, response)
 
+
+def _get_client_identifier(event: Dict[str, Any]) -> str:
+    """
+    Extract client identifier for rate limiting.
+    
+    Priority:
+    1. Authenticated user ID from Cognito authorizer context
+    2. Source IP address from request context
+    
+    Args:
+        event: API Gateway event dictionary
+        
+    Returns:
+        Client identifier string
+    """
+    # Try to get authenticated user ID from Cognito authorizer
+    request_context = event.get('requestContext', {})
+    authorizer = request_context.get('authorizer', {})
+    claims = authorizer.get('claims', {})
+    user_id = claims.get('sub') or claims.get('cognito:username')
+    
+    if user_id:
+        return f"user:{user_id}"
+    
+    # Fall back to source IP address
+    source_ip = request_context.get('identity', {}).get('sourceIp', 'unknown')
+    return f"ip:{source_ip}"
 
 def execute_operation(connection, route_info, operation: str) -> Any:
     """

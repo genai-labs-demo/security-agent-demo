@@ -1,6 +1,7 @@
 """
 Request routing and parsing module for API Gateway events.
 Handles route parsing, parameter extraction, and request routing to appropriate entity handlers.
+Includes rate limiting awareness for resource consumption protection.
 """
 
 import json
@@ -16,6 +17,7 @@ logger.setLevel(logging.INFO)
 class RouteInfo:
     """
     Container for parsed route information from API Gateway event.
+    Includes metadata for rate limiting and resource consumption tracking.
     """
     def __init__(
         self,
@@ -24,7 +26,8 @@ class RouteInfo:
         resource_id: Optional[str] = None,
         query_params: Optional[Dict[str, str]] = None,
         body: Optional[Dict[str, Any]] = None,
-        path: Optional[str] = None
+        path: Optional[str] = None,
+        client_identifier: Optional[str] = None
     ):
         self.resource_type = resource_type
         self.http_method = http_method
@@ -33,6 +36,7 @@ class RouteInfo:
         self.body = body or {}
         self.path = path or ""
     
+        self.client_identifier = client_identifier
     def __repr__(self):
         return (f"RouteInfo(resource_type={self.resource_type}, "
                 f"http_method={self.http_method}, "

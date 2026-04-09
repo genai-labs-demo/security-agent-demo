@@ -65,6 +65,8 @@ export class RestApi extends Construct {
                 allowHeaders: Cors.DEFAULT_HEADERS,
             },
             deployOptions: {
+                throttlingRateLimit: 1000,
+                throttlingBurstLimit: 2000,
                 accessLogDestination: new LogGroupLogDestination(
                     new LogGroup(this, "restApiLogGroup", {
                         removalPolicy: RemovalPolicy.DESTROY,
