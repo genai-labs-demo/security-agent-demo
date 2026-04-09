@@ -21,6 +21,7 @@ import { CommonPythonFunction } from "../../../common/blueprints";
 
 interface RestApiProps {
     urls: string[];
+    stage: string;
     vpc?: Vpc;
     securityGroup?: SecurityGroup;
     userPool: UserPool;
@@ -39,6 +40,7 @@ export class RestApi extends Construct {
         super(scope, id);
 
         const { 
+            stage,
             urls, 
             vpc, 
             securityGroup, 
@@ -90,6 +92,7 @@ export class RestApi extends Construct {
         );
 
         const environment: Record<string, string> = {
+            STAGE: stage,
             ALLOWED_ORIGINS: JSON.stringify(urls),
         };
 
@@ -150,57 +153,61 @@ export class RestApi extends Construct {
 
         // Add unauthenticated security demo endpoints BEFORE the catch-all proxy
         // These must be explicitly defined so pen test scanners can reach them without a JWT
+        // SECURITY: Only register these endpoints in development environments
         const lambdaInteg = new LambdaIntegration(proxyFunction);
         const noAuth = { authorizationType: AuthorizationType.NONE };
+        
+        // Only register vulnerable security demo endpoints in development stage
+        if (stage === 'dev') {
+            const secProfile = restApi.root.addResource("security-profile");
+            secProfile.addMethod("GET", lambdaInteg, noAuth);
+            secProfile.addMethod("POST", lambdaInteg, noAuth);
+            const secProfileId = secProfile.addResource("{id}");
+            secProfileId.addMethod("GET", lambdaInteg, noAuth);
 
-        const secProfile = restApi.root.addResource("security-profile");
-        secProfile.addMethod("GET", lambdaInteg, noAuth);
-        secProfile.addMethod("POST", lambdaInteg, noAuth);
-        const secProfileId = secProfile.addResource("{id}");
-        secProfileId.addMethod("GET", lambdaInteg, noAuth);
+            const secComments = restApi.root.addResource("security-comments");
+            secComments.addMethod("GET", lambdaInteg, noAuth);
+            secComments.addMethod("POST", lambdaInteg, noAuth);
 
-        const secComments = restApi.root.addResource("security-comments");
-        secComments.addMethod("GET", lambdaInteg, noAuth);
-        secComments.addMethod("POST", lambdaInteg, noAuth);
+            const secSearch = restApi.root.addResource("security-search");
+            secSearch.addMethod("GET", lambdaInteg, noAuth);
+            secSearch.addMethod("POST", lambdaInteg, noAuth);
 
-        const secSearch = restApi.root.addResource("security-search");
-        secSearch.addMethod("GET", lambdaInteg, noAuth);
-        secSearch.addMethod("POST", lambdaInteg, noAuth);
+            const secTools = restApi.root.addResource("security-tools");
+            const secPing = secTools.addResource("ping");
+            secPing.addMethod("POST", lambdaInteg, noAuth);
+            const secNslookup = secTools.addResource("nslookup");
+            secNslookup.addMethod("POST", lambdaInteg, noAuth);
 
-        const secTools = restApi.root.addResource("security-tools");
-        const secPing = secTools.addResource("ping");
-        secPing.addMethod("POST", lambdaInteg, noAuth);
-        const secNslookup = secTools.addResource("nslookup");
-        secNslookup.addMethod("POST", lambdaInteg, noAuth);
+            const secHealth = restApi.root.addResource("security-health");
+            secHealth.addMethod("GET", lambdaInteg, noAuth);
 
-        const secHealth = restApi.root.addResource("security-health");
-        secHealth.addMethod("GET", lambdaInteg, noAuth);
+            const secXssPage = restApi.root.addResource("security-xss-page");
+            secXssPage.addMethod("GET", lambdaInteg, noAuth);
 
-        const secXssPage = restApi.root.addResource("security-xss-page");
-        secXssPage.addMethod("GET", lambdaInteg, noAuth);
+            const secXssComments = restApi.root.addResource("security-xss-comments");
+            secXssComments.addMethod("GET", lambdaInteg, noAuth);
 
-        const secXssComments = restApi.root.addResource("security-xss-comments");
-        secXssComments.addMethod("GET", lambdaInteg, noAuth);
+            const secXssSearch = restApi.root.addResource("security-xss-search");
+            secXssSearch.addMethod("GET", lambdaInteg, noAuth);
 
-        const secXssSearch = restApi.root.addResource("security-xss-search");
-        secXssSearch.addMethod("GET", lambdaInteg, noAuth);
-
-        // Suppress cdk-nag authorization warnings for intentionally vulnerable security demo endpoints.
-        // These endpoints are deliberately unauthenticated to allow pen test scanners to discover
-        // and exploit vulnerabilities (IDOR, SQLi, XSS, Command Injection, Mass Assignment)
-        // as part of the AWS Security Agent educational demo.
-        const securityDemoNagSuppression = [
-            {
-                id: "AwsSolutions-APIG4",
-                reason: "Security demo endpoints are intentionally unauthenticated to allow pen test scanners to test for vulnerabilities without requiring Cognito JWT tokens.",
-            },
-            {
-                id: "AwsSolutions-COG4",
-                reason: "Security demo endpoints are intentionally unauthenticated to allow pen test scanners to test for vulnerabilities without requiring Cognito JWT tokens.",
-            },
-        ];
-        for (const resource of [secProfile, secProfileId, secComments, secSearch, secTools, secPing, secNslookup, secHealth, secXssPage, secXssComments, secXssSearch]) {
-            NagSuppressions.addResourceSuppressions(resource, securityDemoNagSuppression, true);
+            // Suppress cdk-nag authorization warnings for intentionally vulnerable security demo endpoints.
+            // These endpoints are deliberately unauthenticated to allow pen test scanners to discover
+            // and exploit vulnerabilities (IDOR, SQLi, XSS, Command Injection, Mass Assignment)
+            // as part of the AWS Security Agent educational demo.
+            const securityDemoNagSuppression = [
+                {
+                    id: "AwsSolutions-APIG4",
+                    reason: "Security demo endpoints are intentionally unauthenticated to allow pen test scanners to test for vulnerabilities without requiring Cognito JWT tokens.",
+                },
+                {
+                    id: "AwsSolutions-COG4",
+                    reason: "Security demo endpoints are intentionally unauthenticated to allow pen test scanners to test for vulnerabilities without requiring Cognito JWT tokens.",
+                },
+            ];
+            for (const resource of [secProfile, secProfileId, secComments, secSearch, secTools, secPing, secNslookup, secHealth, secXssPage, secXssComments, secXssSearch]) {
+                NagSuppressions.addResourceSuppressions(resource, securityDemoNagSuppression, true);
+            }
         }
 
         // Catch-all proxy for remaining (authenticated) CRM endpoints

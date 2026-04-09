@@ -20,6 +20,9 @@ export class Backend extends CommonStack {
 
         const { urls } = props;
 
+        // Get deployment stage from CDK context (dev, staging, prod)
+        const stage = this.node.tryGetContext('stage') || 'prod';
+
         const networking = new Networking(this, "networking");
 
         const auth = new Auth(this, "auth", {
@@ -40,6 +43,7 @@ export class Backend extends CommonStack {
 
         const restApi = new RestApi(this, "restApi", {
             urls,
+            stage,
             userPool: auth.userPool,
             regionalWebAclArn: auth.regionalWebAclArn,
             vpc: networking.vpc,
