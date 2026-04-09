@@ -11,7 +11,7 @@ Requirements: 1.1, 1.2, 2.1, 3.1, 4.1, 5.1, 6.1, 7.1, 8.1, 9.1, 10.1
 import json
 import logging
 import time
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import boto3
 
 # Import handler modules
@@ -22,6 +22,7 @@ from handlers import security_handler
 from s3_integration import enhance_with_images
 from cors_handler import process_cors
 from error_handler import (
+from authorization import AuthorizationError
     handle_validation_error,
     handle_not_found_error,
     handle_conflict_error,
@@ -37,6 +38,26 @@ cloudwatch = boto3.client('cloudwatch')
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
+
+
+def extract_user_id_from_event(event: Dict[str, Any]) -> str:
+    """
+    Extract the authenticated user's ID from the JWT token in the API Gateway event.
+    
+    Args:
+        event: API Gateway event dictionary
+    
+    Returns:
+        User ID (sub claim from JWT token)
+    
+    Raises:
+        ValueError: If user ID cannot be extracted from the event
+    """
+    try:
+        return event['requestContext']['authorizer']['claims']['sub']
+    except (KeyError, TypeError) as e:
+        logger.error(f"Failed to extract user ID from event: {str(e)}")
+        raise ValueError("Authentication required: unable to identify user from JWT token")
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
@@ -71,6 +92,12 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Parse API Gateway event to extract route information
         route_info = parse_api_gateway_event(event)
         
+        # Extract user ID from JWT token (except for security demo endpoints)
+        user_id = None
+        if not route_info.resource_type.startswith('security-'):
+            user_id = extract_user_id_from_event(event)
+            logger.info(f"Authenticated user: {user_id}")
+        
         # Validate route
         validate_route(route_info)
         
@@ -85,7 +112,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             start_time = time.time()
             
             # Route to appropriate handler and execute operation
-            result = execute_operation(connection, route_info, operation)
+            result = execute_operation(connection, route_info, operation, user_id)
             
             # Calculate and publish search latency metrics
             elapsed_time = (time.time() - start_time) * 1000  # Convert to milliseconds
@@ -129,6 +156,12 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         logger.info(f"Request {request_id} completed successfully with status {response['statusCode']}")
         return response
         
+    except AuthorizationError as e:
+        # Authorization errors (403 Forbidden)
+        logger.warning(f"Authorization error in request {request_id}: {str(e)}")
+        response = {'statusCode': 403, 'body': json.dumps({'error': 'Forbidden', 'message': str(e)})}
+        return process_cors(event, response)
+        
     except ValueError as e:
         # Validation errors (400)
         logger.warning(f"Validation error in request {request_id}: {str(e)}")
@@ -162,7 +195,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         return process_cors(event, response)
 
 
-def execute_operation(connection, route_info, operation: str) -> Any:
+def execute_operation(connection, route_info, operation: str, user_id: Optional[str]) -> Any:
     """
     Execute the appropriate CRUD operation based on route information.
     
@@ -170,6 +203,7 @@ def execute_operation(connection, route_info, operation: str) -> Any:
         connection: Database connection object
         route_info: Parsed route information
         operation: Operation type ('list', 'get', 'create', 'update', 'delete')
+        user_id: Authenticated user's ID from JWT token (None for security endpoints)
         
     Returns:
         Operation result (record, list of records, or boolean)
@@ -187,21 +221,21 @@ def execute_operation(connection, route_info, operation: str) -> Any:
     # Route to accounts handler
     if resource_type == 'accounts':
         if operation == 'list':
-            return accounts_handler.list_accounts(connection)
+            return accounts_handler.list_accounts(connection, user_id)
         elif operation == 'get':
-            result = accounts_handler.get_account(connection, resource_id)
+            result = accounts_handler.get_account(connection, resource_id, user_id)
             if result is None:
                 raise ValueError(f"Account with id {resource_id} not found")
             return result
         elif operation == 'create':
-            return accounts_handler.create_account(connection, body)
+            return accounts_handler.create_account(connection, body, user_id)
         elif operation == 'update':
-            result = accounts_handler.update_account(connection, resource_id, body)
+            result = accounts_handler.update_account(connection, resource_id, body, user_id)
             if result is None:
                 raise ValueError(f"Account with id {resource_id} not found")
             return result
         elif operation == 'delete':
-            success = accounts_handler.delete_account(connection, resource_id)
+            success = accounts_handler.delete_account(connection, resource_id, user_id)
             if not success:
                 raise ValueError(f"Account with id {resource_id} not found")
             return None
@@ -217,23 +251,23 @@ def execute_operation(connection, route_info, operation: str) -> Any:
         if operation == 'list' or is_search_endpoint:
             # If search query is provided, perform search instead of list
             if search_query:
-                return opportunities_handler.search_opportunities(connection, search_query, account_id)
+                return opportunities_handler.search_opportunities(connection, search_query, user_id, account_id)
             else:
-                return opportunities_handler.list_opportunities(connection, account_id)
+                return opportunities_handler.list_opportunities(connection, user_id, account_id)
         elif operation == 'get':
-            result = opportunities_handler.get_opportunity(connection, resource_id)
+            result = opportunities_handler.get_opportunity(connection, resource_id, user_id)
             if result is None:
                 raise ValueError(f"Opportunity with id {resource_id} not found")
             return result
         elif operation == 'create':
-            return opportunities_handler.create_opportunity(connection, body)
+            return opportunities_handler.create_opportunity(connection, body, user_id)
         elif operation == 'update':
-            result = opportunities_handler.update_opportunity(connection, resource_id, body)
+            result = opportunities_handler.update_opportunity(connection, resource_id, body, user_id)
             if result is None:
                 raise ValueError(f"Opportunity with id {resource_id} not found")
             return result
         elif operation == 'delete':
-            success = opportunities_handler.delete_opportunity(connection, resource_id)
+            success = opportunities_handler.delete_opportunity(connection, resource_id, user_id)
             if not success:
                 raise ValueError(f"Opportunity with id {resource_id} not found")
             return None
