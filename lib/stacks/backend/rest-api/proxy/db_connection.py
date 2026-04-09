@@ -5,6 +5,7 @@ Handles connection pooling, credential retrieval, and connection reuse across La
 
 import os
 import json
+import time
 import logging
 from typing import Optional
 import boto3
@@ -16,9 +17,14 @@ from botocore.exceptions import ClientError
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
+# Credential TTL configuration (default: 5 minutes)
+# Can be overridden via DB_CREDENTIALS_TTL_SECONDS environment variable
+CREDENTIALS_TTL_SECONDS = int(os.environ.get('DB_CREDENTIALS_TTL_SECONDS', '300'))
+
 # Global connection pool (persists across Lambda invocations)
 _connection_pool: Optional[psycopg2.pool.SimpleConnectionPool] = None
 _db_credentials: Optional[dict] = None
+_credentials_last_fetched: Optional[float] = None
 
 
 def _get_database_credentials() -> dict:
@@ -32,12 +38,29 @@ def _get_database_credentials() -> dict:
     Raises:
         Exception: If credentials cannot be retrieved from Secrets Manager
     """
-    global _db_credentials
+    global _db_credentials, _credentials_last_fetched, _connection_pool
     
-    # Return cached credentials if available
-    if _db_credentials is not None:
-        logger.info("Using cached database credentials")
-        return _db_credentials
+    # Check if credentials are cached and still fresh
+    if _db_credentials is not None and _credentials_last_fetched is not None:
+        age_seconds = time.time() - _credentials_last_fetched
+        if age_seconds < CREDENTIALS_TTL_SECONDS:
+            # Credentials are still fresh, return cached version
+            logger.info(f"Using cached database credentials (age: {int(age_seconds)}s, TTL: {CREDENTIALS_TTL_SECONDS}s)")
+            return _db_credentials
+        else:
+            # Credentials have exceeded TTL - invalidate cache and fetch fresh credentials
+            logger.info(f"Cached credentials expired (age: {int(age_seconds)}s, TTL: {CREDENTIALS_TTL_SECONDS}s). Refreshing from Secrets Manager.")
+            _db_credentials = None
+            _credentials_last_fetched = None
+            
+            # Close existing connection pool to ensure new connections use fresh credentials
+            if _connection_pool is not None:
+                try:
+                    _connection_pool.closeall()
+                    _connection_pool = None
+                    logger.info("Closed connection pool due to credential refresh")
+                except Exception as e:
+                    logger.warning(f"Error closing connection pool during credential refresh: {str(e)}")
     
     secret_arn = os.environ.get('DATABASE_SECRET_ARN')
     if not secret_arn:
@@ -71,6 +94,9 @@ def _get_database_credentials() -> dict:
             'port': int(os.environ.get('DATABASE_PORT', secret_dict.get('port', 5432))),
             'dbname': database_name
         }
+        
+        # Update timestamp to track credential freshness
+        _credentials_last_fetched = time.time()
         
         logger.info(f"Successfully retrieved credentials for database: {database_name}")
         return _db_credentials
