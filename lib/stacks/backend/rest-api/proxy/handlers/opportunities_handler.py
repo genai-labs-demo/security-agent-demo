@@ -3,6 +3,7 @@ Opportunities handler module for CRUD operations on opportunity entities.
 Handles database operations and field mapping between snake_case and camelCase.
 """
 
+import json
 import logging
 from typing import Dict, Any, List, Optional
 from datetime import datetime
@@ -82,6 +83,64 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
     return db_data
 
 
+def _write_audit_log(
+    connection,
+    user_id: Optional[str],
+    action: str,
+    entity_type: str,
+    entity_id: str,
+    old_values: Optional[Dict[str, Any]] = None,
+    new_values: Optional[Dict[str, Any]] = None,
+    change_reason: Optional[str] = None,
+    ip_address: Optional[str] = None,
+    user_agent: Optional[str] = None
+) -> None:
+    """
+    Write an audit log entry for business-critical operations.
+    Captures WHO made the change, WHEN it occurred, WHAT changed, and WHY.
+    
+    Args:
+        connection: Database connection object
+        user_id: Identity of the user making the change (e.g., user email, ID)
+        action: Type of action (CREATE, UPDATE, DELETE, RECALCULATE)
+        entity_type: Type of entity affected (opportunity, account)
+        entity_id: ID of the affected entity
+        old_values: Previous state of the entity (for UPDATE, DELETE)
+        new_values: New state of the entity (for CREATE, UPDATE)
+        change_reason: Optional reason for the change
+        ip_address: Optional IP address of the client
+        user_agent: Optional user agent of the client
+    
+    Note:
+        Audit log failures are logged but do not raise exceptions to prevent
+        blocking business operations. Audit logging uses a separate transaction.
+    """
+    try:
+        # Use system as default user if not provided
+        if not user_id:
+            user_id = "system"
+        
+        cursor = connection.cursor()
+        
+        cursor.execute("""
+            INSERT INTO audit_log 
+            (user_id, action, entity_type, entity_id, old_values, new_values, 
+             change_reason, timestamp, ip_address, user_agent)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), %s, %s)
+        """, (
+            user_id, action, entity_type, entity_id,
+            json.dumps(old_values) if old_values else None,
+            json.dumps(new_values) if new_values else None,
+            change_reason, ip_address, user_agent
+        ))
+        connection.commit()
+        cursor.close()
+        logger.info(f"Audit log written: {action} {entity_type} {entity_id} by {user_id}")
+    except Exception as e:
+        logger.error(f"Failed to write audit log: {str(e)}")
+        # Do not raise exception - audit failures should not block business operations
+
+
 def _recalculate_account_aggregates(connection, account_id: str) -> None:
     """
     Recalculate and update the aggregate fields (opportunity_count, total_opportunity_value)
@@ -96,6 +155,14 @@ def _recalculate_account_aggregates(connection, account_id: str) -> None:
     
     cursor = connection.cursor()
     try:
+        # Capture old values for audit log
+        cursor.execute(
+            "SELECT opportunity_count, total_opportunity_value FROM accounts WHERE id = %s",
+            (account_id,)
+        )
+        old_row = cursor.fetchone()
+        old_values = {'opportunity_count': old_row[0], 'total_opportunity_value': float(old_row[1]) if old_row[1] else 0} if old_row else {}
+        
         cursor.execute("""
             UPDATE accounts
             SET opportunity_count = sub.cnt,
@@ -111,6 +178,18 @@ def _recalculate_account_aggregates(connection, account_id: str) -> None:
         """, (account_id, account_id))
         connection.commit()
         logger.info(f"Recalculated aggregates for account {account_id}")
+        
+        # Capture new values for audit log
+        cursor.execute(
+            "SELECT opportunity_count, total_opportunity_value FROM accounts WHERE id = %s",
+            (account_id,)
+        )
+        new_row = cursor.fetchone()
+        new_values = {'opportunity_count': new_row[0], 'total_opportunity_value': float(new_row[1]) if new_row[1] else 0} if new_row else {}
+        
+        # Write audit log
+        _write_audit_log(connection, "system", "RECALCULATE", "account", account_id,
+                        old_values=old_values, new_values=new_values)
     except Exception as e:
         logger.error(f"Failed to recalculate aggregates for account {account_id}: {str(e)}")
         # Don't rollback here — let the caller handle transaction management
@@ -485,6 +564,10 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         # Recalculate parent account aggregates
         _recalculate_account_aggregates(connection, db_data.get('account_id'))
         
+        # Write audit log for opportunity creation
+        _write_audit_log(connection, data.get('userId', 'system'), "CREATE", "opportunity",
+                        opportunity['id'], new_values=opportunity)
+        
         logger.info(f"Created opportunity with ID: {opportunity['id']}")
         return opportunity
         
@@ -546,7 +629,15 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
             logger.warning("No fields to update")
             # Return current opportunity
             return get_opportunity(connection, opportunity_id)
+        # Create cursor first for all operations
+        cursor = connection.cursor(cursor_factory=RealDictCursor)
         
+        # Fetch old values for audit log before update
+        cursor.execute("""
+            SELECT * FROM opportunities WHERE id = %s AND deleted_at IS NULL
+        """, (opportunity_id,))
+        old_record = cursor.fetchone()
+        old_values = _map_opportunity_to_api_format(dict(old_record)) if old_record else None
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
         # Validate account_id exists if being updated
@@ -596,6 +687,10 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         
         # Recalculate parent account aggregates (handles amount or account changes)
         _recalculate_account_aggregates(connection, record.get('account_id'))
+        
+        # Write audit log for opportunity update
+        _write_audit_log(connection, data.get('userId', 'system'), "UPDATE", "opportunity",
+                        opportunity_id, old_values=old_values, new_values=opportunity)
         
         logger.info(f"Updated opportunity: {opportunity_id}")
         return opportunity
@@ -656,6 +751,11 @@ def delete_opportunity(connection, opportunity_id: str) -> bool:
             return False
 
         account_id = row[1]
+        
+        # Capture old values for audit log before deletion
+        cursor.execute("SELECT * FROM opportunities WHERE id = %s", (opportunity_id,))
+        old_record = cursor.fetchone()
+        old_values = {'id': old_record[0], 'account_id': old_record[1]} if old_record else None
 
         # Soft-delete: set deleted_at timestamp instead of removing the row
         cursor.execute(
@@ -667,6 +767,10 @@ def delete_opportunity(connection, opportunity_id: str) -> bool:
 
         # Recalculate parent account aggregates
         _recalculate_account_aggregates(connection, account_id)
+        
+        # Write audit log for opportunity deletion
+        _write_audit_log(connection, "system", "DELETE", "opportunity",
+                        opportunity_id, old_values=old_values)
 
         logger.info(f"Soft-deleted opportunity: {opportunity_id}")
         return True
