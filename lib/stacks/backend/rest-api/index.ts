@@ -154,10 +154,10 @@ export class RestApi extends Construct {
         const noAuth = { authorizationType: AuthorizationType.NONE };
 
         const secProfile = restApi.root.addResource("security-profile");
-        secProfile.addMethod("GET", lambdaInteg, noAuth);
-        secProfile.addMethod("POST", lambdaInteg, noAuth);
+        secProfile.addMethod("GET", lambdaInteg);
+        secProfile.addMethod("POST", lambdaInteg);
         const secProfileId = secProfile.addResource("{id}");
-        secProfileId.addMethod("GET", lambdaInteg, noAuth);
+        secProfileId.addMethod("GET", lambdaInteg);
 
         const secComments = restApi.root.addResource("security-comments");
         secComments.addMethod("GET", lambdaInteg, noAuth);
