@@ -145,7 +145,10 @@ def initialize_schema(conn):
         total_opportunity_value NUMERIC(15, 2),
         last_activity_date TIMESTAMP WITH TIME ZONE,
         created_date TIMESTAMP WITH TIME ZONE,
-        logo_url TEXT
+        logo_url TEXT,
+        created_by VARCHAR(255),
+        modified_by VARCHAR(255),
+        deleted_by VARCHAR(255)
     );
 
     CREATE TABLE IF NOT EXISTS opportunities (
@@ -164,7 +167,10 @@ def initialize_schema(conn):
         owner_name VARCHAR(255),
         probability INTEGER,
         created_date TIMESTAMP WITH TIME ZONE,
-        last_modified_date TIMESTAMP WITH TIME ZONE
+        last_modified_date TIMESTAMP WITH TIME ZONE,
+        created_by VARCHAR(255),
+        modified_by VARCHAR(255),
+        deleted_by VARCHAR(255)
     );
 
     CREATE INDEX IF NOT EXISTS idx_opportunities_owner_id ON opportunities(owner_id);
@@ -195,11 +201,34 @@ def initialize_schema(conn):
     ALTER TABLE security_comments ADD COLUMN IF NOT EXISTS author_name VARCHAR(255);
     ALTER TABLE security_comments ADD COLUMN IF NOT EXISTS author_role VARCHAR(100);
 
-    -- Soft-delete support: add deleted_at columns for accounts and opportunities
+    -- Soft-delete and audit trail support
     ALTER TABLE accounts ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE;
     ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE;
     CREATE INDEX IF NOT EXISTS idx_accounts_deleted_at ON accounts(deleted_at);
     CREATE INDEX IF NOT EXISTS idx_opportunities_deleted_at ON opportunities(deleted_at);
+
+    -- Audit trail columns (idempotent migrations)
+    ALTER TABLE accounts ADD COLUMN IF NOT EXISTS created_by VARCHAR(255);
+    ALTER TABLE accounts ADD COLUMN IF NOT EXISTS modified_by VARCHAR(255);
+    ALTER TABLE accounts ADD COLUMN IF NOT EXISTS deleted_by VARCHAR(255);
+    ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS created_by VARCHAR(255);
+    ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS modified_by VARCHAR(255);
+    ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS deleted_by VARCHAR(255);
+
+    -- Audit log table for comprehensive change tracking
+    CREATE TABLE IF NOT EXISTS audit_log (
+        id SERIAL PRIMARY KEY,
+        table_name VARCHAR(100) NOT NULL,
+        record_id VARCHAR(50) NOT NULL,
+        operation VARCHAR(20) NOT NULL,
+        user_id VARCHAR(255),
+        changed_fields JSONB,
+        old_values JSONB,
+        new_values JSONB,
+        timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_audit_log_record ON audit_log(table_name, record_id);
+    CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp ON audit_log(timestamp);
     """
     
     cursor = conn.cursor()
