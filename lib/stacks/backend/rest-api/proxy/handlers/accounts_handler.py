@@ -68,7 +68,6 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
         'ownerId': 'owner_id',
         'ownerName': 'owner_name',
         'lastActivityDate': 'last_activity_date',
-        'createdDate': 'created_date',
         'logoUrl': 'logo_url'
     }
     
@@ -212,13 +211,9 @@ def create_account(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         else:
             db_data['id'] = data['id']
         
-        # Set created_date if not provided
-        if 'created_date' not in db_data:
-            db_data['created_date'] = datetime.utcnow()
-        
-        # Set last_activity_date if not provided
-        if 'last_activity_date' not in db_data:
-            db_data['last_activity_date'] = datetime.utcnow()
+        # Always set timestamps server-side to prevent backdating
+        db_data['created_date'] = datetime.utcnow()
+        db_data['last_activity_date'] = datetime.utcnow()
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
