@@ -82,6 +82,10 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
     return db_data
 
 
+# Fields that are system-managed and cannot be set directly by users
+SYSTEM_MANAGED_FIELDS = {'id', 'created_date', 'last_modified_date'}
+
+
 def _recalculate_account_aggregates(connection, account_id: str) -> None:
     """
     Recalculate and update the aggregate fields (opportunity_count, total_opportunity_value)
@@ -425,6 +429,10 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
         
+        # Strip system-managed fields — these are set automatically by the system
+        for field in SYSTEM_MANAGED_FIELDS:
+            db_data.pop(field, None)
+        
         # Validate amount bounds
         _validate_amount(db_data.get('amount'))
         
@@ -536,10 +544,14 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         if 'amount' in db_data:
             _validate_amount(db_data.get('amount'))
         
-        # Remove id if present (shouldn't be updated)
+        # Strip system-managed fields — id and created_date cannot be updated
+        # Note: We explicitly remove these before setting last_modified_date below
         db_data.pop('id', None)
+        db_data.pop('created_date', None)
         
-        # Update last_modified_date
+        # Update last_modified_date to current timestamp
+        # This ensures the field always reflects the actual modification time,
+        # preventing users from setting arbitrary values via mass assignment
         db_data['last_modified_date'] = datetime.utcnow()
         
         if not db_data or (len(db_data) == 1 and 'last_modified_date' in db_data):
