@@ -445,6 +445,22 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
+        # Check for duplicate opportunity (same name + account combination)
+        if 'name' in db_data and 'account_id' in db_data:
+            cursor.execute(
+                """SELECT id, name FROM opportunities 
+                   WHERE name = %s AND account_id = %s AND deleted_at IS NULL""",
+                (db_data['name'], db_data['account_id'])
+            )
+            existing_opportunity = cursor.fetchone()
+            if existing_opportunity:
+                cursor.close()
+                raise Exception(
+                    f"Duplicate opportunity detected: An opportunity with the name "
+                    f"'{db_data['name']}' already exists for this account. "
+                    f"Please use a different name or update the existing opportunity."
+                )
+        
         # Validate account_id exists
         if 'account_id' in db_data and db_data['account_id']:
             cursor.execute("SELECT id FROM accounts WHERE id = %s", (db_data['account_id'],))
@@ -491,7 +507,9 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     except psycopg2.IntegrityError as e:
         connection.rollback()
         logger.error(f"Integrity error creating opportunity: {str(e)}")
-        # Check for specific constraint violations
+        # Check for duplicate constraint violation (defense in depth - DB-level enforcement)
+        if 'idx_opportunities_unique_name_account' in str(e).lower() or 'duplicate key' in str(e).lower():
+            raise Exception(f"Duplicate opportunity detected: An opportunity with this name already exists for this account")
         if 'foreign key' in str(e).lower():
             if 'account_id' in str(e).lower():
                 raise Exception("Invalid account ID: account does not exist")
@@ -504,7 +522,7 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         raise Exception(f"Failed to create opportunity: {str(e)}")
     except Exception as e:
         connection.rollback()
-        # Re-raise if it's already our custom exception
+        # Re-raise if it's already our custom exception message
         if "Invalid account ID" in str(e) or "Invalid owner ID" in str(e):
             raise
         logger.error(f"Unexpected error creating opportunity: {str(e)}")

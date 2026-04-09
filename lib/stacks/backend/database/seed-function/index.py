@@ -200,6 +200,11 @@ def initialize_schema(conn):
     ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE;
     CREATE INDEX IF NOT EXISTS idx_accounts_deleted_at ON accounts(deleted_at);
     CREATE INDEX IF NOT EXISTS idx_opportunities_deleted_at ON opportunities(deleted_at);
+
+    -- Unique constraint to prevent duplicate opportunities (same name + account combination)
+    -- Partial index allows duplicates only when soft-deleted (deleted_at IS NOT NULL)
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_opportunities_unique_name_account 
+        ON opportunities(name, account_id) WHERE deleted_at IS NULL;
     """
     
     cursor = conn.cursor()
