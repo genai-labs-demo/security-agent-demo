@@ -11,7 +11,7 @@ Requirements: 1.1, 1.2, 2.1, 3.1, 4.1, 5.1, 6.1, 7.1, 8.1, 9.1, 10.1
 import json
 import logging
 import time
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import boto3
 
 # Import handler modules
@@ -63,6 +63,20 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     request_id = context.aws_request_id if context else "unknown"
     logger.info(f"Processing request {request_id}: {event.get('httpMethod')} {event.get('path')}")
     
+    # Extract authenticated user from JWT token claims
+    # API Gateway Cognito Authorizer places JWT claims in requestContext.authorizer.claims
+    authenticated_user = None
+    try:
+        request_context = event.get('requestContext', {})
+        authorizer = request_context.get('authorizer', {})
+        claims = authorizer.get('claims', {})
+        # The 'sub' claim contains the Cognito user's unique identifier
+        authenticated_user = claims.get('sub')
+        if authenticated_user:
+            logger.info(f"Authenticated user: {authenticated_user}")
+    except Exception as e:
+        logger.warning(f"Could not extract authenticated user from request context: {str(e)}")
+    
     try:
         # Handle CORS preflight requests
         if event.get('httpMethod') == 'OPTIONS':
@@ -85,7 +99,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             start_time = time.time()
             
             # Route to appropriate handler and execute operation
-            result = execute_operation(connection, route_info, operation)
+            result = execute_operation(connection, route_info, operation, authenticated_user)
             
             # Calculate and publish search latency metrics
             elapsed_time = (time.time() - start_time) * 1000  # Convert to milliseconds
@@ -163,7 +177,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
 
 def execute_operation(connection, route_info, operation: str) -> Any:
-    """
+def execute_operation(connection, route_info, operation: str, authenticated_user: Optional[str] = None) -> Any:
     Execute the appropriate CRUD operation based on route information.
     
     Args:
@@ -171,6 +185,7 @@ def execute_operation(connection, route_info, operation: str) -> Any:
         route_info: Parsed route information
         operation: Operation type ('list', 'get', 'create', 'update', 'delete')
         
+        authenticated_user: Optional Cognito subject (sub) of the authenticated user for authorization checks
     Returns:
         Operation result (record, list of records, or boolean)
         
@@ -227,7 +242,7 @@ def execute_operation(connection, route_info, operation: str) -> Any:
             return result
         elif operation == 'create':
             return opportunities_handler.create_opportunity(connection, body)
-        elif operation == 'update':
+            return opportunities_handler.create_opportunity(connection, body, authenticated_user)
             result = opportunities_handler.update_opportunity(connection, resource_id, body)
             if result is None:
                 raise ValueError(f"Opportunity with id {resource_id} not found")

@@ -120,6 +120,7 @@ def initialize_schema(conn):
         id VARCHAR(50) PRIMARY KEY,
         name VARCHAR(255) NOT NULL,
         email VARCHAR(255) NOT NULL UNIQUE,
+        cognito_subject VARCHAR(255) UNIQUE,
         role VARCHAR(100),
         quota NUMERIC(15, 2),
         pipeline_value NUMERIC(15, 2),
