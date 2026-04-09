@@ -62,7 +62,13 @@ export class RestApi extends Construct {
                 allowCredentials: true,
                 allowOrigins: urls,
                 allowMethods: Cors.ALL_METHODS,
-                allowHeaders: Cors.DEFAULT_HEADERS,
+                allowHeaders: [
+                    "Content-Type",
+                    "Authorization",
+                    "X-Amz-Date",
+                    "X-Api-Key",
+                    "X-Amz-Security-Token"
+                ],
             },
             deployOptions: {
                 accessLogDestination: new LogGroupLogDestination(
