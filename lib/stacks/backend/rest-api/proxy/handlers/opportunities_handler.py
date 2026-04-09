@@ -140,9 +140,11 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
         keywords = search_query.strip().split()
         
         # Limit keyword count to prevent resource exhaustion via query explosion
+        truncated = False
         MAX_KEYWORDS = 10
         if len(keywords) > MAX_KEYWORDS:
             logger.warning(f"Search query truncated from {len(keywords)} to {MAX_KEYWORDS} keywords")
+            truncated = True
             keywords = keywords[:MAX_KEYWORDS]
         
         logger.info(f"Searching opportunities for keywords: {keywords}")
@@ -256,6 +258,7 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
             # Add search metadata
             opportunity['relevanceScore'] = record.get('relevance_score', 0)
             opportunity['matchCount'] = record.get('match_count', 0)
+            opportunity['queryTruncated'] = truncated
             opportunities.append(opportunity)
         
         logger.info(f"Found {len(opportunities)} opportunities matching search query")
