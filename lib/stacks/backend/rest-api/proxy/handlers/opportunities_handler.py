@@ -563,6 +563,14 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
                 cursor.close()
                 raise Exception(f"Invalid owner ID: team member does not exist")
         
+        # Capture the old account_id BEFORE update to handle account transfers
+        # This is critical for recalculating aggregates on both old and new accounts
+        old_account_id = None
+        cursor.execute("SELECT account_id FROM opportunities WHERE id = %s AND deleted_at IS NULL", (opportunity_id,))
+        old_record = cursor.fetchone()
+        if old_record:
+            old_account_id = old_record[0]
+        
         # Build UPDATE query dynamically based on provided fields
         set_clauses = [f"{col} = %s" for col in db_data.keys()]
         values = list(db_data.values())
@@ -594,8 +602,18 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         # Map to API format
         opportunity = _map_opportunity_to_api_format(dict(record))
         
-        # Recalculate parent account aggregates (handles amount or account changes)
-        _recalculate_account_aggregates(connection, record.get('account_id'))
+        # Recalculate aggregates for affected accounts
+        new_account_id = record.get('account_id')
+        
+        # If account_id was changed (opportunity transferred), recalculate OLD account first
+        # This prevents double-counting where the opportunity is counted in both accounts
+        if old_account_id and 'account_id' in db_data and old_account_id != new_account_id:
+            logger.info(f"Opportunity transferred from account {old_account_id} to {new_account_id}")
+            _recalculate_account_aggregates(connection, old_account_id)
+        
+        # Always recalculate the current (new) account aggregates
+        # This handles amount updates, new opportunity assignments, or the target of a transfer
+        _recalculate_account_aggregates(connection, new_account_id)
         
         logger.info(f"Updated opportunity: {opportunity_id}")
         return opportunity
