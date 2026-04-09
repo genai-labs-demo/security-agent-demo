@@ -9,6 +9,8 @@ from datetime import datetime
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
+from validation import validate_opportunity, ValidationError
+
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -422,6 +424,9 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     try:
         logger.info(f"Creating new opportunity: {data.get('name')}")
         
+        # Validate opportunity data (enforces required fields, data types, enums)
+        validate_opportunity(data, is_update=False)
+        
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
         
@@ -490,6 +495,20 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         
     except psycopg2.IntegrityError as e:
         connection.rollback()
+        connection.rollback()
+        logger.error(f"Integrity error creating opportunity: {str(e)}")
+        # Check for specific constraint violations
+        if 'foreign key' in str(e).lower():
+            if 'account_id' in str(e).lower():
+                raise Exception("Invalid account ID: account does not exist")
+            elif 'owner_id' in str(e).lower():
+                raise Exception("Invalid owner ID: team member does not exist")
+        raise Exception(f"Failed to create opportunity: constraint violation")
+    except ValidationError as e:
+        connection.rollback()
+        logger.error(f"Validation error creating opportunity: {str(e)}")
+        raise ValueError(f"{e.message}")
+    except psycopg2.Error as e:
         logger.error(f"Integrity error creating opportunity: {str(e)}")
         # Check for specific constraint violations
         if 'foreign key' in str(e).lower():
@@ -528,6 +547,26 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
     """
     try:
         logger.info(f"Updating opportunity: {opportunity_id}")
+        # Retrieve current stage if we're updating the stage field (for transition validation)
+        current_stage = None
+        if 'stage' in data:
+            cursor = connection.cursor(cursor_factory=RealDictCursor)
+            cursor.execute(
+                "SELECT stage FROM opportunities WHERE id = %s AND deleted_at IS NULL",
+                (opportunity_id,)
+            )
+            current_record = cursor.fetchone()
+            cursor.close()
+            
+            if not current_record:
+                logger.info(f"Opportunity not found: {opportunity_id}")
+                return None
+            
+            current_stage = current_record.get('stage')
+        
+        # Validate data including stage transition rules
+        validate_opportunity(data, is_update=True, current_stage=current_stage)
+        
         
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
@@ -603,6 +642,20 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
     except psycopg2.IntegrityError as e:
         connection.rollback()
         logger.error(f"Integrity error updating opportunity {opportunity_id}: {str(e)}")
+        connection.rollback()
+        logger.error(f"Integrity error updating opportunity {opportunity_id}: {str(e)}")
+        # Check for specific constraint violations
+        if 'foreign key' in str(e).lower():
+            if 'account_id' in str(e).lower():
+                raise Exception("Invalid account ID: account does not exist")
+            elif 'owner_id' in str(e).lower():
+                raise Exception("Invalid owner ID: team member does not exist")
+        raise Exception(f"Failed to update opportunity: constraint violation")
+    except ValidationError as e:
+        connection.rollback()
+        logger.error(f"Validation error updating opportunity {opportunity_id}: {str(e)}")
+        raise ValueError(f"{e.message}")
+    except psycopg2.Error as e:
         # Check for specific constraint violations
         if 'foreign key' in str(e).lower():
             if 'account_id' in str(e).lower():

@@ -12,6 +12,48 @@ HEALTH_STATUS_VALUES = ['Green', 'Yellow', 'Red']
 OPPORTUNITY_STAGE_VALUES = ['Launched', 'Qualified', 'Proof of Concept', 'Negotiation', 'Closed Won', 'Closed Lost']
 FORECAST_CATEGORY_VALUES = ['Pipeline', 'Best Case', 'Commit', 'Closed']
 
+# Stage transition rules: maps each stage to its permitted next stages
+# This enforces workflow logic and prevents illogical state changes
+STAGE_TRANSITION_RULES = {
+    'Launched': ['Launched', 'Qualified', 'Proof of Concept', 'Negotiation', 'Closed Won', 'Closed Lost'],
+    'Qualified': ['Qualified', 'Launched', 'Proof of Concept', 'Negotiation', 'Closed Won', 'Closed Lost'],
+    'Proof of Concept': ['Proof of Concept', 'Qualified', 'Launched', 'Negotiation', 'Closed Won', 'Closed Lost'],
+    'Negotiation': ['Negotiation', 'Proof of Concept', 'Qualified', 'Launched', 'Closed Won', 'Closed Lost'],
+    'Closed Won': ['Closed Won'],
+    'Closed Lost': ['Closed Lost']
+}
+
+
+def check_stage_transition_allowed(from_stage: str, to_stage: str) -> None:
+    """
+    Verify that transitioning from one opportunity stage to another is permitted.
+    
+    Business rules enforced:
+    - Terminal stages (Closed Won, Closed Lost) cannot be changed
+    - Active stages can move forward or backward as needed
+    
+    Args:
+        from_stage: The current stage
+        to_stage: The target stage
+    
+    Raises:
+        ValidationError: When the requested transition violates business rules
+    """
+    if from_stage not in STAGE_TRANSITION_RULES:
+        raise ValidationError(
+            f"Unrecognized current stage value: {from_stage}",
+            field='stage'
+        )
+    
+    permitted_next_stages = STAGE_TRANSITION_RULES[from_stage]
+    
+    if to_stage not in permitted_next_stages:
+        raise ValidationError(
+            f"Cannot transition from '{from_stage}' to '{to_stage}'. "
+            f"Valid next stages are: {', '.join(permitted_next_stages)}",
+            field='stage'
+        )
+
 # Email validation regex pattern
 EMAIL_PATTERN = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
 
@@ -111,13 +153,14 @@ def validate_account(data: Dict[str, Any], is_update: bool = False) -> None:
             raise ValidationError("Field 'logoUrl' must be a string", field='logoUrl')
 
 
-def validate_opportunity(data: Dict[str, Any], is_update: bool = False) -> None:
+def validate_opportunity(data: Dict[str, Any], is_update: bool = False, current_stage: Optional[str] = None) -> None:
     """
     Validate opportunity data against schema requirements.
     
     Args:
         data: Opportunity data in API format (camelCase)
         is_update: If True, required fields are optional (partial update)
+        current_stage: For updates, the existing stage value to validate transitions
     
     Raises:
         ValidationError: If validation fails with field-specific details
@@ -173,6 +216,10 @@ def validate_opportunity(data: Dict[str, Any], is_update: bool = False) -> None:
                 field='stage'
             )
     
+        
+        # For updates with stage changes, enforce transition rules
+        if is_update and current_stage is not None and data['stage'] != current_stage:
+            check_stage_transition_allowed(current_stage, data['stage'])
     # Validate forecastCategory enum
     if 'forecastCategory' in data:
         if data['forecastCategory'] not in FORECAST_CATEGORY_VALUES:
