@@ -12,6 +12,17 @@ HEALTH_STATUS_VALUES = ['Green', 'Yellow', 'Red']
 OPPORTUNITY_STAGE_VALUES = ['Launched', 'Qualified', 'Proof of Concept', 'Negotiation', 'Closed Won', 'Closed Lost']
 FORECAST_CATEGORY_VALUES = ['Pipeline', 'Best Case', 'Commit', 'Closed']
 
+# Stage-to-probability mapping for business logic enforcement
+# This mapping enforces forecast accuracy and prevents pipeline manipulation
+STAGE_PROBABILITY_MAP = {
+    'Launched': 10,
+    'Qualified': 30,
+    'Proof of Concept': 60,
+    'Negotiation': 80,
+    'Closed Won': 100,
+    'Closed Lost': 0
+}
+
 # Email validation regex pattern
 EMAIL_PATTERN = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
 
@@ -192,6 +203,24 @@ def validate_opportunity(data: Dict[str, Any], is_update: bool = False) -> None:
             raise ValidationError("Field 'probability' must be an integer", field='probability')
         if not (0 <= data['probability'] <= 100):
             raise ValidationError("Field 'probability' must be between 0 and 100", field='probability')
+    
+    # Cross-field validation: enforce stage-probability alignment
+    # This prevents business logic vulnerabilities where users manipulate forecasts
+    # by setting mismatched stage-probability combinations
+    if 'stage' in data and 'probability' in data:
+        stage = data['stage']
+        probability = data['probability']
+        expected_probability = STAGE_PROBABILITY_MAP.get(stage)
+        
+        if expected_probability is not None and probability != expected_probability:
+            raise ValidationError(
+                f"Field 'probability' must be {expected_probability}% for stage '{stage}'. "
+                f"Stage-probability alignment is required to maintain forecast accuracy. "
+                f"Please update the stage to match the probability or set probability to {expected_probability}%.",
+                field='probability'
+            )
+    # Note: Partial updates (stage-only or probability-only) are validated at the handler level
+    # where existing values can be retrieved to perform complete validation
     
     # Validate optional fields if present
     if 'accountName' in data and data['accountName'] is not None:
