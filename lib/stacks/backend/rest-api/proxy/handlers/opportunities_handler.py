@@ -8,6 +8,7 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from validation import OPPORTUNITY_STAGE_VALUES
 
 # Configure logging
 logger = logging.getLogger()
@@ -270,6 +271,60 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
 
 # Maximum allowed opportunity amount ($10M) to prevent pipeline inflation
 MAX_OPPORTUNITY_AMOUNT = 10_000_000
+# Define the ordered pipeline stages for transition validation.
+# Terminal stages ("Closed Won", "Closed Lost") are at the end.
+STAGE_ORDER = {stage: idx for idx, stage in enumerate(OPPORTUNITY_STAGE_VALUES)}
+
+# Terminal stages from which no further transitions are allowed
+TERMINAL_STAGES = {'Closed Won', 'Closed Lost'}
+
+
+def _validate_stage_transition(current_stage: str, new_stage: str) -> None:
+    """
+    Validate that an opportunity stage transition is allowed.
+
+    Business rules enforced:
+    - Opportunities in a terminal stage ("Closed Won", "Closed Lost") cannot
+      transition to any other stage.
+    - Stage transitions must move forward in the pipeline (higher ordinal);
+      backward transitions are rejected.
+    - Transitions to the same stage are allowed (no-op).
+
+    Args:
+        current_stage: The opportunity's current stage value.
+        new_stage: The requested new stage value.
+
+    Raises:
+        ValueError: If the transition violates business rules.
+    """
+    # Same stage is always allowed (no actual change)
+    if current_stage == new_stage:
+        return
+
+    # Reject transitions out of terminal stages
+    if current_stage in TERMINAL_STAGES:
+        raise ValueError(
+            f"Invalid stage transition: cannot move from '{current_stage}' to "
+            f"'{new_stage}'. '{current_stage}' is a terminal stage and cannot "
+            f"be changed."
+        )
+
+    current_idx = STAGE_ORDER.get(current_stage)
+    new_idx = STAGE_ORDER.get(new_stage)
+
+    # If either stage is unknown, skip ordinal validation (enum validation
+    # in the validation module will catch truly invalid values).
+    if current_idx is None or new_idx is None:
+        return
+
+    # Reject backward transitions
+    if new_idx < current_idx:
+        raise ValueError(
+            f"Invalid stage transition: cannot move from '{current_stage}' to "
+            f"'{new_stage}'. Stage transitions must move forward in the "
+            f"pipeline."
+        )
+
 
 
 def _validate_amount(amount) -> None:
@@ -535,6 +590,18 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         # Validate amount bounds if being updated
         if 'amount' in db_data:
             _validate_amount(db_data.get('amount'))
+        # Validate stage transition if stage is being updated
+        if 'stage' in db_data:
+            cursor = connection.cursor(cursor_factory=RealDictCursor)
+            cursor.execute(
+                "SELECT stage FROM opportunities WHERE id = %s AND deleted_at IS NULL",
+                (opportunity_id,)
+            )
+            current_record = cursor.fetchone()
+            cursor.close()
+            if current_record and current_record.get('stage'):
+                _validate_stage_transition(current_record['stage'], db_data['stage'])
+
         
         # Remove id if present (shouldn't be updated)
         db_data.pop('id', None)
@@ -617,7 +684,7 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
     except Exception as e:
         connection.rollback()
         # Re-raise if it's already our custom exception
-        if "Invalid account ID" in str(e) or "Invalid owner ID" in str(e) or "Invalid amount" in str(e):
+        if "Invalid account ID" in str(e) or "Invalid owner ID" in str(e) or "Invalid amount" in str(e) or "Invalid stage transition" in str(e):
             raise
         logger.error(f"Unexpected error updating opportunity {opportunity_id}: {str(e)}")
         raise
