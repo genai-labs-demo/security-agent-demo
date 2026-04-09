@@ -11,7 +11,7 @@ Requirements: 1.1, 1.2, 2.1, 3.1, 4.1, 5.1, 6.1, 7.1, 8.1, 9.1, 10.1
 import json
 import logging
 import time
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import boto3
 
 # Import handler modules
@@ -23,12 +23,14 @@ from s3_integration import enhance_with_images
 from cors_handler import process_cors
 from error_handler import (
     handle_validation_error,
+    handle_rate_limit_error,
     handle_not_found_error,
     handle_conflict_error,
     handle_database_error,
     handle_server_error,
     parse_database_error
 )
+from rate_limiter import RateLimitExceeded
 
 # CloudWatch client for custom metrics
 cloudwatch = boto3.client('cloudwatch')
@@ -77,6 +79,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Get operation type
         operation = get_operation_type(route_info)
         
+        # Extract user identity from request context for rate limiting
+        user_id = _extract_user_id(event)
+        
         # Get database connection
         connection = get_database_connection()
         
@@ -85,7 +90,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             start_time = time.time()
             
             # Route to appropriate handler and execute operation
-            result = execute_operation(connection, route_info, operation)
+            result = execute_operation(connection, route_info, operation, user_id)
             
             # Calculate and publish search latency metrics
             elapsed_time = (time.time() - start_time) * 1000  # Convert to milliseconds
@@ -130,6 +135,12 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         return response
         
     except ValueError as e:
+    except RateLimitExceeded as e:
+        # Rate limit errors (429)
+        logger.warning(f"Rate limit exceeded in request {request_id}: {str(e)}")
+        response = handle_rate_limit_error(e.retry_after, e.message)
+        return process_cors(event, response)
+        
         # Validation errors (400)
         logger.warning(f"Validation error in request {request_id}: {str(e)}")
         response = handle_validation_error(str(e))
@@ -163,7 +174,43 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
 
 def execute_operation(connection, route_info, operation: str) -> Any:
+def _extract_user_id(event: Dict[str, Any]) -> Optional[str]:
     """
+    Extract user identifier from API Gateway event for rate limiting.
+    
+    Tries multiple sources in order:
+    1. Cognito authorizer claims (sub)
+    2. IAM authorizer principal
+    3. Request context identity
+    
+    Args:
+        event: API Gateway event dictionary
+    
+    Returns:
+        User identifier string, or None if not authenticated
+    """
+    try:
+        # Try Cognito authorizer claims first (most common)
+        request_context = event.get('requestContext', {})
+        authorizer = request_context.get('authorizer', {})
+        
+        # Cognito sub claim
+        claims = authorizer.get('claims', {})
+        if claims and 'sub' in claims:
+            return claims['sub']
+        
+        # IAM principal
+        if 'principalId' in authorizer:
+            return authorizer['principalId']
+        
+        # No user identity found
+        return None
+    except Exception as e:
+        logger.warning(f"Failed to extract user_id from event: {str(e)}")
+        return None
+
+
+def execute_operation(connection, route_info, operation: str, user_id: Optional[str] = None) -> Any:
     Execute the appropriate CRUD operation based on route information.
     
     Args:
@@ -171,6 +218,7 @@ def execute_operation(connection, route_info, operation: str) -> Any:
         route_info: Parsed route information
         operation: Operation type ('list', 'get', 'create', 'update', 'delete')
         
+        user_id: Optional user identifier for rate limiting
     Returns:
         Operation result (record, list of records, or boolean)
         
@@ -226,7 +274,7 @@ def execute_operation(connection, route_info, operation: str) -> Any:
                 raise ValueError(f"Opportunity with id {resource_id} not found")
             return result
         elif operation == 'create':
-            return opportunities_handler.create_opportunity(connection, body)
+            return opportunities_handler.create_opportunity(connection, body, user_id)
         elif operation == 'update':
             result = opportunities_handler.update_opportunity(connection, resource_id, body)
             if result is None:

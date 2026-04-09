@@ -9,6 +9,7 @@ from datetime import datetime
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
+from rate_limiter import check_rate_limit
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -404,7 +405,7 @@ def get_opportunity(connection, opportunity_id: str) -> Optional[Dict[str, Any]]
         raise
 
 
-def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
+def create_opportunity(connection, data: Dict[str, Any], user_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Insert a new opportunity record into the database.
     Validates that account_id and owner_id reference existing records.
@@ -412,6 +413,7 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     Args:
         connection: Database connection object
         data: Opportunity data in API format (camelCase)
+        user_id: Optional user identifier for rate limiting (Cognito sub or similar)
     
     Returns:
         Created opportunity dictionary in API format
@@ -421,6 +423,18 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     """
     try:
         logger.info(f"Creating new opportunity: {data.get('name')}")
+        
+        # Rate limiting: Prevent resource exhaustion attacks (CWE-770)
+        # Limit: 10 opportunity creations per 60 seconds per user
+        # This prevents rapid automation from creating thousands of opportunities
+        # and inflating pipeline metrics or exhausting system resources
+        if user_id:
+            try:
+                check_rate_limit(user_id, 'create_opportunity')
+            except Exception as e:
+                # Re-raise rate limit exceptions to be handled by caller
+                logger.warning(f"Rate limit check failed for user {user_id}: {str(e)}")
+                raise
         
         # Map API format to database format
         db_data = _map_api_to_db_format(data)

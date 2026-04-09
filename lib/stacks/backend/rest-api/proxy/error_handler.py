@@ -5,6 +5,7 @@ Provides consistent error response formatting and handling for various error typ
 - Validation errors (400)
 - Not found errors (404)
 - Conflict errors (409)
+- Rate limit errors (429)
 - Database/server errors (500)
 """
 
@@ -136,6 +137,39 @@ def handle_conflict_error(message: str, conflict_type: Optional[str] = None, det
         message=message,
         details=error_details if error_details else None
     )
+
+
+def handle_rate_limit_error(retry_after: int, message: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Handle rate limit exceeded errors with 429 status and Retry-After header.
+    
+    Args:
+        retry_after: Number of seconds until the rate limit resets
+        message: Optional custom error message
+        
+    Returns:
+        API Gateway response dictionary with Retry-After header
+        
+    Security:
+        - CWE-770: Proper rate limiting response to prevent resource exhaustion
+        - Includes Retry-After header per RFC 6585
+    """
+    default_message = (
+        f"Too many requests. Rate limit exceeded. "
+        f"Please try again in {retry_after} seconds."
+    )
+    
+    response = format_error_response(
+        status_code=429,
+        error_code="RATE_LIMIT_EXCEEDED",
+        message=message or default_message,
+        details={"retryAfter": retry_after}
+    )
+    
+    # Add Retry-After header per RFC 6585
+    response["headers"]["Retry-After"] = str(retry_after)
+    
+    return response
 
 
 def handle_database_error(original_error: Exception, request_id: Optional[str] = None) -> Dict[str, Any]:
