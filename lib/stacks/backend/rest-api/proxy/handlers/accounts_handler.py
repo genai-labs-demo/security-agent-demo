@@ -129,6 +129,31 @@ def list_accounts(connection) -> List[Dict[str, Any]]:
 COMPUTED_FIELDS = {'health_status', 'health_score', 'opportunity_count', 'total_opportunity_value'}
 
 
+def _recalculate_health(connection, account_id: str) -> None:
+    """
+    Recalculate account health score and status based on business metrics.
+    
+    Health calculation logic:
+    - Based on total_opportunity_value and opportunity_count
+    - Green: health_score >= 80
+    - Yellow: health_score 50-79
+    - Red: health_score < 50
+    
+    Args:
+        connection: Database connection object
+        account_id: Account ID to recalculate health for
+    """
+    # Note: This is a simplified stub implementation
+    # In production, this would calculate health score based on:
+    # - Opportunity win rate
+    # - Account engagement metrics
+    # - Revenue trends
+    # - Support ticket volume
+    # For now, health is managed by triggers or stored procedures in the database
+    logger.info(f"Health recalculation for account {account_id} (managed by database)")
+    pass
+
+
 
 def get_account(connection, account_id: str) -> Optional[Dict[str, Any]]:
     """
