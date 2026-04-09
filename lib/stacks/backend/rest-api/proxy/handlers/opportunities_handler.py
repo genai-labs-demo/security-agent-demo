@@ -149,7 +149,7 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
-        # Create WHERE conditions for each keyword (must find ALL keywords)
+        # Create WHERE conditions for each keyword (matches ANY keyword)
         keyword_conditions = []
         keyword_params = []
         
@@ -168,8 +168,8 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
             for _ in range(6):
                 keyword_params.append(f'%{keyword}%')
         
-        # Join all keyword conditions with AND (all keywords must match)
-        where_clause = " AND ".join(keyword_conditions)
+        # Join all keyword conditions with OR (any keyword can match)
+        where_clause = " OR ".join(keyword_conditions)
         
         # Build relevance scoring SQL for each keyword
         relevance_parts = []
