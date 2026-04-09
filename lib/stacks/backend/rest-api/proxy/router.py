@@ -24,7 +24,8 @@ class RouteInfo:
         resource_id: Optional[str] = None,
         query_params: Optional[Dict[str, str]] = None,
         body: Optional[Dict[str, Any]] = None,
-        path: Optional[str] = None
+        path: Optional[str] = None,
+        user_id: Optional[str] = None
     ):
         self.resource_type = resource_type
         self.http_method = http_method
@@ -32,12 +33,14 @@ class RouteInfo:
         self.query_params = query_params or {}
         self.body = body or {}
         self.path = path or ""
+        self.user_id = user_id
     
     def __repr__(self):
         return (f"RouteInfo(resource_type={self.resource_type}, "
                 f"http_method={self.http_method}, "
                 f"resource_id={self.resource_id}, "
-                f"query_params={self.query_params})")
+                f"query_params={self.query_params}, "
+                f"user_id={self.user_id})")
 
 
 def parse_api_gateway_event(event: Dict[str, Any]) -> RouteInfo:
@@ -90,13 +93,17 @@ def parse_api_gateway_event(event: Dict[str, Any]) -> RouteInfo:
         # Extract and parse request body
         body = _parse_request_body(event)
         
+        # Extract authenticated user ID from request context
+        user_id = _extract_user_id(event)
+        
         route_info = RouteInfo(
             resource_type=resource_type,
             http_method=http_method,
             resource_id=resource_id,
             query_params=query_params,
             body=body,
-            path=path
+            path=path,
+            user_id=user_id
         )
         
         logger.info(f"Parsed route: {route_info}")
@@ -231,6 +238,35 @@ def _parse_request_body(event: Dict[str, Any]) -> Dict[str, Any]:
         logger.error(f"Failed to parse JSON body: {str(e)}")
         raise ValueError(f"Invalid JSON in request body: {str(e)}")
 
+
+def _extract_user_id(event: Dict[str, Any]) -> Optional[str]:
+    """
+    Extract authenticated user ID from API Gateway request context.
+    
+    When using Cognito User Pool authorizer, the user identity is available
+    in event['requestContext']['authorizer']['claims']['sub'].
+    
+    Args:
+        event: API Gateway event dictionary
+    
+    Returns:
+        User ID (sub claim from Cognito JWT) or None if not authenticated
+    """
+    try:
+        request_context = event.get('requestContext', {})
+        authorizer = request_context.get('authorizer', {})
+        claims = authorizer.get('claims', {})
+        user_id = claims.get('sub')
+        
+        if user_id:
+            logger.info(f"Extracted authenticated user ID: {user_id}")
+        else:
+            logger.warning("No user ID found in request context - request may be unauthenticated")
+        
+        return user_id
+    except Exception as e:
+        logger.error(f"Failed to extract user ID from request context: {str(e)}")
+        return None
 
 def route_request(route_info: RouteInfo) -> str:
     """

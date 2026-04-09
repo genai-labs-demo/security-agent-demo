@@ -119,23 +119,30 @@ def _recalculate_account_aggregates(connection, account_id: str) -> None:
 
 
 def search_opportunities(connection, search_query: str, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
-    """
+def search_opportunities(connection, search_query: str, account_id: Optional[str] = None, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
     Perform full text search on opportunities using multiple keywords.
     
+    Results are filtered by owner_id to ensure users can only search their own opportunities.
     Args:
         connection: Database connection object
         search_query: Search string (e.g., "finance software platform")
         account_id: Optional account ID to filter opportunities
     
+        user_id: Authenticated user ID for authorization (filters by owner_id)
     Returns:
         List of opportunity dictionaries in API format, ordered by relevance
     
     Raises:
         Exception: If database query fails
+        ValueError: If user_id is not provided (authentication required)
     """
     try:
         if not search_query or not search_query.strip():
             return []
+        
+        # Require authentication for search operations
+        if not user_id:
+            raise ValueError("Authentication required: user_id must be provided for search operations")
         
         keywords = search_query.strip().split()
         
@@ -145,7 +152,7 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
             logger.warning(f"Search query truncated from {len(keywords)} to {MAX_KEYWORDS} keywords")
             keywords = keywords[:MAX_KEYWORDS]
         
-        logger.info(f"Searching opportunities for keywords: {keywords}")
+        logger.info(f"Searching opportunities for user {user_id} with keywords: {keywords}")
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
@@ -216,8 +223,12 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
             LEFT JOIN team_members tm ON o.owner_id = tm.id
             WHERE 
                 o.deleted_at IS NULL
-                AND {where_clause}
+                AND o.owner_id = %s
+                AND ({where_clause})
         """
+        
+        # Add user_id parameter for owner authorization filter
+        keyword_params.insert(0, user_id)
         
         # Add account filter if specified
         if account_id:
