@@ -5,6 +5,7 @@ Provides consistent error response formatting and handling for various error typ
 - Validation errors (400)
 - Not found errors (404)
 - Conflict errors (409)
+- Authorization errors (403)
 - Database/server errors (500)
 """
 
@@ -61,6 +62,48 @@ def format_error_response(
         },
         "body": json.dumps(error_body)
     }
+
+
+def handle_validation_error(message: str, field: Optional[str] = None, details: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Handle authorization/permission errors with 403 status.
+    
+    Args:
+        message: Human-readable authorization error message
+        details: Optional additional authorization error details
+        
+    Returns:
+        API Gateway response dictionary
+        
+    Security: CWE-862 (Missing Authorization) mitigation
+    """
+    return format_error_response(
+        status_code=403,
+        error_code="FORBIDDEN",
+        message=message,
+        details=details
+    )
+
+
+def handle_authorization_error(message: str, details: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Handle authorization/permission errors with 403 status.
+    
+    Args:
+        message: Human-readable authorization error message
+        details: Optional additional authorization error details
+        
+    Returns:
+        API Gateway response dictionary
+        
+    Security: CWE-862 (Missing Authorization) mitigation
+    """
+    return format_error_response(
+        status_code=403,
+        error_code="FORBIDDEN",
+        message=message,
+        details=details
+    )
 
 
 def handle_validation_error(message: str, field: Optional[str] = None, details: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:

@@ -9,6 +9,8 @@ from datetime import datetime
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
+from authorization import require_admin, require_authenticated
+
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -72,12 +74,13 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
     return db_data
 
 
-def list_team_members(connection) -> List[Dict[str, Any]]:
+def list_team_members(connection, user_groups: List[str]) -> List[Dict[str, Any]]:
     """
     Query all team members from the database ordered by name.
     
     Args:
         connection: Database connection object
+        user_groups: List of Cognito groups the user belongs to
     
     Returns:
         List of team member dictionaries in API format
@@ -85,6 +88,9 @@ def list_team_members(connection) -> List[Dict[str, Any]]:
     Raises:
         Exception: If database query fails
     """
+        # Enforce authentication (all authenticated users can list team members)
+        require_authenticated(user_groups)
+        
     try:
         logger.info("Listing all team members")
         
@@ -116,13 +122,14 @@ def list_team_members(connection) -> List[Dict[str, Any]]:
         raise
 
 
-def get_team_member(connection, member_id: str) -> Optional[Dict[str, Any]]:
+def get_team_member(connection, member_id: str, user_groups: List[str]) -> Optional[Dict[str, Any]]:
     """
     Query a single team member by ID from the database.
     
     Args:
         connection: Database connection object
         member_id: Team member ID to retrieve
+        user_groups: List of Cognito groups the user belongs to
     
     Returns:
         Team member dictionary in API format, or None if not found
@@ -130,6 +137,9 @@ def get_team_member(connection, member_id: str) -> Optional[Dict[str, Any]]:
     Raises:
         Exception: If database query fails
     """
+        # Enforce authentication (all authenticated users can get team members)
+        require_authenticated(user_groups)
+        
     try:
         logger.info(f"Getting team member with ID: {member_id}")
         
@@ -165,14 +175,16 @@ def get_team_member(connection, member_id: str) -> Optional[Dict[str, Any]]:
         raise
 
 
-def create_team_member(connection, data: Dict[str, Any]) -> Dict[str, Any]:
+def create_team_member(connection, data: Dict[str, Any], user_groups: List[str]) -> Dict[str, Any]:
     """
     Insert a new team member record into the database.
     Validates email uniqueness before insertion.
+    Requires Admin group membership.
     
     Args:
         connection: Database connection object
         data: Team member data in API format (camelCase)
+        user_groups: List of Cognito groups the user belongs to
     
     Returns:
         Created team member dictionary in API format
@@ -180,6 +192,9 @@ def create_team_member(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     Raises:
         Exception: If database insert fails or validation fails
     """
+        # Enforce Admin-only authorization
+        require_admin(user_groups)
+        
     try:
         logger.info(f"Creating new team member: {data.get('name')}")
         
@@ -249,15 +264,17 @@ def create_team_member(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         raise
 
 
-def update_team_member(connection, member_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def update_team_member(connection, member_id: str, data: Dict[str, Any], user_groups: List[str]) -> Optional[Dict[str, Any]]:
     """
     Update an existing team member record in the database.
     Validates email uniqueness if email is being updated.
+    Requires Admin group membership.
     
     Args:
         connection: Database connection object
         member_id: Team member ID to update
         data: Partial team member data in API format (camelCase)
+        user_groups: List of Cognito groups the user belongs to
     
     Returns:
         Updated team member dictionary in API format, or None if not found
@@ -265,6 +282,9 @@ def update_team_member(connection, member_id: str, data: Dict[str, Any]) -> Opti
     Raises:
         Exception: If database update fails or validation fails
     """
+        # Enforce Admin-only authorization
+        require_admin(user_groups)
+        
     try:
         logger.info(f"Updating team member: {member_id}")
         
@@ -343,14 +363,16 @@ def update_team_member(connection, member_id: str, data: Dict[str, Any]) -> Opti
         raise
 
 
-def delete_team_member(connection, member_id: str) -> bool:
+def delete_team_member(connection, member_id: str, user_groups: List[str]) -> bool:
     """
     Delete a team member record from the database.
     Checks for foreign key constraints (owned accounts/opportunities) before deletion.
+    Requires Admin group membership.
     
     Args:
         connection: Database connection object
         member_id: Team member ID to delete
+        user_groups: List of Cognito groups the user belongs to
     
     Returns:
         True if team member was deleted, False if not found
@@ -358,6 +380,9 @@ def delete_team_member(connection, member_id: str) -> bool:
     Raises:
         Exception: If team member owns accounts or opportunities, or database delete fails
     """
+        # Enforce Admin-only authorization
+        require_admin(user_groups)
+        
     try:
         logger.info(f"Deleting team member: {member_id}")
         
