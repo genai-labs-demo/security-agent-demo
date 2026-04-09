@@ -63,6 +63,20 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     request_id = context.aws_request_id if context else "unknown"
     logger.info(f"Processing request {request_id}: {event.get('httpMethod')} {event.get('path')}")
     
+    # Extract authenticated user email from Cognito JWT claims
+    user_email = None
+    try:
+        request_context = event.get('requestContext', {})
+        authorizer = request_context.get('authorizer', {})
+        claims = authorizer.get('claims', {})
+        user_email = claims.get('email')
+        if user_email:
+            logger.info(f"Authenticated user: {user_email}")
+        else:
+            logger.warning("No email claim found in JWT token")
+    except Exception as e:
+        logger.warning(f"Failed to extract user email from JWT: {str(e)}")
+    
     try:
         # Handle CORS preflight requests
         if event.get('httpMethod') == 'OPTIONS':
@@ -85,7 +99,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             start_time = time.time()
             
             # Route to appropriate handler and execute operation
-            result = execute_operation(connection, route_info, operation)
+            result = execute_operation(connection, route_info, operation, user_email)
             
             # Calculate and publish search latency metrics
             elapsed_time = (time.time() - start_time) * 1000  # Convert to milliseconds
@@ -162,7 +176,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         return process_cors(event, response)
 
 
-def execute_operation(connection, route_info, operation: str) -> Any:
+def execute_operation(connection, route_info, operation: str, user_email: Optional[str] = None) -> Any:
     """
     Execute the appropriate CRUD operation based on route information.
     
@@ -170,6 +184,7 @@ def execute_operation(connection, route_info, operation: str) -> Any:
         connection: Database connection object
         route_info: Parsed route information
         operation: Operation type ('list', 'get', 'create', 'update', 'delete')
+        user_email: Email of authenticated user from JWT token
         
     Returns:
         Operation result (record, list of records, or boolean)
@@ -241,21 +256,21 @@ def execute_operation(connection, route_info, operation: str) -> Any:
     # Route to team members handler
     elif resource_type == 'team-members':
         if operation == 'list':
-            return team_members_handler.list_team_members(connection)
+            return team_members_handler.list_team_members(connection, user_email)
         elif operation == 'get':
-            result = team_members_handler.get_team_member(connection, resource_id)
+            result = team_members_handler.get_team_member(connection, resource_id, user_email)
             if result is None:
                 raise ValueError(f"Team member with id {resource_id} not found")
             return result
         elif operation == 'create':
-            return team_members_handler.create_team_member(connection, body)
+            return team_members_handler.create_team_member(connection, body, user_email)
         elif operation == 'update':
-            result = team_members_handler.update_team_member(connection, resource_id, body)
+            result = team_members_handler.update_team_member(connection, resource_id, body, user_email)
             if result is None:
                 raise ValueError(f"Team member with id {resource_id} not found")
             return result
         elif operation == 'delete':
-            success = team_members_handler.delete_team_member(connection, resource_id)
+            success = team_members_handler.delete_team_member(connection, resource_id, user_email)
             if not success:
                 raise ValueError(f"Team member with id {resource_id} not found")
             return None
