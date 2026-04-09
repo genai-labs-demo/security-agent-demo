@@ -366,7 +366,7 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
 def delete_account(connection, account_id: str) -> bool:
     """
     Soft-delete an account record by marking it as deleted.
-    The record is retained in the database for recovery purposes.
+    Checks for all associated opportunities (including soft-deleted) before allowing deletion.
     Checks for active (non-deleted) opportunities before allowing deletion.
 
     Args:
@@ -377,7 +377,7 @@ def delete_account(connection, account_id: str) -> bool:
         True if account was soft-deleted, False if not found
 
     Raises:
-        Exception: If account has active opportunities or database update fails
+        Exception: If account has associated opportunities or database update fails
     """
     try:
         logger.info(f"Soft-deleting account: {account_id}")
@@ -394,9 +394,10 @@ def delete_account(connection, account_id: str) -> bool:
             logger.info(f"Account not found for deletion: {account_id}")
             return False
 
-        # Check for active (non-deleted) associated opportunities
+        # Check for ALL associated opportunities (including soft-deleted ones)
+        # to maintain referential integrity for potential restoration
         cursor.execute(
-            "SELECT COUNT(*) as count FROM opportunities WHERE account_id = %s AND (deleted_at IS NULL)",
+            "SELECT COUNT(*) as count FROM opportunities WHERE account_id = %s",
             (account_id,)
         )
         result = cursor.fetchone()
@@ -406,8 +407,8 @@ def delete_account(connection, account_id: str) -> bool:
             cursor.close()
             logger.warning(f"Cannot delete account {account_id}: has {opportunity_count} active opportunities")
             raise Exception(
-                f"Cannot delete account: account has {opportunity_count} active opportunities. "
-                f"Delete or archive the opportunities first."
+                f"Cannot delete account: account has {opportunity_count} associated opportunities "
+                f"(including archived records). Delete or permanently remove all opportunities first."
             )
 
         # Soft-delete: set deleted_at timestamp instead of removing the row
