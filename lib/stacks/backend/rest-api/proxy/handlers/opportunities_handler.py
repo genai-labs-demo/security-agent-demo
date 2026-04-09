@@ -15,6 +15,34 @@ logger.setLevel(logging.INFO)
 
 
 def _map_opportunity_to_api_format(db_record: Dict[str, Any]) -> Dict[str, Any]:
+    """Helper function to resolve team member ID from Cognito user ID for authorization."""
+    if not cognito_sub:
+        return None
+    
+    try:
+        cur = db_conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute(
+            "SELECT id FROM team_members WHERE cognito_user_id = %s",
+            (cognito_sub,)
+        )
+        row_data = cur.fetchone()
+        cur.close()
+        
+        if row_data:
+            member_identifier = row_data['id']
+            logger.info(f"Cognito sub {cognito_sub} mapped to team member {member_identifier}")
+            return member_identifier
+        else:
+            logger.warning(f"No team member found for Cognito sub {cognito_sub}")
+            return None
+    except psycopg2.Error as db_exception:
+        logger.error(f"Database error during team member lookup: {str(db_exception)}")
+        return None
+    except Exception as general_exception:
+        logger.error(f"General error during team member lookup: {str(general_exception)}")
+        return None
+
+def get_team_member_for_user(db_conn, cognito_sub: str) -> Optional[str]:
     """
     Map database snake_case columns to camelCase API response fields.
     

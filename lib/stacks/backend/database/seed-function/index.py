@@ -120,6 +120,7 @@ def initialize_schema(conn):
         id VARCHAR(50) PRIMARY KEY,
         name VARCHAR(255) NOT NULL,
         email VARCHAR(255) NOT NULL UNIQUE,
+        cognito_user_id VARCHAR(255) UNIQUE,
         role VARCHAR(100),
         quota NUMERIC(15, 2),
         pipeline_value NUMERIC(15, 2),
@@ -128,6 +129,9 @@ def initialize_schema(conn):
         win_rate NUMERIC(5, 2),
         opportunity_count INTEGER,
         avatar_url TEXT
+
+    -- Add index for cognito_user_id lookups
+    CREATE INDEX IF NOT EXISTS idx_team_members_cognito_user_id ON team_members(cognito_user_id);
     );
 
     CREATE TABLE IF NOT EXISTS accounts (
