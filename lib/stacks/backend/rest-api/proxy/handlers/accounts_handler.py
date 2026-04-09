@@ -275,6 +275,9 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
     """
     Update an existing account record in the database.
     
+    Note: Account ownership transfers via ownerId field are not permitted through this endpoint
+    to prevent unauthorized account takeover (see security finding: Business Logic Vulnerability - Medium).
+    
     Args:
         connection: Database connection object
         account_id: Account ID to update
@@ -288,6 +291,15 @@ def update_account(connection, account_id: str, data: Dict[str, Any]) -> Optiona
     """
     try:
         logger.info(f"Updating account: {account_id}")
+        
+        # Security Control: Block ownership transfers to prevent unauthorized account takeover
+        # Ownership changes should be performed through administrative workflows, not via API updates
+        if 'ownerId' in data:
+            logger.warning(f"Attempted unauthorized ownership transfer for account {account_id}")
+            raise Exception(
+                "Account ownership transfers are not permitted via this endpoint. "
+                "Contact your administrator for ownership changes."
+            )
         
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
