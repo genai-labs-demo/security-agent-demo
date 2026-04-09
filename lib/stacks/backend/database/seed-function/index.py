@@ -175,12 +175,17 @@ def initialize_schema(conn):
     -- Security demo tables (intentionally vulnerable for AWS Security Agent testing)
     CREATE TABLE IF NOT EXISTS security_users (
         id SERIAL PRIMARY KEY,
+        cognito_sub VARCHAR(255) UNIQUE,
         username VARCHAR(255) NOT NULL,
         email VARCHAR(255) NOT NULL,
         role VARCHAR(100) DEFAULT 'user',
         bio TEXT,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
     );
+    
+    -- Migration: add cognito_sub column if it doesn't exist
+    ALTER TABLE security_users ADD COLUMN IF NOT EXISTS cognito_sub VARCHAR(255) UNIQUE;
+    CREATE INDEX IF NOT EXISTS idx_security_users_cognito_sub ON security_users(cognito_sub);
 
     CREATE TABLE IF NOT EXISTS security_comments (
         id SERIAL PRIMARY KEY,
