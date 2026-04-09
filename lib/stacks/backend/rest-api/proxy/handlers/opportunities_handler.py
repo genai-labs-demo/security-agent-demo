@@ -514,6 +514,7 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
 def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     Update an existing opportunity record in the database.
+    Validates stage transitions to prevent invalid state changes.
     
     Args:
         connection: Database connection object
@@ -530,6 +531,28 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         logger.info(f"Updating opportunity: {opportunity_id}")
         
         # Map API format to database format
+        # Fetch current opportunity if stage is being updated (for transition validation)
+        current_opportunity = None
+        if 'stage' in data:
+            current_opportunity = get_opportunity(connection, opportunity_id)
+            if not current_opportunity:
+                logger.info(f"Opportunity not found for update: {opportunity_id}")
+                return None
+        
+        # Validate stage transition if stage is being updated
+        if 'stage' in data and current_opportunity:
+            from validation import validate_stage_transition, ValidationError as ValidateError
+            
+            current_stage = current_opportunity.get('stage')
+            new_stage = data['stage']
+            
+            try:
+                validate_stage_transition(current_stage, new_stage)
+                logger.info(f"Stage transition validated: '{current_stage}' -> '{new_stage}'")
+            except ValidateError as e:
+                logger.warning(f"Invalid stage transition for opportunity {opportunity_id}: {e.message}")
+                raise Exception(f"Invalid stage transition: {e.message}")
+        
         db_data = _map_api_to_db_format(data)
         
         # Validate amount bounds if being updated
@@ -618,7 +641,10 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         connection.rollback()
         # Re-raise if it's already our custom exception
         if "Invalid account ID" in str(e) or "Invalid owner ID" in str(e) or "Invalid amount" in str(e):
-            raise
+        if ("Invalid account ID" in str(e) or 
+            "Invalid owner ID" in str(e) or 
+            "Invalid amount" in str(e) or 
+            "Invalid stage transition" in str(e)):
         logger.error(f"Unexpected error updating opportunity {opportunity_id}: {str(e)}")
         raise
 
