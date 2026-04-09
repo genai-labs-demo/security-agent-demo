@@ -119,7 +119,12 @@ def _initialize_connection_pool() -> psycopg2.pool.SimpleConnectionPool:
             host=credentials['host'],
             port=credentials['port'],
             database=credentials['dbname'],
-            connect_timeout=10
+            connect_timeout=10,
+            # Database-level timeout settings to prevent connection exhaustion (CWE-770)
+            # statement_timeout: Maximum time for any single query (30 seconds)
+            # idle_in_transaction_session_timeout: Maximum idle time in transaction (60 seconds)
+            # These prevent long-running queries from holding connections indefinitely
+            options='-c statement_timeout=30000 -c idle_in_transaction_session_timeout=60000'
         )
         
         logger.info("Connection pool initialized successfully")
@@ -160,6 +165,13 @@ def get_database_connection():
     try:
         # Initialize pool if needed
         pool = _initialize_connection_pool()
+        
+        # Log pool health status for monitoring connection exhaustion
+        # Note: SimpleConnectionPool doesn't expose metrics, this is best-effort logging
+        try:
+            logger.info("Retrieving connection from pool (maxconn=5)")
+        except Exception:
+            pass  # Don't fail on logging errors
         
         # Get connection from pool
         connection = pool.getconn()
@@ -218,3 +230,54 @@ def close_all_connections() -> None:
             logger.info("All database connections closed")
         except Exception as e:
             logger.error(f"Failed to close connections: {str(e)}")
+
+
+class DatabaseConnection:
+    """
+    Context manager for database connections that ensures proper cleanup.
+    
+    This context manager guarantees that connections are returned to the pool
+    even if exceptions occur during database operations, preventing connection leaks.
+    
+    Example:
+        with DatabaseConnection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM accounts")
+            results = cursor.fetchall()
+        # Connection is automatically returned to pool
+    
+    This addresses CWE-770 (Allocation of Resources Without Limits or Throttling)
+    by ensuring connections are always released back to the pool.
+    """
+    
+    def __init__(self):
+        """Initialize the context manager."""
+        self.connection = None
+    
+    def __enter__(self):
+        """
+        Acquire a database connection from the pool.
+        
+        Returns:
+            psycopg2.connection: Database connection object
+        
+        Raises:
+            Exception: If connection cannot be obtained
+        """
+        self.connection = get_database_connection()
+        return self.connection
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """
+        Return the database connection to the pool.
+        
+        This is called automatically when exiting the context manager,
+        even if an exception occurred within the with block.
+        
+        Args:
+            exc_type: Exception type (if any)
+            exc_val: Exception value (if any)
+            exc_tb: Exception traceback (if any)
+        """
+        return_database_connection(self.connection)
+        return False  # Don't suppress exceptions
