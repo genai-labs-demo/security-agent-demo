@@ -11,6 +11,16 @@ from typing import Dict, Any, List, Optional
 HEALTH_STATUS_VALUES = ['Green', 'Yellow', 'Red']
 OPPORTUNITY_STAGE_VALUES = ['Launched', 'Qualified', 'Proof of Concept', 'Negotiation', 'Closed Won', 'Closed Lost']
 FORECAST_CATEGORY_VALUES = ['Pipeline', 'Best Case', 'Commit', 'Closed']
+# Define allowed team member roles to prevent arbitrary role assignment
+TEAM_MEMBER_ROLE_VALUES = [
+    'Sales Representative',
+    'Senior Sales Representative', 
+    'Sales Manager',
+    'Senior Sales Manager',
+    'Sales Director',
+    'VP of Sales'
+]
+MAX_TEAM_MEMBER_QUOTA = 50_000_000  # $50M reasonable upper bound for individual quotas
 
 # Email validation regex pattern
 EMAIL_PATTERN = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
@@ -256,6 +266,13 @@ def validate_team_member(data: Dict[str, Any], is_update: bool = False) -> None:
             raise ValidationError("Field 'role' must be a non-empty string", field='role')
         if len(data['role']) > 100:
             raise ValidationError("Field 'role' must not exceed 100 characters", field='role')
+        # Enforce role enumeration to prevent arbitrary role assignment
+        if data['role'] not in TEAM_MEMBER_ROLE_VALUES:
+            raise ValidationError(
+                f"Field 'role' must be one of: {', '.join(TEAM_MEMBER_ROLE_VALUES)}. "
+                f"Contact an administrator to add new role types.",
+                field='role'
+            )
     
     # Validate quota
     if 'quota' in data:
@@ -263,6 +280,13 @@ def validate_team_member(data: Dict[str, Any], is_update: bool = False) -> None:
             raise ValidationError("Field 'quota' must be a number", field='quota')
         if data['quota'] < 0:
             raise ValidationError("Field 'quota' must be non-negative", field='quota')
+        # Enforce quota upper bound to prevent unrealistic values
+        if data['quota'] > MAX_TEAM_MEMBER_QUOTA:
+            raise ValidationError(
+                f"Field 'quota' must not exceed {MAX_TEAM_MEMBER_QUOTA:,.0f}. "
+                f"Contact an administrator for quotas exceeding this threshold.",
+                field='quota'
+            )
     
     # Validate optional fields if present
     if 'pipelineValue' in data and data['pipelineValue'] is not None:
