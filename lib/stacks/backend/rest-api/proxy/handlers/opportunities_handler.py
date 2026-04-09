@@ -118,7 +118,7 @@ def _recalculate_account_aggregates(connection, account_id: str) -> None:
         cursor.close()
 
 
-def search_opportunities(connection, search_query: str, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
+def search_opportunities(connection, search_query: str, account_id: Optional[str] = None, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Perform full text search on opportunities using multiple keywords.
     
@@ -126,6 +126,7 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
         connection: Database connection object
         search_query: Search string (e.g., "finance software platform")
         account_id: Optional account ID to filter opportunities
+        user_id: Authenticated user ID for authorization (filters by owner_id)
     
     Returns:
         List of opportunity dictionaries in API format, ordered by relevance
@@ -224,6 +225,11 @@ def search_opportunities(connection, search_query: str, account_id: Optional[str
             query += " AND o.account_id = %s"
             keyword_params.append(account_id)
         
+        # Add owner filter for authorization - users can only search their own opportunities
+        if user_id:
+            query += " AND o.owner_id = %s"
+            keyword_params.append(user_id)
+        
         query += """
             ORDER BY 
                 relevance_score DESC,
@@ -299,13 +305,14 @@ def _validate_amount(amount) -> None:
         )
 
 
-def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
+def list_opportunities(connection, account_id: Optional[str] = None, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Query opportunities from the database with optional account filter.
     
     Args:
         connection: Database connection object
         account_id: Optional account ID to filter opportunities
+        user_id: Authenticated user ID for authorization (filters by owner_id)
     
     Returns:
         List of opportunity dictionaries in API format
@@ -331,6 +338,11 @@ def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dic
         params = []
         if account_id:
             query += " AND account_id = %s"
+        
+        # Add owner filter for authorization - users can only list their own opportunities
+        if user_id:
+            query += " AND owner_id = %s"
+            params.append(user_id)
             params.append(account_id)
         
         query += " ORDER BY close_date DESC LIMIT 1000"
@@ -353,13 +365,14 @@ def list_opportunities(connection, account_id: Optional[str] = None) -> List[Dic
         raise
 
 
-def get_opportunity(connection, opportunity_id: str) -> Optional[Dict[str, Any]]:
+def get_opportunity(connection, opportunity_id: str, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
     Query a single opportunity by ID from the database.
     
     Args:
         connection: Database connection object
         opportunity_id: Opportunity ID to retrieve
+        user_id: Authenticated user ID for authorization (validates ownership)
     
     Returns:
         Opportunity dictionary in API format, or None if not found
@@ -380,10 +393,17 @@ def get_opportunity(connection, opportunity_id: str) -> Optional[Dict[str, Any]]
                 created_date, last_modified_date
             FROM opportunities
             WHERE id = %s AND deleted_at IS NULL
-        """
+            WHERE id = %s AND deleted_at IS NULL AND owner_id = %s
         
         cursor.execute(query, (opportunity_id,))
-        record = cursor.fetchone()
+        # If user_id is not provided (e.g., unauthenticated security endpoints), 
+        # allow access without owner check
+        if user_id:
+            cursor.execute(query, (opportunity_id, user_id))
+        else:
+            query = query.replace("AND owner_id = %s", "")
+            cursor.execute(query, (opportunity_id,))
+        
         cursor.close()
         
         if not record:
@@ -404,7 +424,7 @@ def get_opportunity(connection, opportunity_id: str) -> Optional[Dict[str, Any]]
         raise
 
 
-def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
+def create_opportunity(connection, data: Dict[str, Any], user_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Insert a new opportunity record into the database.
     Validates that account_id and owner_id reference existing records.
@@ -412,6 +432,7 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     Args:
         connection: Database connection object
         data: Opportunity data in API format (camelCase)
+        user_id: Authenticated user ID (set as owner if not specified in data)
     
     Returns:
         Created opportunity dictionary in API format
@@ -442,6 +463,11 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         # Set last_modified_date if not provided
         if 'last_modified_date' not in db_data:
             db_data['last_modified_date'] = datetime.utcnow()
+        
+        # Set owner_id to authenticated user if not already set
+        # This ensures users can only create opportunities they own
+        if 'owner_id' not in db_data and user_id:
+            db_data['owner_id'] = user_id
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
@@ -511,7 +537,7 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         raise
 
 
-def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any], user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
     Update an existing opportunity record in the database.
     
@@ -519,6 +545,7 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         connection: Database connection object
         opportunity_id: Opportunity ID to update
         data: Partial opportunity data in API format (camelCase)
+        user_id: Authenticated user ID for authorization (validates ownership)
     
     Returns:
         Updated opportunity dictionary in API format, or None if not found
@@ -545,9 +572,23 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         if not db_data or (len(db_data) == 1 and 'last_modified_date' in db_data):
             logger.warning("No fields to update")
             # Return current opportunity
-            return get_opportunity(connection, opportunity_id)
+            return get_opportunity(connection, opportunity_id, user_id)
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
+        
+        # Verify ownership before allowing update
+        if user_id:
+            cursor.execute(
+                "SELECT owner_id FROM opportunities WHERE id = %s AND deleted_at IS NULL",
+                (opportunity_id,)
+            )
+            record = cursor.fetchone()
+            if not record:
+                cursor.close()
+                return None
+            if record['owner_id'] != user_id:
+                cursor.close()
+                raise Exception(f"Forbidden: You do not have permission to update this opportunity")
         
         # Validate account_id exists if being updated
         if 'account_id' in db_data and db_data['account_id']:
@@ -623,7 +664,7 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         raise
 
 
-def delete_opportunity(connection, opportunity_id: str) -> bool:
+def delete_opportunity(connection, opportunity_id: str, user_id: Optional[str] = None) -> bool:
     """
     Soft-delete an opportunity record by marking it as deleted.
     The record is retained in the database for recovery purposes.
@@ -632,6 +673,7 @@ def delete_opportunity(connection, opportunity_id: str) -> bool:
     Args:
         connection: Database connection object
         opportunity_id: Opportunity ID to soft-delete
+        user_id: Authenticated user ID for authorization (validates ownership)
 
     Returns:
         True if opportunity was soft-deleted, False if not found
@@ -646,15 +688,27 @@ def delete_opportunity(connection, opportunity_id: str) -> bool:
 
         # Check if opportunity exists and capture account_id for aggregate recalculation
         cursor.execute(
-            "SELECT id, account_id FROM opportunities WHERE id = %s AND (deleted_at IS NULL)",
-            (opportunity_id,)
-        )
-        row = cursor.fetchone()
+        # Also verify ownership if user_id is provided
+        if user_id:
+            cursor.execute(
+                "SELECT id, account_id, owner_id FROM opportunities WHERE id = %s AND (deleted_at IS NULL)",
+                (opportunity_id,)
+            )
+        else:
+            cursor.execute(
+                "SELECT id, account_id FROM opportunities WHERE id = %s AND (deleted_at IS NULL)",
+                (opportunity_id,)
+            )
         if not row:
             cursor.close()
             logger.info(f"Opportunity not found for deletion: {opportunity_id}")
             return False
 
+        
+        # Verify ownership
+        if user_id and len(row) > 2 and row[2] != user_id:
+            cursor.close()
+            raise Exception(f"Forbidden: You do not have permission to delete this opportunity")
         account_id = row[1]
 
         # Soft-delete: set deleted_at timestamp instead of removing the row
