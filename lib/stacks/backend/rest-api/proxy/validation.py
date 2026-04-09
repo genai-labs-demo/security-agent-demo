@@ -12,6 +12,17 @@ HEALTH_STATUS_VALUES = ['Green', 'Yellow', 'Red']
 OPPORTUNITY_STAGE_VALUES = ['Launched', 'Qualified', 'Proof of Concept', 'Negotiation', 'Closed Won', 'Closed Lost']
 FORECAST_CATEGORY_VALUES = ['Pipeline', 'Best Case', 'Commit', 'Closed']
 
+# Probability ranges for each opportunity stage (business logic validation)
+# Ensures probability values are consistent with the stage of the sales cycle
+STAGE_PROBABILITY_RANGES = {
+    'Launched': (0, 20),
+    'Qualified': (10, 40),
+    'Proof of Concept': (30, 60),
+    'Negotiation': (50, 90),
+    'Closed Won': (100, 100),
+    'Closed Lost': (0, 0)
+}
+
 # Email validation regex pattern
 EMAIL_PATTERN = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
 
@@ -111,6 +122,40 @@ def validate_account(data: Dict[str, Any], is_update: bool = False) -> None:
             raise ValidationError("Field 'logoUrl' must be a string", field='logoUrl')
 
 
+
+def _validate_probability_stage_consistency(data: Dict[str, Any]) -> None:
+    """
+    Validate that probability value is consistent with opportunity stage.
+    Enforces business logic rules to prevent illogical probability-stage combinations
+    that would undermine sales forecasting accuracy and pipeline analytics.
+    
+    Args:
+        data: Opportunity data with 'stage' and 'probability' fields
+    
+    Raises:
+        ValidationError: If probability-stage combination is illogical
+    """
+    stage = data.get('stage')
+    probability = data.get('probability')
+    
+    # Both fields must be present for consistency check
+    if stage is None or probability is None:
+        return
+    
+    # Get expected probability range for the stage
+    expected_range = STAGE_PROBABILITY_RANGES.get(stage)
+    if not expected_range:
+        return  # Unknown stage, skip validation
+    
+    min_prob, max_prob = expected_range
+    
+    # Check if probability falls within acceptable range
+    if not (min_prob <= probability <= max_prob):
+        raise ValidationError(
+            f"Field 'probability' value {probability}% is inconsistent with stage '{stage}'. "
+            f"Expected probability range for '{stage}' stage is {min_prob}-{max_prob}%.",
+            field='probability'
+        )
 def validate_opportunity(data: Dict[str, Any], is_update: bool = False) -> None:
     """
     Validate opportunity data against schema requirements.
@@ -192,6 +237,9 @@ def validate_opportunity(data: Dict[str, Any], is_update: bool = False) -> None:
             raise ValidationError("Field 'probability' must be an integer", field='probability')
         if not (0 <= data['probability'] <= 100):
             raise ValidationError("Field 'probability' must be between 0 and 100", field='probability')
+    
+    # Validate probability-stage consistency (business logic)
+    _validate_probability_stage_consistency(data)
     
     # Validate optional fields if present
     if 'accountName' in data and data['accountName'] is not None:

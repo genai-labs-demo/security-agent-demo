@@ -9,6 +9,12 @@ from datetime import datetime
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
+# Import validation module from parent directory
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from validation import validate_opportunity, ValidationError
+
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -422,6 +428,9 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     try:
         logger.info(f"Creating new opportunity: {data.get('name')}")
         
+        # Validate opportunity data (business logic and field validation)
+        validate_opportunity(data, is_update=False)
+        
         # Map API format to database format
         db_data = _map_api_to_db_format(data)
         
@@ -506,6 +515,8 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         connection.rollback()
         # Re-raise if it's already our custom exception
         if "Invalid account ID" in str(e) or "Invalid owner ID" in str(e):
+        if isinstance(e, ValidationError):
+            raise
             raise
         logger.error(f"Unexpected error creating opportunity: {str(e)}")
         raise
@@ -527,6 +538,9 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
         Exception: If database update fails or validation fails
     """
     try:
+        # Validate opportunity data (business logic and field validation)
+        validate_opportunity(data, is_update=True)
+        
         logger.info(f"Updating opportunity: {opportunity_id}")
         
         # Map API format to database format
@@ -617,6 +631,8 @@ def update_opportunity(connection, opportunity_id: str, data: Dict[str, Any]) ->
     except Exception as e:
         connection.rollback()
         # Re-raise if it's already our custom exception
+        if isinstance(e, ValidationError):
+            raise
         if "Invalid account ID" in str(e) or "Invalid owner ID" in str(e) or "Invalid amount" in str(e):
             raise
         logger.error(f"Unexpected error updating opportunity {opportunity_id}: {str(e)}")
