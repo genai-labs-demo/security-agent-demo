@@ -129,6 +129,106 @@ def list_accounts(connection) -> List[Dict[str, Any]]:
 COMPUTED_FIELDS = {'health_status', 'health_score', 'opportunity_count', 'total_opportunity_value'}
 
 
+def _recalculate_health(connection, account_id: str) -> None:
+    """
+    Recalculate health metrics for an account based on opportunities and activity.
+    Updates health_status, health_score, opportunity_count, and total_opportunity_value.
+    
+    Health scoring algorithm:
+    - Starting point: 50 points
+    - Add points for opportunity count (10 per opportunity, capped at 30)
+    - Add points for opportunity value (20 if >$500k, 10 if >$200k)
+    - Add points for recent activity (20 if <30 days, 10 if <60 days)
+    
+    Health status thresholds:
+    - Green: 80-100 points
+    - Yellow: 60-79 points
+    - Red: 0-59 points
+    
+    Args:
+        account_id: UUID of account to recalculate
+        connection: Active database connection
+    """
+    if not account_id:
+        return
+    
+    cursor = connection.cursor()
+    try:
+        # Aggregate opportunities for this account
+        cursor.execute("""
+            SELECT
+                COUNT(*)::int AS count_opps,
+                COALESCE(SUM(amount), 0) AS sum_value
+            FROM opportunities
+            WHERE account_id = %s AND deleted_at IS NULL
+        """, (account_id,))
+        
+        row = cursor.fetchone()
+        count_opps = row[0] if row else 0
+        sum_value = float(row[1]) if row and row[1] else 0.0
+        
+        # Retrieve account activity timestamp
+        cursor.execute("""
+            SELECT last_activity_date
+            FROM accounts
+            WHERE id = %s
+        """, (account_id,))
+        
+        acct_row = cursor.fetchone()
+        activity_date = acct_row[0] if acct_row and acct_row[0] else None
+        
+        # Compute health score
+        score = 50
+        
+        # Factor 1: Opportunity volume
+        if count_opps >= 3:
+            score += 30
+        else:
+            score += count_opps * 10
+        
+        # Factor 2: Opportunity dollar value
+        if sum_value >= 500000:
+            score += 20
+        elif sum_value >= 200000:
+            score += 10
+        
+        # Factor 3: Activity recency
+        if activity_date:
+            from datetime import datetime, timezone, timedelta
+            now_utc = datetime.now(timezone.utc)
+            activity_utc = activity_date.replace(tzinfo=timezone.utc)
+            delta_days = (now_utc - activity_utc).days
+            
+            if delta_days <= 30:
+                score += 20
+            elif delta_days <= 60:
+                score += 10
+        
+        # Clamp score to valid range
+        score = max(0, min(100, score))
+        
+        # Map score to status
+        status = 'Green' if score >= 80 else 'Yellow' if score >= 60 else 'Red'
+        
+        # Persist calculated values
+        cursor.execute("""
+            UPDATE accounts
+            SET health_status = %s,
+                health_score = %s,
+                opportunity_count = %s,
+                total_opportunity_value = %s
+            WHERE id = %s
+        """, (status, score, count_opps, sum_value, account_id))
+        
+        connection.commit()
+        logger.info(f"Recalculated health for account {account_id}: {status} ({score})")
+    except Exception as e:
+        logger.error(f"Failed to recalculate health for account {account_id}: {str(e)}")
+        # Don't rollback - caller manages transaction
+    finally:
+        cursor.close()
+
+
 
 def get_account(connection, account_id: str) -> Optional[Dict[str, Any]]:
     """
