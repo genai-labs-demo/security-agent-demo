@@ -40,12 +40,12 @@ Amplify.configure(
                         domain: import.meta.env.VITE_USER_POOL_DOMAIN_URL,
                         scopes: ["openid"],
                         redirectSignIn: [
-                            "http://localhost:3000",
+                            ...(import.meta.env.DEV ? ["http://localhost:3000"] : []),
                             import.meta.env.VITE_CALLBACK_URL,
                             ...(import.meta.env.VITE_CLOUDFRONT_URL ? [import.meta.env.VITE_CLOUDFRONT_URL] : []),
                         ],
                         redirectSignOut: [
-                            "http://localhost:3000",
+                            ...(import.meta.env.DEV ? ["http://localhost:3000"] : []),
                             import.meta.env.VITE_CALLBACK_URL,
                             ...(import.meta.env.VITE_CLOUDFRONT_URL ? [import.meta.env.VITE_CLOUDFRONT_URL] : []),
                         ],
