@@ -5,6 +5,7 @@ Validates required fields, data types, and enum values for all entity types.
 
 import re
 from typing import Dict, Any, List, Optional
+from datetime import datetime, date
 
 
 # Define allowed enum values based on database schema
@@ -161,9 +162,32 @@ def validate_opportunity(data: Dict[str, Any], is_update: bool = False) -> None:
     if 'closeDate' in data:
         if not isinstance(data['closeDate'], str) or not data['closeDate'].strip():
             raise ValidationError("Field 'closeDate' must be a non-empty string in ISO 8601 format", field='closeDate')
-        # Basic ISO date format validation (YYYY-MM-DD)
-        if not re.match(r'^\d{4}-\d{2}-\d{2}', data['closeDate']):
-            raise ValidationError("Field 'closeDate' must be in ISO 8601 date format (YYYY-MM-DD)", field='closeDate')
+        
+        # Validate date format and semantic validity (catch invalid dates like 2024-02-30, 2024-13-45)
+        try:
+            close_date = datetime.strptime(data['closeDate'], '%Y-%m-%d').date()
+        except ValueError as e:
+            # Provide clear error message for invalid dates
+            raise ValidationError(
+                f"Field 'closeDate' must be a valid date in ISO 8601 format (YYYY-MM-DD). "
+                f"The provided date '{data['closeDate']}' is not a valid calendar date.",
+                field='closeDate'
+            )
+        
+        # Business logic validation: prevent past dates with active stages
+        # Active stages should not have close dates in the past
+        active_stages = ['Launched', 'Qualified', 'Proof of Concept', 'Negotiation']
+        current_stage = data.get('stage')
+        today = date.today()
+        
+        if current_stage in active_stages and close_date < today:
+            raise ValidationError(
+                f"Field 'closeDate' cannot be in the past ({data['closeDate']}) for active stage '{current_stage}'. "
+                f"Opportunities in active stages (Launched, Qualified, Proof of Concept, Negotiation) "
+                f"must have future close dates. Please update the close date or change the stage to "
+                f"'Closed Won' or 'Closed Lost' if the opportunity is already closed.",
+                field='closeDate'
+            )
     
     # Validate stage enum
     if 'stage' in data:
