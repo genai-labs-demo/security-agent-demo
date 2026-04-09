@@ -79,12 +79,51 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
     return db_data
 
 
-def list_accounts(connection) -> List[Dict[str, Any]]:
+def _get_team_member_id_by_email(connection, user_email: str) -> Optional[str]:
     """
-    Query all accounts from the database.
+    Lookup team member ID by email address.
     
     Args:
         connection: Database connection object
+        user_email: Email address of the authenticated user
+    
+    Returns:
+        Team member ID if found, None otherwise
+    
+    Raises:
+        Exception: If database query fails
+    """
+    try:
+        cursor = connection.cursor()
+        cursor.execute(
+            "SELECT id FROM team_members WHERE email = %s",
+            (user_email,)
+        )
+        result = cursor.fetchone()
+        cursor.close()
+        
+        if result:
+            team_member_id = result[0]
+            logger.info(f"Found team member ID {team_member_id} for email {user_email}")
+            return team_member_id
+        else:
+            logger.warning(f"No team member found for email {user_email}")
+            return None
+    except psycopg2.Error as e:
+        logger.error(f"Database error looking up team member: {str(e)}")
+        raise Exception(f"Failed to lookup team member: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error looking up team member: {str(e)}")
+        raise
+
+
+def list_accounts(connection, user_email: Optional[str] = None) -> List[Dict[str, Any]]:
+    """
+    Query accounts owned by the authenticated user from the database.
+    
+    Args:
+        connection: Database connection object
+        user_email: Email of authenticated user for authorization filtering
     
     Returns:
         List of account dictionaries in API format
@@ -92,8 +131,19 @@ def list_accounts(connection) -> List[Dict[str, Any]]:
     Raises:
         Exception: If database query fails
     """
-    try:
+        # Authorization check: Get team member ID for the authenticated user
+        owner_id = None
+        if user_email:
+            owner_id = _get_team_member_id_by_email(connection, user_email)
+            if not owner_id:
+                # User is not a team member, deny access
+                logger.warning(f"User {user_email} is not a team member, denying access to accounts")
+                raise Exception("Access denied: User is not a member of the sales team")
+        else:
+            raise Exception("Access denied: User email not provided in authentication context")
         logger.info("Listing all accounts")
+        logger.info(f"Listing accounts for user {user_email}")
+        
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
         
@@ -105,10 +155,11 @@ def list_accounts(connection) -> List[Dict[str, Any]]:
                 last_activity_date, created_date, logo_url
             FROM accounts
             WHERE deleted_at IS NULL
+              AND owner_id = %s
             ORDER BY name ASC
         """
         
-        cursor.execute(query)
+        cursor.execute(query, (owner_id,))
         records = cursor.fetchall()
         cursor.close()
         

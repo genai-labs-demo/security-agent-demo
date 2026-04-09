@@ -183,12 +183,15 @@ def execute_operation(connection, route_info, operation: str) -> Any:
     body = route_info.body
     
     logger.info(f"Executing {operation} operation on {resource_type}")
+    # Extract user context for authorization
+    user_email = route_info.user_email
+    
     
     # Route to accounts handler
     if resource_type == 'accounts':
         if operation == 'list':
             return accounts_handler.list_accounts(connection)
-        elif operation == 'get':
+            return accounts_handler.list_accounts(connection, user_email)
             result = accounts_handler.get_account(connection, resource_id)
             if result is None:
                 raise ValueError(f"Account with id {resource_id} not found")
@@ -217,9 +220,9 @@ def execute_operation(connection, route_info, operation: str) -> Any:
         if operation == 'list' or is_search_endpoint:
             # If search query is provided, perform search instead of list
             if search_query:
-                return opportunities_handler.search_opportunities(connection, search_query, account_id)
+                return opportunities_handler.search_opportunities(connection, search_query, account_id, user_email)
             else:
-                return opportunities_handler.list_opportunities(connection, account_id)
+                return opportunities_handler.list_opportunities(connection, account_id, user_email)
         elif operation == 'get':
             result = opportunities_handler.get_opportunity(connection, resource_id)
             if result is None:
@@ -241,7 +244,7 @@ def execute_operation(connection, route_info, operation: str) -> Any:
     # Route to team members handler
     elif resource_type == 'team-members':
         if operation == 'list':
-            return team_members_handler.list_team_members(connection)
+            return team_members_handler.list_team_members(connection, user_email)
         elif operation == 'get':
             result = team_members_handler.get_team_member(connection, resource_id)
             if result is None:
