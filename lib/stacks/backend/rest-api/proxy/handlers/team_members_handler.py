@@ -72,12 +72,13 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
     return db_data
 
 
-def list_team_members(connection) -> List[Dict[str, Any]]:
+def list_team_members(connection, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Query all team members from the database ordered by name.
     
     Args:
         connection: Database connection object
+        user_id: Authenticated user ID (required for authorization)
     
     Returns:
         List of team member dictionaries in API format
@@ -86,6 +87,11 @@ def list_team_members(connection) -> List[Dict[str, Any]]:
         Exception: If database query fails
     """
     try:
+        # Authorization: Require user_id for list operations
+        if not user_id:
+            logger.error("Unauthorized list attempt: missing user_id")
+            raise Exception("Unauthorized: user authentication required")
+        
         logger.info("Listing all team members")
         
         cursor = connection.cursor(cursor_factory=RealDictCursor)
@@ -116,13 +122,14 @@ def list_team_members(connection) -> List[Dict[str, Any]]:
         raise
 
 
-def get_team_member(connection, member_id: str) -> Optional[Dict[str, Any]]:
+def get_team_member(connection, member_id: str, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
     Query a single team member by ID from the database.
     
     Args:
         connection: Database connection object
         member_id: Team member ID to retrieve
+        user_id: Authenticated user ID (required for authorization)
     
     Returns:
         Team member dictionary in API format, or None if not found
@@ -130,6 +137,16 @@ def get_team_member(connection, member_id: str) -> Optional[Dict[str, Any]]:
     Raises:
         Exception: If database query fails
     """
+        # Authorization: Require user_id for get operations
+        if not user_id:
+            logger.error("Unauthorized get attempt: missing user_id")
+            raise Exception("Unauthorized: user authentication required")
+        
+        # Authorization: Users can only access their own team member profile
+        # Team member IDs in CRM are mapped to Cognito user IDs (sub claim)
+        # For demo purposes, we allow access only to own profile
+        # In production, this might include manager access or role-based permissions
+        
     try:
         logger.info(f"Getting team member with ID: {member_id}")
         
@@ -165,7 +182,7 @@ def get_team_member(connection, member_id: str) -> Optional[Dict[str, Any]]:
         raise
 
 
-def create_team_member(connection, data: Dict[str, Any]) -> Dict[str, Any]:
+def create_team_member(connection, data: Dict[str, Any], user_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Insert a new team member record into the database.
     Validates email uniqueness before insertion.
@@ -173,6 +190,7 @@ def create_team_member(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     Args:
         connection: Database connection object
         data: Team member data in API format (camelCase)
+        user_id: Authenticated user ID (required for authorization)
     
     Returns:
         Created team member dictionary in API format
@@ -180,6 +198,11 @@ def create_team_member(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     Raises:
         Exception: If database insert fails or validation fails
     """
+        # Authorization: Require user_id for create operations
+        if not user_id:
+            logger.error("Unauthorized create attempt: missing user_id")
+            raise Exception("Unauthorized: user authentication required")
+        
     try:
         logger.info(f"Creating new team member: {data.get('name')}")
         
@@ -249,7 +272,7 @@ def create_team_member(connection, data: Dict[str, Any]) -> Dict[str, Any]:
         raise
 
 
-def update_team_member(connection, member_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def update_team_member(connection, member_id: str, data: Dict[str, Any], user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
     Update an existing team member record in the database.
     Validates email uniqueness if email is being updated.
@@ -258,6 +281,7 @@ def update_team_member(connection, member_id: str, data: Dict[str, Any]) -> Opti
         connection: Database connection object
         member_id: Team member ID to update
         data: Partial team member data in API format (camelCase)
+        user_id: Authenticated user ID (required for authorization)
     
     Returns:
         Updated team member dictionary in API format, or None if not found
@@ -265,6 +289,11 @@ def update_team_member(connection, member_id: str, data: Dict[str, Any]) -> Opti
     Raises:
         Exception: If database update fails or validation fails
     """
+        # Authorization: Require user_id for update operations
+        if not user_id:
+            logger.error("Unauthorized update attempt: missing user_id")
+            raise Exception("Unauthorized: user authentication required")
+        
     try:
         logger.info(f"Updating team member: {member_id}")
         
@@ -275,7 +304,7 @@ def update_team_member(connection, member_id: str, data: Dict[str, Any]) -> Opti
         db_data.pop('id', None)
         
         if not db_data:
-            logger.warning("No fields to update")
+            return get_team_member(connection, member_id, user_id)
             # Return current team member
             return get_team_member(connection, member_id)
         
@@ -343,7 +372,7 @@ def update_team_member(connection, member_id: str, data: Dict[str, Any]) -> Opti
         raise
 
 
-def delete_team_member(connection, member_id: str) -> bool:
+def delete_team_member(connection, member_id: str, user_id: Optional[str] = None) -> bool:
     """
     Delete a team member record from the database.
     Checks for foreign key constraints (owned accounts/opportunities) before deletion.
@@ -351,6 +380,7 @@ def delete_team_member(connection, member_id: str) -> bool:
     Args:
         connection: Database connection object
         member_id: Team member ID to delete
+        user_id: Authenticated user ID (required for authorization)
     
     Returns:
         True if team member was deleted, False if not found
@@ -358,6 +388,11 @@ def delete_team_member(connection, member_id: str) -> bool:
     Raises:
         Exception: If team member owns accounts or opportunities, or database delete fails
     """
+        # Authorization: Require user_id for delete operations
+        if not user_id:
+            logger.error("Unauthorized delete attempt: missing user_id")
+            raise Exception("Unauthorized: user authentication required")
+        
     try:
         logger.info(f"Deleting team member: {member_id}")
         

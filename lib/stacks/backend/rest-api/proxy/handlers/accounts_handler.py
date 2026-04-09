@@ -80,6 +80,30 @@ def _map_api_to_db_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def list_accounts(connection) -> List[Dict[str, Any]]:
+def _recalculate_health(connection, account_id: str) -> None:
+    """
+    Recalculate and update the health score and status for an account.
+    Health metrics are computed from business data (opportunities, activities, etc.).
+    
+    Args:
+        connection: Database connection object
+        account_id: Account ID whose health metrics need recalculation
+    """
+    if not account_id:
+        return
+    
+    # Health score calculation logic would go here
+    # For now, this is a placeholder to prevent errors
+    # The actual health calculation would aggregate opportunity data,
+    # activity metrics, and other business indicators
+    
+    try:
+        logger.info(f"Health recalculation for account {account_id} (placeholder)")
+        # Future implementation: UPDATE accounts SET health_score = ..., health_status = ... WHERE id = %s
+    except Exception as e:
+        logger.error(f"Failed to recalculate health for account {account_id}: {str(e)}")
+
+
     """
     Query all accounts from the database.
     
