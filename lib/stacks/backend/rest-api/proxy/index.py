@@ -233,6 +233,12 @@ def execute_operation(connection, route_info, operation: str) -> Any:
                 raise ValueError(f"Opportunity with id {resource_id} not found")
             return result
         elif operation == 'delete':
+        elif operation == 'restore':
+            # Restore a soft-deleted opportunity
+            result = opportunities_handler.restore_opportunity(connection, resource_id)
+            if result is None:
+                raise ValueError(f"Opportunity with id {resource_id} not found or not deleted")
+            return result
             success = opportunities_handler.delete_opportunity(connection, resource_id)
             if not success:
                 raise ValueError(f"Opportunity with id {resource_id} not found")

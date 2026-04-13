@@ -87,6 +87,9 @@ def _recalculate_account_aggregates(connection, account_id: str) -> None:
     Recalculate and update the aggregate fields (opportunity_count, total_opportunity_value)
     on the parent account after any opportunity create/update/delete.
     
+    SECURITY: Logs before/after values as audit trail and notifies when aggregates decrease.
+    This addresses business logic audit requirements for aggregate changes (CWE-778).
+    
     Args:
         connection: Database connection object
         account_id: Account ID whose aggregates need recalculation
@@ -95,6 +98,22 @@ def _recalculate_account_aggregates(connection, account_id: str) -> None:
         return
     
     cursor = connection.cursor()
+        # AUDIT TRAIL: Query current aggregate values BEFORE recalculation
+        cursor.execute("""
+            SELECT opportunity_count, total_opportunity_value
+            FROM accounts
+            WHERE id = %s
+        """, (account_id,))
+        before_record = cursor.fetchone()
+        
+        if before_record:
+            before_count = before_record[0] or 0
+            before_value = float(before_record[1]) if before_record[1] else 0.0
+        else:
+            before_count = 0
+            before_value = 0.0
+        
+        # Recalculate aggregates from active (non-deleted) opportunities
     try:
         cursor.execute("""
             UPDATE accounts
@@ -109,7 +128,36 @@ def _recalculate_account_aggregates(connection, account_id: str) -> None:
             ) sub
             WHERE accounts.id = %s
         """, (account_id, account_id))
-        connection.commit()
+        
+        # AUDIT TRAIL: Query new aggregate values AFTER recalculation
+        cursor.execute("""
+            SELECT opportunity_count, total_opportunity_value
+            FROM accounts
+            WHERE id = %s
+        """, (account_id,))
+        after_record = cursor.fetchone()
+        
+        if after_record:
+            after_count = after_record[0] or 0
+            after_value = float(after_record[1]) if after_record[1] else 0.0
+        else:
+            after_count = 0
+            after_value = 0.0
+        
+        # Log audit trail with before/after values
+        logger.info(
+            f"AUDIT: Account {account_id} aggregates recalculated - "
+            f"opportunity_count: {before_count} -> {after_count}, "
+            f"total_opportunity_value: ${before_value:,.2f} -> ${after_value:,.2f}"
+        )
+        
+        # NOTIFICATION: Alert when aggregates decrease (for sales manager awareness)
+        if after_count < before_count or after_value < before_value:
+            logger.warning(
+                f"NOTIFICATION: Account {account_id} aggregates decreased - "
+                f"Opportunity count: {before_count} -> {after_count}, Value: ${before_value:,.2f} -> ${after_value:,.2f}. "
+                f"Sales manager should be notified."
+            )
         logger.info(f"Recalculated aggregates for account {account_id}")
     except Exception as e:
         logger.error(f"Failed to recalculate aggregates for account {account_id}: {str(e)}")
@@ -678,4 +726,75 @@ def delete_opportunity(connection, opportunity_id: str) -> bool:
     except Exception as e:
         connection.rollback()
         logger.error(f"Unexpected error soft-deleting opportunity {opportunity_id}: {str(e)}")
+        raise
+
+
+def restore_opportunity(connection, opportunity_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Restore a soft-deleted opportunity by clearing the deleted_at timestamp.
+    Recalculates parent account aggregates after restoration.
+    
+    This addresses the business logic requirement for opportunity restoration
+    and ensures aggregate values are correctly updated when opportunities are undeleted.
+    
+    Args:
+        connection: Database connection object
+        opportunity_id: Opportunity ID to restore
+    
+    Returns:
+        Restored opportunity dictionary in API format, or None if not found
+    
+    Raises:
+        Exception: If database update fails or opportunity is not soft-deleted
+    """
+    try:
+        logger.info(f"Restoring soft-deleted opportunity: {opportunity_id}")
+        
+        cursor = connection.cursor(cursor_factory=RealDictCursor)
+        
+        # Check if opportunity exists and is soft-deleted
+        cursor.execute(
+            "SELECT id, account_id, deleted_at FROM opportunities WHERE id = %s",
+            (opportunity_id,)
+        )
+        row = cursor.fetchone()
+        
+        if not row:
+            cursor.close()
+            logger.info(f"Opportunity not found for restoration: {opportunity_id}")
+            return None
+        
+        if row['deleted_at'] is None:
+            cursor.close()
+            logger.warning(f"Opportunity {opportunity_id} is not deleted, cannot restore")
+            raise Exception("Opportunity is not deleted and cannot be restored")
+        
+        account_id = row['account_id']
+        
+        # Restore: clear deleted_at timestamp
+        cursor.execute(
+            "UPDATE opportunities SET deleted_at = NULL WHERE id = %s",
+            (opportunity_id,)
+        )
+        connection.commit()
+        cursor.close()
+        
+        # Recalculate parent account aggregates
+        _recalculate_account_aggregates(connection, account_id)
+        
+        # Fetch and return the restored opportunity
+        restored_opportunity = get_opportunity(connection, opportunity_id)
+        logger.info(f"Restored opportunity: {opportunity_id}")
+        return restored_opportunity
+        
+    except psycopg2.Error as e:
+        connection.rollback()
+        logger.error(f"Database error restoring opportunity {opportunity_id}: {str(e)}")
+        raise Exception(f"Failed to restore opportunity: {str(e)}")
+    except Exception as e:
+        connection.rollback()
+        # Re-raise if it's already our custom exception
+        if "cannot be restored" in str(e):
+            raise
+        logger.error(f"Unexpected error restoring opportunity {opportunity_id}: {str(e)}")
         raise
