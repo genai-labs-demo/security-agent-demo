@@ -491,8 +491,15 @@ def create_opportunity(connection, data: Dict[str, Any]) -> Dict[str, Any]:
     except psycopg2.IntegrityError as e:
         connection.rollback()
         logger.error(f"Integrity error creating opportunity: {str(e)}")
-        # Check for specific constraint violations
-        if 'foreign key' in str(e).lower():
+        retrieved_count = len(opportunities)
+        logger.info(f"Retrieved {retrieved_count} of {total_num} opportunities (limit={limit}, offset={offset})")
+        
+        paginated_response = {}
+        paginated_response['items'] = opportunities
+        paginated_response['total'] = total_num
+        paginated_response['limit'] = limit
+        paginated_response['offset'] = offset
+        return paginated_response
             if 'account_id' in str(e).lower():
                 raise Exception("Invalid account ID: account does not exist")
             elif 'owner_id' in str(e).lower():
